@@ -1,0 +1,3 @@
+[submodule "third_party/xla"]
+	path = third_party/xla
+	url = https://github.com/openxla/xla.git
