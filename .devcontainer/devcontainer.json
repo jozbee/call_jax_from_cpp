@@ -1,0 +1,22 @@
+{
+  "name": "jax_from_cpp",
+  "dockerFile": "Dockerfile",
+  "mounts": [
+    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
+  ],
+  "workspaceFolder": "/workspace",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-vscode.cpptools",
+        "ms-vscode.cpptools-extension-pack",
+        "lfs.vscode-emacs-friendly",
+        "ms-azuretools.vscode-docker",
+        "ms-vscode.makefile-tools",
+        "github.copilot",
+        "github.copilot-chat",
+        "ms-python.python",
+      ],
+    }
+  }
+}

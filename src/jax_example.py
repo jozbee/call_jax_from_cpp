@@ -17,3 +17,6 @@ if __name__ == "__main__":
 
     with open("artifacts/jax_example.binpb", "wb") as f:
         f.write(compiled_fun)
+
+    with open("artifacts/jax_example.hlo", "w") as f:
+        f.write(hlo_fun.as_hlo_text())
