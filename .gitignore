@@ -2,3 +2,6 @@
 *.so
 *.binpb
 *.hlo
+archive
+artifacts
+__pycache__

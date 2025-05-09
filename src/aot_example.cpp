@@ -34,7 +34,6 @@ int main() {
       // the extra parentheses are important
       (std::istreambuf_iterator<char>(input_file)),
       std::istreambuf_iterator<char>());
-
   std::cout << "read binary\n";
   std::flush(std::cout);
 
