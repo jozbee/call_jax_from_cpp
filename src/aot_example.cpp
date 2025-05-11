@@ -90,37 +90,25 @@ int main() {
             << "\n";
   std::flush(std::cout);
 
-  // read in hlo file
-  std::ifstream hlo_file("./artifacts/jax_example.binpb",
+  // read in executable
+  std::ifstream exec_file("./artifacts/jax_example_exec.binpb",
                          std::ios_base::binary);
-  const std::vector<char> hlo_buffer(std::istreambuf_iterator<char>(hlo_file),
+  const std::vector<char> exec_buffer(std::istreambuf_iterator<char>(exec_file),
                                      {});
-  std::ifstream comp_opt_file("./artifacts/jax_example_comp_opt.binpb",
-                              std::ios_base::binary);
-  const std::vector<char> comp_opt_buffer(
-      std::istreambuf_iterator<char>(comp_opt_file), {});
-  std::cout << "read hlo\n";
+  std::cout << "read exec\n";
   std::flush(std::cout);
 
-  // compile
-  PJRT_Program program;
-  memset(&program, 0, sizeof(PJRT_Program));
-  program.struct_size = sizeof(PJRT_Program);
-  program.code = const_cast<char*>(hlo_buffer.data());
-  program.code_size = hlo_buffer.size();
-  program.format = "hlo";
-  program.format_size = strlen(program.format);
-
-  PJRT_Client_Compile_Args compile_args;
-  memset(&compile_args, 0, sizeof(PJRT_Client_Compile_Args));
-  compile_args.struct_size = sizeof(PJRT_Client_Compile_Args);
-  compile_args.client = client;
-  compile_args.program = &program;
-  compile_args.compile_options = const_cast<char*>(comp_opt_buffer.data());
-  compile_args.compile_options_size = comp_opt_buffer.size();
-  check_error(api->PJRT_Client_Compile(&compile_args), api);
-  PJRT_LoadedExecutable* loaded_executable = compile_args.executable;
-  std::cout << "compile\n";
+  // load executable
+  PJRT_Executable_DeserializeAndLoad_Args load_args;
+  memset(&load_args, 0, sizeof(PJRT_Executable_DeserializeAndLoad_Args));
+  load_args.struct_size = sizeof(PJRT_Executable_DeserializeAndLoad_Args);
+  load_args.extension_start = nullptr;
+  load_args.client = client;
+  load_args.serialized_executable = exec_buffer.data();
+  load_args.serialized_executable_size = exec_buffer.size();
+  check_error(api->PJRT_Executable_DeserializeAndLoad(&load_args), api);
+  PJRT_LoadedExecutable* loaded_executable = load_args.loaded_executable;
+  std::cout << "load exec\n";
   std::flush(std::cout);
 
   // input
