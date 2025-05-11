@@ -106,7 +106,7 @@ int main() {
   PJRT_Program program;
   memset(&program, 0, sizeof(PJRT_Program));
   program.struct_size = sizeof(PJRT_Program);
-  program.code = (char*)(hlo_buffer.data());
+  program.code = const_cast<char*>(hlo_buffer.data());
   program.code_size = hlo_buffer.size();
   program.format = "hlo";
   program.format_size = strlen(program.format);
@@ -116,7 +116,7 @@ int main() {
   compile_args.struct_size = sizeof(PJRT_Client_Compile_Args);
   compile_args.client = client;
   compile_args.program = &program;
-  compile_args.compile_options = (char*)(comp_opt_buffer.data());
+  compile_args.compile_options = const_cast<char*>(comp_opt_buffer.data());
   compile_args.compile_options_size = comp_opt_buffer.size();
   check_error(api->PJRT_Client_Compile(&compile_args), api);
   PJRT_LoadedExecutable* loaded_executable = compile_args.executable;
@@ -125,8 +125,8 @@ int main() {
 
   // input
   double input_data = 3.0;
-  int64_t dims[] = {};  // scalar
-  size_t num_dims = 0;
+  std::array<int64_t, 0> dims = {};  // scalar
+  const size_t num_dims = 0;
 
   PJRT_Client_BufferFromHostBuffer_Args input_buffer_args;
   memset(&input_buffer_args, 0, sizeof(PJRT_Client_BufferFromHostBuffer_Args));
@@ -134,7 +134,7 @@ int main() {
   input_buffer_args.client = client;
   input_buffer_args.data = &input_data;
   input_buffer_args.type = PJRT_Buffer_Type::PJRT_Buffer_Type_F64;
-  input_buffer_args.dims = dims;
+  input_buffer_args.dims = dims.data();
   input_buffer_args.num_dims = num_dims;
   input_buffer_args.byte_strides = nullptr;  // dense layout
   input_buffer_args.num_byte_strides = 0;    // dense layout
@@ -177,7 +177,7 @@ int main() {
   PJRT_Buffer** output_buffer_ptr = output_buffer.data();
 
   // execute
-  const int64_t non_donatable_input_indices[] = {0};
+  const std::array<int64_t, 1> non_donatable_input_indices = {0};
   PJRT_ExecuteOptions execute_options;
   memset(&execute_options, 0, sizeof(PJRT_ExecuteOptions));
   execute_options.struct_size = sizeof(PJRT_ExecuteOptions);
@@ -187,11 +187,11 @@ int main() {
   execute_options.num_send_ops = 0;
   execute_options.num_recv_ops = 0;
   execute_options.launch_id = 0;  // only one device
-  execute_options.non_donatable_input_indices = non_donatable_input_indices;
+  execute_options.non_donatable_input_indices = non_donatable_input_indices.data();
   execute_options.num_non_donatable_input_indices = 1;
   execute_options.context = nullptr;  // nothing fancy here
 
-  PJRT_Event* exec_event;
+  PJRT_Event* exec_event = nullptr;
   PJRT_LoadedExecutable_Execute_Args execute_args;
   memset(&execute_args, 0, sizeof(PJRT_LoadedExecutable_Execute_Args));
   execute_args.struct_size = sizeof(PJRT_LoadedExecutable_Execute_Args);
