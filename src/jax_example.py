@@ -1,5 +1,6 @@
 import hlo_pb2
 import jax
+import jax.extend
 jax.config.update("jax_enable_x64", True)
 
 def fun(x):
@@ -25,6 +26,7 @@ if __name__ == "__main__":
     with open("artifacts/jax_example.hlo", "w") as f:
         f.write(hlo_fun.as_hlo_text())
 
+    # serialized compile options
     comp_opt = hlo_pb2.CompileOptionsProto()
     comp_opt.executable_build_options.num_replicas = 1
     comp_opt.executable_build_options.num_partitions = 1
@@ -37,3 +39,9 @@ if __name__ == "__main__":
         f.write(comp_opt.SerializeToString())
     with open("artifacts/jax_example_comp_opt.pb", "w") as f:
         f.write(str(comp_opt))
+
+    # serialize executable
+    cpu = jax.extend.backend.get_backend(platform="cpu")
+    exec = cpu.compile(str(lower_fun.compiler_ir("stablehlo")))
+    with open("artifacts/jax_example_exec.binpb", "wb") as f:
+        f.write(cpu.serialize_executable(exec))

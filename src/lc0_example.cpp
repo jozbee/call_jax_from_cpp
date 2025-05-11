@@ -8,7 +8,7 @@
 
 int main() {
   // pjrt
-  lczero::Pjrt pjrt("./artifacts/libpjrt_c_api_cpu_plugin.so");
+  lczero::Pjrt pjrt("./artifacts/libpjrt_c_api_cpu_plugin_linux.so");
   std::cout << "pjrt\n";
   std::flush(std::cout);
 
@@ -29,6 +29,7 @@ int main() {
   std::cout << "read hlo\n";
   std::flush(std::cout);
 
+  // compile
   auto exec =
       client->CompileHlo({hlo_buffer.data(), hlo_buffer.size()},
                          {comp_opt_buffer.data(), comp_opt_buffer.size()});

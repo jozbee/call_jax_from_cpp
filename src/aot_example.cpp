@@ -7,8 +7,8 @@
 #include <iostream>
 #include <vector>
 
-#include "artifacts/pjrt_c_api.h"
-#include "artifacts/pjrt_c_api_cpu.h"
+#include "src/pjrt_c_api.h"
+#include "src/pjrt_c_api_cpu.h"
 
 PJRT_Error_Code get_error_code(const PJRT_Api* api, PJRT_Error* error) {
   PJRT_Error_GetCode_Args args;
@@ -20,27 +20,44 @@ PJRT_Error_Code get_error_code(const PJRT_Api* api, PJRT_Error* error) {
   return args.code;
 }
 
+const char* get_error_message(const PJRT_Api* api, PJRT_Error* error) {
+  PJRT_Error_Message_Args args;
+  memset(&args, 0, sizeof(PJRT_Error_Message_Args));
+  args.struct_size = sizeof(PJRT_Error_Message_Args);
+  args.extension_start = nullptr;
+  args.error = error;
+  api->PJRT_Error_Message(&args);
+  return args.message;
+}
+
 void check_error(PJRT_Error* error, const PJRT_Api* api) {
   if (!error) return;
   const PJRT_Error_Code code = get_error_code(api, error);
-  std::cout << "RECEIVED ERROR CODE " << code << std::endl;
+  std::cout << "RECEIVED ERROR CODE " << code << "\n";
+  const char* message = get_error_message(api, error);
+  std::cout << "RECEIVED ERROR MESSAGE " << message << "\n";
+
+  PJRT_Error_Destroy_Args args;
+  memset(&args, 0, sizeof(PJRT_Error_Destroy_Args));
+  args.struct_size = sizeof(PJRT_Error_Destroy_Args);
+  args.extension_start = nullptr;
+  args.error = error;
+  api->PJRT_Error_Destroy(&args);
 }
+
+// TODO(jozbee): make aot (right now it is jit)
 
 int main() {
   // read compiled program
   const std::string input_binary = "artifacts/jax_example.binpb";
   std::ifstream input_file(input_binary, std::ios::binary);
-  std::vector<char> buffer(
-      // the extra parentheses are important
-      (std::istreambuf_iterator<char>(input_file)),
-      std::istreambuf_iterator<char>());
+  std::vector<char> buffer(std::istreambuf_iterator<char>(input_file), {});
   std::cout << "read binary\n";
   std::flush(std::cout);
 
   // api
   // should be linked with the cpu plugin (.so)
   const PJRT_Api* api = GetPjrtApi();
-
   std::cout << "api\n";
   std::flush(std::cout);
 
@@ -59,21 +76,7 @@ int main() {
   client_create_args.struct_size = sizeof(PJRT_Client_Create_Args);
   check_error(api->PJRT_Client_Create(&client_create_args), api);
   PJRT_Client* client = client_create_args.client;
-
   std::cout << "client\n";
-  std::flush(std::cout);
-
-  // load executable
-  PJRT_Executable_DeserializeAndLoad_Args decereal_args;
-  memset(&decereal_args, 0, sizeof(PJRT_Executable_DeserializeAndLoad_Args));
-  decereal_args.struct_size = sizeof(PJRT_Executable_DeserializeAndLoad_Args);
-  decereal_args.client = client;
-  decereal_args.serialized_executable = buffer.data();
-  decereal_args.serialized_executable_size = buffer.size();
-  check_error(api->PJRT_Executable_DeserializeAndLoad(&decereal_args), api);
-  PJRT_LoadedExecutable* loaded_executable = decereal_args.loaded_executable;
-
-  std::cout << "load executable\n";
   std::flush(std::cout);
 
   // cpu device
@@ -83,13 +86,46 @@ int main() {
   device_args.client = client;
   check_error(api->PJRT_Client_AddressableDevices(&device_args), api);
   PJRT_Device* cpu_device = device_args.addressable_devices[0];
+  std::cout << "cpu device, out of " << device_args.num_addressable_devices
+            << "\n";
+  std::flush(std::cout);
 
-  std::cout << "cpu device\n";
+  // read in hlo file
+  std::ifstream hlo_file("./artifacts/jax_example.binpb",
+                         std::ios_base::binary);
+  const std::vector<char> hlo_buffer(std::istreambuf_iterator<char>(hlo_file),
+                                     {});
+  std::ifstream comp_opt_file("./artifacts/jax_example_comp_opt.binpb",
+                              std::ios_base::binary);
+  const std::vector<char> comp_opt_buffer(
+      std::istreambuf_iterator<char>(comp_opt_file), {});
+  std::cout << "read hlo\n";
+  std::flush(std::cout);
+
+  // compile
+  PJRT_Program program;
+  memset(&program, 0, sizeof(PJRT_Program));
+  program.struct_size = sizeof(PJRT_Program);
+  program.code = (char*)(hlo_buffer.data());
+  program.code_size = hlo_buffer.size();
+  program.format = "hlo";
+  program.format_size = strlen(program.format);
+
+  PJRT_Client_Compile_Args compile_args;
+  memset(&compile_args, 0, sizeof(PJRT_Client_Compile_Args));
+  compile_args.struct_size = sizeof(PJRT_Client_Compile_Args);
+  compile_args.client = client;
+  compile_args.program = &program;
+  compile_args.compile_options = (char*)(comp_opt_buffer.data());
+  compile_args.compile_options_size = comp_opt_buffer.size();
+  check_error(api->PJRT_Client_Compile(&compile_args), api);
+  PJRT_LoadedExecutable* loaded_executable = compile_args.executable;
+  std::cout << "compile\n";
   std::flush(std::cout);
 
   // input
   double input_data = 3.0;
-  int64_t dims[] = {};  // scalar?
+  int64_t dims[] = {};  // scalar
   size_t num_dims = 0;
 
   PJRT_Client_BufferFromHostBuffer_Args input_buffer_args;
@@ -100,18 +136,22 @@ int main() {
   input_buffer_args.type = PJRT_Buffer_Type::PJRT_Buffer_Type_F64;
   input_buffer_args.dims = dims;
   input_buffer_args.num_dims = num_dims;
-  input_buffer_args.byte_strides = nullptr;             // dense layout
-  input_buffer_args.num_byte_strides = sizeof(double);  // dense layout
+  input_buffer_args.byte_strides = nullptr;  // dense layout
+  input_buffer_args.num_byte_strides = 0;    // dense layout
   input_buffer_args.host_buffer_semantics = PJRT_HostBufferSemantics::
       PJRT_HostBufferSemantics_kImmutableOnlyDuringCall;
   input_buffer_args.device = cpu_device;
   input_buffer_args.memory = nullptr;  // consider non-null, for less copying
   input_buffer_args.device_layout = nullptr;  // dense layout
-
   check_error(api->PJRT_Client_BufferFromHostBuffer(&input_buffer_args), api);
-
+  PJRT_Event* host_event = input_buffer_args.done_with_host_buffer;
+  PJRT_Event_Await_Args host_event_args;
+  memset(&host_event_args, 0, sizeof(PJRT_Event_Await_Args));
+  host_event_args.struct_size = sizeof(PJRT_Event_Await_Args);
+  host_event_args.extension_start = nullptr;
+  host_event_args.event = host_event;
+  check_error(api->PJRT_Event_Await(&host_event_args), api);
   PJRT_Buffer** input_buffer = &input_buffer_args.buffer;
-
   std::cout << "buffer in\n";
   std::flush(std::cout);
 
@@ -130,49 +170,13 @@ int main() {
   }
   std::flush(std::cout);
 
-  // buffer out
-  double output_data = 0.0;
-  PJRT_Client_BufferFromHostBuffer_Args output_buffer_args = input_buffer_args;
-  output_buffer_args.data = &output_data;
-  output_buffer_args.buffer = nullptr;  // reset buffer (because copy)
-  check_error(api->PJRT_Client_BufferFromHostBuffer(&output_buffer_args), api);
-  PJRT_Buffer** output_buffer = &output_buffer_args.buffer;
-
-  std::cout << "buffer out\n";
-  std::flush(std::cout);
-
-  // check if output is on cpu
-  is_on_cpu_args.buffer = output_buffer_args.buffer;
-  check_error(api->PJRT_Buffer_IsOnCpu(&is_on_cpu_args), api);
-  if (is_on_cpu_args.is_on_cpu) {
-    std::cout << "output buffer is on cpu\n";
-  } else {
-    std::cout << "output buffer is NOT on cpu\n";
-  }
-  std::flush(std::cout);
-
-  // get executable
-  PJRT_LoadedExecutable_GetExecutable_Args get_executable_args;
-  memset(&get_executable_args, 0,
-         sizeof(PJRT_LoadedExecutable_GetExecutable_Args));
-  get_executable_args.struct_size =
-      sizeof(PJRT_LoadedExecutable_GetExecutable_Args);
-  get_executable_args.extension_start = nullptr;
-  get_executable_args.loaded_executable = loaded_executable;
-  check_error(api->PJRT_LoadedExecutable_GetExecutable(&get_executable_args),
-              api);
-  PJRT_Executable* executable = get_executable_args.executable;
-  std::cout << "get executable\n";
-  std::flush(std::cout);
+  // output
+  // remark: do not allocate ouput buffers, because that is the job of execution
+  //  (if there a no donatable buffers)
+  std::vector<PJRT_Buffer*> output_buffer(1);  // sized to hold one null pointer
+  PJRT_Buffer** output_buffer_ptr = output_buffer.data();
 
   // execute
-  PJRT_ExecuteContext_Create_Args execute_context_args;
-  memset(&execute_context_args, 0, sizeof(PJRT_ExecuteContext_Create_Args));
-  execute_context_args.struct_size = sizeof(PJRT_ExecuteContext_Create_Args);
-  execute_context_args.extension_start = nullptr;
-  check_error(api->PJRT_ExecuteContext_Create(&execute_context_args), api);
-  PJRT_ExecuteContext* execute_context = execute_context_args.context;
-
   const int64_t non_donatable_input_indices[] = {0};
   PJRT_ExecuteOptions execute_options;
   memset(&execute_options, 0, sizeof(PJRT_ExecuteOptions));
@@ -185,9 +189,9 @@ int main() {
   execute_options.launch_id = 0;  // only one device
   execute_options.non_donatable_input_indices = non_donatable_input_indices;
   execute_options.num_non_donatable_input_indices = 1;
-  execute_options.context = execute_context;
+  execute_options.context = nullptr;  // nothing fancy here
 
-  PJRT_Event* event_ptr;  // lc0
+  PJRT_Event* exec_event;
   PJRT_LoadedExecutable_Execute_Args execute_args;
   memset(&execute_args, 0, sizeof(PJRT_LoadedExecutable_Execute_Args));
   execute_args.struct_size = sizeof(PJRT_LoadedExecutable_Execute_Args);
@@ -197,13 +201,46 @@ int main() {
   execute_args.argument_lists = &input_buffer;
   execute_args.num_devices = 1;
   execute_args.num_args = 1;
-  execute_args.output_lists = &output_buffer;
-  execute_args.device_complete_events = &event_ptr;
-  execute_args.execute_device = nullptr;  // execute compiled device
+  execute_args.output_lists = &output_buffer_ptr;
+  execute_args.device_complete_events = &exec_event;
+  execute_args.execute_device = nullptr;  // execute on _only_ compiled device
 
   check_error(api->PJRT_LoadedExecutable_Execute(&execute_args), api);
 
   std::cout << "execute\n";
+  std::flush(std::cout);
+
+  // wait for execution to finish
+  PJRT_Event_Await_Args exec_event_args;
+  memset(&exec_event_args, 0, sizeof(PJRT_Event_Await_Args));
+  exec_event_args.struct_size = sizeof(PJRT_Event_Await_Args);
+  exec_event_args.extension_start = nullptr;
+  exec_event_args.event = exec_event;
+  check_error(api->PJRT_Event_Await(&exec_event_args), api);
+  std::cout << "execution finished\n";
+  std::flush(std::cout);
+
+  // output
+  PJRT_Event_Await_Args output_event_args;
+  memset(&output_event_args, 0, sizeof(PJRT_Event_Await_Args));
+  output_event_args.struct_size = sizeof(PJRT_Event_Await_Args);
+  output_event_args.extension_start = nullptr;
+
+  double output_data = 0.0;  // sentinel
+  PJRT_Buffer_ToHostBuffer_Args output_buffer_args;
+  memset(&output_buffer_args, 0, sizeof(PJRT_Buffer_ToHostBuffer_Args));
+  output_buffer_args.struct_size = sizeof(PJRT_Buffer_ToHostBuffer_Args);
+  output_buffer_args.extension_start = nullptr;
+  output_buffer_args.src = output_buffer[0];
+  output_buffer_args.host_layout = nullptr;  // dense layout
+  output_buffer_args.dst = &output_data;
+  output_buffer_args.dst_size = sizeof(double);
+  output_buffer_args.event = nullptr;  // no event needed
+  check_error(api->PJRT_Buffer_ToHostBuffer(&output_buffer_args), api);
+  output_event_args.event = output_buffer_args.event;
+  check_error(api->PJRT_Event_Await(&output_event_args), api);
+  std::cout << "output buffer size: " << output_buffer_args.dst_size << "\n";
+  std::cout << "output data: " << output_data << "\n";
   std::flush(std::cout);
 
   return 0;

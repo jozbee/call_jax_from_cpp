@@ -5,3 +5,4 @@
 archive
 artifacts
 __pycache__
+*.dSYM
