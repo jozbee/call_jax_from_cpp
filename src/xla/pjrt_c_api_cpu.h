@@ -16,7 +16,7 @@ limitations under the License.
 #ifndef XLA_PJRT_C_PJRT_C_API_CPU_H_
 #define XLA_PJRT_C_PJRT_C_API_CPU_H_
 
-#include "src/pjrt_c_api.h"
+#include "src/xla/pjrt_c_api.h"
 
 #ifdef __cplusplus
 extern "C" {

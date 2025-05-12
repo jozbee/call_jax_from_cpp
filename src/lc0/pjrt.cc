@@ -25,7 +25,7 @@
   Program grant you additional permission to convey the resulting work.
 */
 
-#include "src/pjrt.h"
+#include "src/lc0/pjrt.h"
 
 #include <dlfcn.h>
 
@@ -34,7 +34,7 @@
 #include <iostream>
 #include <numeric>
 
-#include "src/pjrt_c_api.h"
+#include "src/xla/pjrt_c_api.h"
 
 namespace lczero {
 

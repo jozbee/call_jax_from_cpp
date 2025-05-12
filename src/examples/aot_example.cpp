@@ -7,8 +7,8 @@
 #include <iostream>
 #include <vector>
 
-#include "src/pjrt_c_api.h"
-#include "src/pjrt_c_api_cpu.h"
+#include "src/xla/pjrt_c_api.h"
+#include "src/xla/pjrt_c_api_cpu.h"
 
 PJRT_Error_Code get_error_code(const PJRT_Api* api, PJRT_Error* error) {
   PJRT_Error_GetCode_Args args;
@@ -44,8 +44,6 @@ void check_error(PJRT_Error* error, const PJRT_Api* api) {
   args.error = error;
   api->PJRT_Error_Destroy(&args);
 }
-
-// TODO(jozbee): make aot (right now it is jit)
 
 int main() {
   // read compiled program
@@ -92,9 +90,9 @@ int main() {
 
   // read in executable
   std::ifstream exec_file("./artifacts/jax_example_exec.binpb",
-                         std::ios_base::binary);
+                          std::ios_base::binary);
   const std::vector<char> exec_buffer(std::istreambuf_iterator<char>(exec_file),
-                                     {});
+                                      {});
   std::cout << "read exec\n";
   std::flush(std::cout);
 
@@ -175,7 +173,8 @@ int main() {
   execute_options.num_send_ops = 0;
   execute_options.num_recv_ops = 0;
   execute_options.launch_id = 0;  // only one device
-  execute_options.non_donatable_input_indices = non_donatable_input_indices.data();
+  execute_options.non_donatable_input_indices =
+      non_donatable_input_indices.data();
   execute_options.num_non_donatable_input_indices = 1;
   execute_options.context = nullptr;  // nothing fancy here
 
@@ -223,7 +222,7 @@ int main() {
   output_buffer_args.host_layout = nullptr;  // dense layout
   output_buffer_args.dst = &output_data;
   output_buffer_args.dst_size = sizeof(double);
-  output_buffer_args.event = nullptr;  // no event needed
+  output_buffer_args.event = nullptr;  // output
   check_error(api->PJRT_Buffer_ToHostBuffer(&output_buffer_args), api);
   output_event_args.event = output_buffer_args.event;
   check_error(api->PJRT_Event_Await(&output_event_args), api);

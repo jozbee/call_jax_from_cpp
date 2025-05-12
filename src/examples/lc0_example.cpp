@@ -4,11 +4,11 @@
 #include <string_view>
 #include <vector>
 
-#include "pjrt.h"
+#include "src/lc0/pjrt.h"
 
 int main() {
   // pjrt
-  lczero::Pjrt pjrt("./artifacts/libpjrt_c_api_cpu_plugin_linux.so");
+  lczero::Pjrt pjrt("./artifacts/libpjrt_c_api_cpu_plugin_darwin.dylib");
   std::cout << "pjrt\n";
   std::flush(std::cout);
 

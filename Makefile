@@ -1,25 +1,24 @@
-# e.g,
-# clang++ -I. -Wl,-rpath,./artifacts -L/workspace/artifacts \
-#  -lpjrt_c_api_cpu_plugin -o aot_example src/aot_example.cpp
+# for building examples that use the PJRT C API
 
-.PHONY: all clean
+.PHONY: all clean \
+	lc0_clean aot_clean aot_api_clean
 
-all: aot_example
+all: aot_api_example
 
-clean:
-	rm -f aot_example
+clean: aot_api_clean
 
 #######
 # lc0 #
 #######
 
-lc0_all: lc0_example
+lc0_example: src/examples/lc0_example.cpp pjrt
+	clang++ \
+		-o lc0_example src/examples/lc0_example.cpp artifacts/pjrt.o \
+	 -std=c++17 -Wall -Wextra -O3 \
+	 -I.
 
-lc0_example: src/lc0_example.cpp pjrt
-	clang++ -std=c++17 -Wall -Wextra -O3 -I. -o lc0_example src/lc0_example.cpp artifacts/pjrt.o
-
-pjrt: src/pjrt.cc
-	clang++ -c -std=c++17 -Wall -Wextra -O3 -I. -o artifacts/pjrt.o src/pjrt.cc
+pjrt: src/lc0/pjrt.cc
+	clang++ -c -std=c++17 -Wall -Wextra -O3 -I. -o artifacts/pjrt.o src/lc0/pjrt.cc
 
 lc0_clean:
 	rm -f lc0_example
@@ -29,39 +28,35 @@ lc0_clean:
 # aot #
 #######
 
-aot_example: src/aot_example.cpp
+aot_example: src/examples/aot_example.cpp
 	clang++ \
-		-o aot_example src/aot_example.cpp \
+		-o aot_example src/examples/aot_example.cpp \
 		-std=c++17 -Wall -Wextra -O3 \
 		-I. \
 		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_darwin
 #		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_linux
 
-# # Compiler and compiler flags
-# CXX = clang++
-# CXXFLAGS = -std=c++17 -Wall -Wextra -O2
+aot_clean:
+	rm -f aot_example
 
-# # Target executable
-# TARGET = aot_example
+###########
+# aot api #
+###########
 
-# # Source files
-# SRCS = src/aot_example.cpp
+aot_api_example: src/examples/aot_api_example.cpp pjrt_exec
+	clang++ \
+		-o aot_api_example src/examples/aot_api_example.cpp artifacts/pjrt_exec.o \
+		-std=c++17 -Wall -Wextra -O3 \
+		-I. \
+		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_darwin
+#		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_linux
 
-# # Include directories
-# INCLUDES = -I.
+pjrt_exec: src/pjrt_exec/pjrt_exec.cpp
+	clang++ \
+		-c -o artifacts/pjrt_exec.o src/pjrt_exec/pjrt_exec.cpp \
+		-std=c++17 -Wall -Wextra -O3 \
+		-I.
 
-# # Libraries and paths
-# LDFLAGS = -L./artifacts
-# LIBS = -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin
-
-# # Build rules
-# all: pjrt
-
-# $(TARGET): $(SRCS)
-# 	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $^ $(LDFLAGS) $(LIBS)
-
-# # Clean rule
-# clean:
-# 	rm -f $(TARGET)
-
-# .PHONY: all clean
+aot_api_clean:
+	rm -f aot_api_example
+	rm -f artifacts/pjrt_exec.o
