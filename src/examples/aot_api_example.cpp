@@ -5,7 +5,7 @@
 
 #include <iostream>
 
-#include "src/pjrt_exec/pjrt_exec.h"
+#include "src/pjrt_exec/pjrt_exec.hpp"
 
 int main() {
   // example setup

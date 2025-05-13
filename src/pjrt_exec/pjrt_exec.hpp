@@ -141,6 +141,7 @@ class Buffer {
       std::shared_ptr<Device> device);
   std::shared_ptr<Event> to_host(double* data, size_t size);
   void to_host_blocking(double* data, size_t size);
+  std::vector<std::size_t> get_dims() const;
 
  private:
   PJRT_Buffer* buffer_;
@@ -154,13 +155,16 @@ class Buffer {
  */
 class AOTComputation {
  public:
-  AOTComputation(const std::string& file_name, std::shared_ptr<Client> client);
+  AOTComputation(const std::string& base_name, std::shared_ptr<Client> client);
   ~AOTComputation();
-  std::tuple<std::shared_ptr<Buffer>, std::shared_ptr<Event>> execute(
-      std::shared_ptr<Buffer> input);
-  std::shared_ptr<Buffer> execute_blocking(std::shared_ptr<Buffer> input);
+  std::tuple<std::vector<std::shared_ptr<Buffer>>, std::shared_ptr<Event>>
+  execute(std::vector<std::shared_ptr<Buffer>> input);
+  std::vector<std::shared_ptr<Buffer>> execute_blocking(
+      std::vector<std::shared_ptr<Buffer>> input);
 
  private:
+  std::vector<std::size_t> input_sizes_;
+  std::vector<std::size_t> output_sizes_;
   PJRT_LoadedExecutable* loaded_executable_;
   std::shared_ptr<Client> client_;
 };
