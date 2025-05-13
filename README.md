@@ -1,6 +1,6 @@
 # Calling JAX from C++
 
-TLDR; we compile a [JAX](https://github.com/jax-ml/jax) to a serialized executable, and we call this via the [PJRT](https://openxla.org/xla/pjrt) C API.
+TLDR; we compile [JAX](https://github.com/jax-ml/jax) to a serialized executable, and we call this via the [PJRT](https://openxla.org/xla/pjrt) C API.
 
 ## Motivation
 
