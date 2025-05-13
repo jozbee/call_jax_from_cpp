@@ -2,7 +2,7 @@
 
 .PHONY: \
 	all clean \
-	lc0_clean aot_clean aot_api_clean aot_jax2exec_clean
+	lc0_clean aot_clean aot_jax2exec_clean
 
 all: aot_jax2exec_example
 
@@ -51,6 +51,12 @@ aot_jax2exec_example: src/examples/aot_jax2exec_example.cpp pjrt_exec
 		-I. \
 		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_darwin
 #		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_linux
+
+pjrt_exec: src/pjrt_exec/pjrt_exec.cpp
+	clang++ \
+		-c -o artifacts/pjrt_exec.o src/pjrt_exec/pjrt_exec.cpp \
+		-std=c++17 -Wall -Wextra -O3 \
+		-I.
 
 aot_jax2exec_clean:
 	rm -f aot_jax2exec_example

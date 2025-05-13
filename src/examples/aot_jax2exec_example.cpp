@@ -16,17 +16,10 @@ int main() {
   std::vector<double> output_data = {-1.0, -1.0};  // sentinel
   const std::string base_name = "./artifacts/jax_jax2exec";
 
-  std::cout << "setup\n";
-  std::cout << input_data[0].size() << " " << input_data[1].size() << "\n";
-  std::flush(std::cout);
-
   // pjrt setup
   auto client = std::make_shared<pjrt::Client>();
   auto devices = client->get_devices();
   auto device = devices[0];
-
-  std::cout << "client and device\n";
-  std::flush(std::cout);
 
   // inputs
   std::vector<std::shared_ptr<pjrt::Buffer>> input_buffers = {
@@ -35,15 +28,9 @@ int main() {
       pjrt::Buffer::to_device_blocking(input_data[1].data(),
                                        input_data[1].size(), client, device)};
 
-  std::cout << "input buffers\n";
-  std::flush(std::cout);
-
   // exec
   pjrt::AOTComputation aot_comp(base_name, client);
   auto output_buffers = aot_comp.execute_blocking(input_buffers);
-
-  std::cout << "exec\n";
-  std::flush(std::cout);
 
   // ouputs
   output_buffers[0]->to_host_blocking(&output_data[0], 0);
