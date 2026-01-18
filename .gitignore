@@ -7,3 +7,5 @@ artifacts
 __pycache__
 *.dSYM
 notebooks
+.DS_Store
+data

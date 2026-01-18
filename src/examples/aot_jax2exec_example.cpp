@@ -4,6 +4,7 @@
  */
 
 #include <iostream>
+#include <thread>
 
 #include "src/pjrt_exec/pjrt_exec.hpp"
 
@@ -18,6 +19,11 @@ int main() {
   auto devices = client->get_devices();
   auto device = devices[0];
   pjrt::AOTComputation aot_comp(base_name, client);
+
+  // WARNING: sleep to avoid segfault
+  // without sleeping, the BUFFER::to_device call sometimes segfaults
+  // I do not now what the optimal sleep time is, but 1ms is sufficient
+  std::this_thread::sleep_for(std::chrono::microseconds(1000));
 
   // random input timing
   std::vector<double> timings(num_samples);
@@ -71,9 +77,9 @@ int main() {
             << std::endl;
 
   // compute min and max timing
-  std::size_t min_index = 0;
-  std::size_t max_index = 0;
-  for (std::size_t i = 1; i < num_samples; ++i) {
+  std::size_t min_index = 1;
+  std::size_t max_index = 1;
+  for (std::size_t i = 2; i < num_samples; ++i) {
     if (timings[i] < timings[min_index]) {
       min_index = i;
     }

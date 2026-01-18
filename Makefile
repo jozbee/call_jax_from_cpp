@@ -52,12 +52,18 @@ aot_jax2exec_example: src/examples/aot_jax2exec_example.cpp pjrt_exec
 		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_darwin
 #		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_linux
 
+aot_jax2exec_clean: pjrt_clean
+	rm -f aot_jax2exec_example
+
+#############
+# pjrt_exec #
+#############
+
 pjrt_exec: src/pjrt_exec/pjrt_exec.cpp
 	clang++ \
 		-c -o artifacts/pjrt_exec.o src/pjrt_exec/pjrt_exec.cpp \
 		-std=c++17 -Wall -Wextra -O3 \
 		-I.
 
-aot_jax2exec_clean:
-	rm -f aot_jax2exec_example
+pjrt_clean:
 	rm -f artifacts/pjrt_exec.o

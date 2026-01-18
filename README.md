@@ -37,8 +37,8 @@ See the script `compile_xla_runtime.sh` for hints and the correct `bazel` target
 
 > **NOTE.**
 > Make sure that you compile the PJRT runtime to be compatible with JAX.
-> This note is probably immaterial if you are running an up-to-date version of JAX, but on the safe side, I've pinned an XLA commit that is compatible with JAX v0.6.0.
-> Cf. [`jax/third_party/xla/workspace.bzl`](https://github.com/jax-ml/jax/blob/123022cae08d83c4d53ac77481b5c2391f003794/third_party/xla/workspace.bzl).
+> This note is probably immaterial if you are running an up-to-date version of JAX, but on the safe side, I've pinned an XLA commit that is compatible with JAX v0.8.2.
+> Cf. [`jax/third_party/xla/revision.bzl`](https://github.com/jax-ml/jax/blob/jax-v0.8.2/third_party/xla/revision.bzl).
 
 For compiling the examples, see the included `Makefile`.
 These scripts depend on some byproducts produced from JAX.

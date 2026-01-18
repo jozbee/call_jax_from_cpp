@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # make sure to use the correct xla commit, cf.
-# https://github.com/jax-ml/jax/blob/127aa7621868cb77e552b5d1f90e4a42b09c13fa/third_party/xla/workspace.bzl
+# https://github.com/jax-ml/jax/blob/jax-v0.8.2/third_party/xla/revision.bzl
 cd ./third_party/xla
 ./configure.py --backend=CPU --host_compiler=CLANG --lld_path=/usr/bin/ld
 bazel build --repo_env=HERMETIC_PYTHON_VERSION=3.11 //xla/pjrt/c:pjrt_c_api_cpu_plugin.so
@@ -15,5 +15,5 @@ cp bazel-bin/xla/pjrt/c/pjrt_c_api_cpu_plugin.so ../../artifacts/libpjrt_c_api_c
 # otool -L libpjrt_c_api_cpu_plugin_darwin.dylib
 
 # other needed headers
-# cp xla/pjrt/c/pjrt_c_api.h ../../src/.
-# cp xla/pjrt/c/pjrt_c_api_cpu.h ../../src/.
+# cp xla/pjrt/c/pjrt_c_api.h ../../src/xla/.
+# cp xla/pjrt/c/pjrt_c_api_cpu.h ../../src/xla/.

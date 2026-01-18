@@ -43,16 +43,23 @@ def jax2exec(
     fun_name :
         The name of the function.
         This will be used to name the files.
+
+    Notes
+    -----
+    We use AOT compilation, cf. https://docs.jax.dev/en/latest/aot.html.
+    Namely, we followed the advice from skye:
+    https://github.com/jax-ml/jax/discussions/22184#discussioncomment-9909496.
     """
     # compile
+    # (technically, exec is a "loaded executable", which is the type that pjrt
+    #  natively uses)
     jit_fun = jax.jit(fun)
     lower_fun = jit_fun.lower(*args)
+    compiled_fun = lower_fun.compile()
+    exec = compiled_fun._executable.xla_executable
+
+    # serialize
     cpu = jax.extend.backend.get_backend(platform="cpu")
-
-    # technically, exec is a "loaded executable", which is the type that pjrt
-    #  natively uses
-    exec = cpu.compile(str(lower_fun.compiler_ir("stablehlo")))
-
     serialized_exec = cpu.serialize_executable(exec)
     with open(f"{directory}/{fun_name}.binpb", "wb") as f:
         f.write(serialized_exec)
