@@ -260,8 +260,8 @@ std::vector<std::size_t> Buffer::get_dims() const {
       .struct_size = sizeof(PJRT_Buffer_Dimensions_Args),
       .extension_start = nullptr,
       .buffer = this->buffer_,
-      .num_dims = 0,     // out
-      .dims = nullptr};  // out
+      .dims = nullptr,  // out
+      .num_dims = 0};   // out
   check_error(api_->PJRT_Buffer_Dimensions(&args));
   std::vector<std::size_t> dims(args.dims, args.dims + args.num_dims);
   return dims;

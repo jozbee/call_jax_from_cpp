@@ -63,7 +63,15 @@ pjrt_exec: src/pjrt_exec/pjrt_exec.cpp
 	clang++ \
 		-c -o artifacts/pjrt_exec.o src/pjrt_exec/pjrt_exec.cpp \
 		-std=c++17 -Wall -Wextra -O3 \
-		-I.
+		-I. \
+		-Wno-missing-field-initializers
 
 pjrt_clean:
 	rm -f artifacts/pjrt_exec.o
+
+################
+# pjrt runtime #
+################
+
+pjrt_runtime: third_party/xla/WORKSPACE
+	./compile_xla_runtime.sh
