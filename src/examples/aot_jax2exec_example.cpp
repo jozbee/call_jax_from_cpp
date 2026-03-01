@@ -3,6 +3,7 @@
  * @brief Example of using `pjrt_exec` and `jax2exec` to call jax from C++.
  */
 
+#include <cmath>
 #include <iostream>
 #include <thread>
 
@@ -12,7 +13,7 @@ int main() {
   // example setup
   const std::size_t num_samples = 1024;
   const std::string base_name = "./artifacts/jax_jax2exec";
-  std::vector<double> output_data = {-1.0, -1.0};  // sentinel
+  std::vector<double> output_data = {-1.0, -1.0, -1.0, -1.0};  // sentinel
 
   // pjrt setup
   auto client = std::make_shared<pjrt::Client>();
@@ -51,6 +52,8 @@ int main() {
     auto output_buffers = aot_comp.execute_blocking(input_buffers);
     output_buffers[0]->to_host_blocking(&output_data[0], 0);
     output_buffers[1]->to_host_blocking(&output_data[1], 0);
+    output_buffers[2]->to_host_blocking(&output_data[2], 0);
+    output_buffers[3]->to_host_blocking(&output_data[3], 0);
 
     // end timing
     auto end = std::chrono::high_resolution_clock::now();
@@ -94,7 +97,7 @@ int main() {
 
   // not setinels?
   std::cout << "Output data: " << output_data[0] << ", " << output_data[1]
-            << std::endl;
+            << ", " << output_data[2] << ", " << output_data[3] << std::endl;
 
   return 0;
 }

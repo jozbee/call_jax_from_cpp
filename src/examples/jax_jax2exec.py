@@ -9,7 +9,7 @@ jax.config.update("jax_enable_x64", True)
 
 def fun(x: jax.Array, y: jax.Array) -> tuple[jax.Array, jax.Array]:
     """Example function to be compiled."""
-    return jnp.mean(x + y), jnp.std(x + y)
+    return jnp.mean(x + y), jnp.std(x + y), jnp.prod(x + y), jnp.sum(x + y)
 
 
 if __name__ == "__main__":

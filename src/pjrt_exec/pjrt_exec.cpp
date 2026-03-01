@@ -372,7 +372,7 @@ AOTComputation::execute(std::vector<std::shared_ptr<Buffer>> input) {
       .context = nullptr};  // nothing fancy here
 
   // execute
-  std::vector<PJRT_Buffer*> output_buffer(1);  // sized to hold one null pointer
+  std::vector<PJRT_Buffer*> output_buffer(this->output_sizes_.size());
   PJRT_Buffer** output_buffer_ptr = output_buffer.data();
   PJRT_Event* exec_event = nullptr;
   PJRT_LoadedExecutable_Execute_Args args = {

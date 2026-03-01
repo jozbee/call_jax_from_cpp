@@ -12,13 +12,13 @@ clean: aot_jax2exec_clean
 # lc0 #
 #######
 
-lc0_example: src/examples/lc0_example.cpp pjrt
+lc0_example: src/examples/lc0_example.cpp pjrt.o
 	clang++ \
 		-o lc0_example src/examples/lc0_example.cpp artifacts/pjrt.o \
 	 -std=c++17 -Wall -Wextra -O3 \
 	 -I.
 
-pjrt: src/lc0/pjrt.cc
+pjrt.o: src/lc0/pjrt.cc
 	clang++ -c -std=c++17 -Wall -Wextra -O3 -I. -o artifacts/pjrt.o src/lc0/pjrt.cc
 
 lc0_clean:
@@ -34,8 +34,7 @@ aot_example: src/examples/aot_example.cpp
 		-o aot_example src/examples/aot_example.cpp \
 		-std=c++17 -Wall -Wextra -O3 \
 		-I. \
-		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_darwin
-#		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_linux
+		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin
 
 aot_clean:
 	rm -f aot_example
@@ -44,22 +43,28 @@ aot_clean:
 # aot jax2exec #
 ################
 
-aot_jax2exec_example: src/examples/aot_jax2exec_example.cpp pjrt_exec
+aot_jax2exec_example: src/examples/aot_jax2exec_example.cpp artifacts/pjrt_exec.o artifacts/jax_jax2exec.binpb artifacts/jax_jax2exec.json
 	clang++ \
 		-o aot_jax2exec_example src/examples/aot_jax2exec_example.cpp artifacts/pjrt_exec.o \
 		-std=c++17 -Wall -Wextra -O3 \
 		-I. \
-		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_darwin
-#		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin_linux
+		-L./artifacts -Wl,-rpath,./artifacts -lpjrt_c_api_cpu_plugin
 
-aot_jax2exec_clean: pjrt_clean
+artifacts/jax_jax2exec.binpb artifacts/jax_jax2exec.json: src/examples/jax_jax2exec.py
+	python src/examples/jax_jax2exec.py
+
+aot_jax2exec_clean: pjrt_clean jax_jax2exec_clean
 	rm -f aot_jax2exec_example
+
+jax_jax2exec_clean:
+	rm -f artifacts/jax_jax2exec.binpb
+	rm -f artifacts/jax_jax2exec.json
 
 #############
 # pjrt_exec #
 #############
 
-pjrt_exec: src/pjrt_exec/pjrt_exec.cpp
+artifacts/pjrt_exec.o: src/pjrt_exec/pjrt_exec.cpp
 	clang++ \
 		-c -o artifacts/pjrt_exec.o src/pjrt_exec/pjrt_exec.cpp \
 		-std=c++17 -Wall -Wextra -O3 \
@@ -73,5 +78,5 @@ pjrt_clean:
 # pjrt runtime #
 ################
 
-pjrt_runtime: third_party/xla/WORKSPACE
+pjrt_runtime:
 	./compile_xla_runtime.sh
