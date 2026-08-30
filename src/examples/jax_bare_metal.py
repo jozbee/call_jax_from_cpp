@@ -46,6 +46,6 @@ if __name__ == "__main__":
 
     # serialize executable
     cpu = jax.extend.backend.get_backend(platform="cpu")
-    exec = cpu.compile(str(lower_fun.compiler_ir("stablehlo")))
+    exec = lower_fun.compile().runtime_executable()
     with open("artifacts/jax_example_exec.binpb", "wb") as f:
         f.write(cpu.serialize_executable(exec))

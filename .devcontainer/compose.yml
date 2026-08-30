@@ -1,0 +1,26 @@
+services:
+  ubuntu-amd64:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    image: call_jax_from_cpp:ubuntu24.04-amd64
+    container_name: jax_from_cpp_amd64
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
+
+  ubuntu-arm64:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/arm64
+    image: call_jax_from_cpp:ubuntu24.04-arm64
+    container_name: jax_from_cpp_arm64
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+    tty: true
+    stdin_open: true

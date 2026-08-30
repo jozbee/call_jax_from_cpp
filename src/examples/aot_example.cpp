@@ -2,6 +2,7 @@
 // we don't want to require all of the xla dependencies, only the runtime
 //  shared library
 
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <iostream>
