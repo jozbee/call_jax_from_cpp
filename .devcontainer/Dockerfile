@@ -14,6 +14,9 @@ RUN apt update -y && apt upgrade -y && apt install -y \
   npm \
   sudo \
   xxd \
+  # needed to link jaxlib's LAPACK FFI kernels into the PJRT CPU plugin
+  liblapack-dev \
+  libblas-dev \
   # need to also need runtime and headers for clang++, so we need g++-14
   g++-14
 

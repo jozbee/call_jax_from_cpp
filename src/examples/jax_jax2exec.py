@@ -8,15 +8,16 @@ from jax2exec.jax2exec import jax2exec
 jax.config.update("jax_enable_x64", True)
 
 
-def fun(x: jax.Array, y: jax.Array) -> tuple[jax.Array, jax.Array]:
+def fun(A: jax.Array, b: jax.Array) -> tuple[jax.Array, jax.Array]:
     """Example function to be compiled."""
-    return jnp.mean(x + y), jnp.std(x + y), jnp.prod(x + y), jnp.sum(x + y)
+    A = A.reshape(4, 4)
+    return jnp.linalg.inv(A) @ b
 
 
 if __name__ == "__main__":
     # dummy input for tracing
     dummy_in = (
-        jax.ShapeDtypeStruct(shape=(4,), dtype=jax.numpy.float64),
+        jax.ShapeDtypeStruct(shape=(16,), dtype=jax.numpy.float64),
         jax.ShapeDtypeStruct(shape=(4,), dtype=jax.numpy.float64),
     )
 

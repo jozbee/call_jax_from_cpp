@@ -29,31 +29,33 @@ int main() {
   // random input timing
   std::vector<double> timings(num_samples);
   for (std::size_t i = 0; i < num_samples; ++i) {
-    // random input
-    std::vector<std::vector<double>> input_data = {
-        {static_cast<double>(rand()) / RAND_MAX,
-         static_cast<double>(rand()) / RAND_MAX,
-         static_cast<double>(rand()) / RAND_MAX,
-         static_cast<double>(rand()) / RAND_MAX},
-        {static_cast<double>(rand()) / RAND_MAX,
-         static_cast<double>(rand()) / RAND_MAX,
-         static_cast<double>(rand()) / RAND_MAX,
-         static_cast<double>(rand()) / RAND_MAX}};
+    // random input: A (4x4, flattened row-major) and b (4,)
+    // the diagonal is biased so that A stays well-conditioned, since
+    // `jax_jax2exec.py` inverts A
+    std::vector<double> A_data(16);
+    std::vector<double> b_data(4);
+
+    for (auto& v : A_data) {
+      v = static_cast<double>(rand()) / RAND_MAX;
+    }
+    for (std::size_t d = 0; d < 4; ++d) {
+      A_data[d * 4 + d] += 4.0;
+    }
+    for (auto& v : b_data) {
+      v = static_cast<double>(rand()) / RAND_MAX;
+    }
 
     // start timing
     auto start = std::chrono::high_resolution_clock::now();
 
     // compute
     std::vector<std::shared_ptr<pjrt::Buffer>> input_buffers = {
-        pjrt::Buffer::to_device_blocking(input_data[0].data(),
-                                         input_data[0].size(), client, device),
-        pjrt::Buffer::to_device_blocking(input_data[1].data(),
-                                         input_data[1].size(), client, device)};
+        pjrt::Buffer::to_device_blocking(A_data.data(),
+                                         A_data.size(), client, device),
+        pjrt::Buffer::to_device_blocking(b_data.data(),
+                                         b_data.size(), client, device)};
     auto output_buffers = aot_comp.execute_blocking(input_buffers);
-    output_buffers[0]->to_host_blocking(&output_data[0], 0);
-    output_buffers[1]->to_host_blocking(&output_data[1], 0);
-    output_buffers[2]->to_host_blocking(&output_data[2], 0);
-    output_buffers[3]->to_host_blocking(&output_data[3], 0);
+    output_buffers[0]->to_host_blocking(output_data.data(), output_data.size());
 
     // end timing
     auto end = std::chrono::high_resolution_clock::now();

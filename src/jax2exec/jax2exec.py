@@ -16,7 +16,7 @@ import jax.numpy as jnp
 # if not set, jax will only compile to float32 (not float64)
 jax.config.update("jax_enable_x64", True)
 
-array_t: tp.TypeAlias = tp.Union[jax.Array, jax.ShapeDtypeStruct]
+type array_t = jax.Array | jax.ShapeDtypeStruct
 
 def jax2exec(
     fun: tp.Callable,
@@ -68,7 +68,9 @@ def jax2exec(
     #  `pjrt_exec`
     # (note that the serialized executable is written before the checking...)
     args_info = lower_fun.args_info
-    out_info = lower_fun.out_info
+    # `out_info` is a single `ShapeDtypeStruct` when `fun` returns a single
+    # array, rather than a tuple of them, so normalize via the output pytree.
+    out_info = jax.tree_util.tree_leaves(lower_fun.out_info)
 
     assert len(lower_fun.args_info[1]) == 0, "Input cannot have keywords"
     assert all(len(info.shape) <= 1 for info in args_info[0]), (

@@ -1,3 +1,4 @@
 [submodule "third_party/xla"]
 	path = third_party/xla
-	url = https://github.com/openxla/xla.git
+	url = https://github.com/jozbee/xla.git
+	branch = call_jax_from_cpp-lapack
