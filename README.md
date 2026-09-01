@@ -84,27 +84,38 @@ build reported a p50 2.4x higher and a max/p50 of 4.4 instead of 1.1.
 
 ### What actually moved the numbers
 
-Measured on the aarch64 devcontainer, MPC fixture, medians of 3 interleaved
-rounds of 300 calls. Container numbers are relative signals only.
+MPC fixture on the aarch64 devcontainer, 28 runs of 4000 calls per API
+(112,000 calls each), machine otherwise idle. Container numbers are relative
+signals; absolute ones belong on the target hardware.
 
-| change | p50 | max/p50 |
+| | legacy, per-call buffers | `Runtime`/`Function` |
 |---|---|---|
-| legacy API, per-call buffers | 4646 µs | 1.14 |
-| `Runtime`/`Function`, inline execution | **3868 µs** | 1.11 |
+| median p50 | 4842 µs | **3979 µs** |
+| median p99.9 | 5417 µs | **4417 µs** |
+| worst single call | 20169 µs | **6832 µs** |
+| worst max/p50 | 4.20 | **1.72** |
+| runs with a >2x outlier | 2 of 28 | **0 of 28** |
 
-- **Persistent zero-copy buffers are the win: ~17% off the median**, on both
-  the MPC and the synthetic twin. Zero copy requires the caller's memory to be
-  aligned to at least `xla::cpu::MinAlign()`; below that XLA silently falls
-  back to copying, which is why the runtime owns its arenas.
+- **Persistent zero-copy buffers are the win: ~18% off the median**, and the
+  same ~16% shows up on the synthetic twin, so it is the call path rather than
+  anything specific to the MPC. Zero copy needs the caller's memory aligned to
+  at least `xla::cpu::MinAlign()`; below that XLA silently falls back to
+  copying, which is why the runtime owns its arenas instead of accepting any
+  pointer.
+- **The spikes are real but rare** — roughly one run in fourteen contains one,
+  which is why short benchmarks miss them entirely and why the original report
+  was of occasional bad runs rather than consistently bad numbers. The largest
+  call the new path produced in 112,000 was 1.7x its median; the old path
+  reached 4.2x. Two outlier runs against zero is not on its own a significant
+  frequency difference; the difference in magnitude is the solid part.
 - **Building the plugin `-c opt` instead of the bazel default changed nothing
   measurable** (4719 µs vs 4728 µs). The compute kernels are LLVM-compiled at
   export time and embedded in the artifact; the plugin only orchestrates.
 - **~15,400 allocations per call happen inside XLA's thunk runtime**, roughly
-  one per StableHLO op, and the wrapper rework only removed the ~500 that were
-  ours. That is the remaining structural jitter surface; reaching it means a
-  pooling allocator behind `CpuClientOptions::allocator`.
-- The 5.7x max/median blow-up that motivated this work did not reproduce on a
-  quiet machine. Both APIs sit near 1.1.
+  one per StableHLO op, and the rework only removed the ~500 that were ours.
+  That is the remaining structural jitter surface, and reaching it means a
+  pooling allocator behind `CpuClientOptions::allocator` — another fork patch,
+  worth doing only if the numbers on real hardware still show a tail.
 
 ## Patches carried in the XLA fork
 
