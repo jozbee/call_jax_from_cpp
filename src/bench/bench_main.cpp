@@ -240,7 +240,7 @@ int main(int argc, char** argv) {
       // on its own; the Function must not quietly do it too.
       fn_options.warmup_calls = 0;
       pjrt::Function function(runtime, base, fn_options);
-      timings.load = std::chrono::steady_clock::now() - load_start;
+      const auto load_duration = std::chrono::steady_clock::now() - load_start;
 
       std::cout << "sync:      " << (args.synchronous ? "requested" : "off")
                 << (runtime.synchronous_supported()
@@ -269,8 +269,7 @@ int main(int argc, char** argv) {
         }
         function.call();
       });
-      timings.load = std::chrono::steady_clock::now() - load_start -
-                     timings.first_call;
+      timings.load = load_duration;
     } else {
       const auto load_start = std::chrono::steady_clock::now();
       auto client = std::make_shared<pjrt::Client>();
