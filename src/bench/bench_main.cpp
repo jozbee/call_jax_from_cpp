@@ -48,6 +48,7 @@ struct Args {
   std::size_t warmup = 50;
   std::size_t case_index = 0;
   bool check = true;
+  bool all_cases = false;
   bool synchronous = true;
   bool rt_harden = false;
   int pin_cpu = -1;
@@ -94,6 +95,8 @@ Args parse_args(int argc, char** argv) {
       a.worker_threads = std::stoi(next());
     } else if (flag == "--devices") {
       a.cpu_device_count = std::stoi(next());
+    } else if (flag == "--all-cases") {
+      a.all_cases = true;
     } else if (flag == "--rt") {
       a.rt_harden = true;
     } else if (flag == "--cpu") {
@@ -225,6 +228,53 @@ int main(int argc, char** argv) {
               << args.warmup << "\n";
 
     const std::string base = args.artifacts_dir + "/" + args.fixture;
+
+    // The steady-state path reuses one set of zero-copy input buffers for the
+    // life of the Function, so the case that matters for correctness is
+    // *changing* inputs between calls -- which a benchmark feeding the same
+    // values every time never exercises. Run every reference case through a
+    // single Function, in sequence and then interleaved, and check each.
+    if (args.all_cases) {
+      pjrt::RuntimeOptions rt_options;
+      rt_options.synchronous = args.synchronous;
+      rt_options.worker_threads = args.worker_threads;
+      rt_options.cpu_device_count = args.cpu_device_count;
+      pjrt::Runtime runtime(rt_options);
+      pjrt::Function function(runtime, base);
+
+      std::vector<const double*> ptrs(function.num_outputs());
+      for (std::size_t i = 0; i < function.num_outputs(); ++i) {
+        ptrs[i] = function.output(i);
+      }
+
+      const std::size_t n_cases = fixture.cases().size();
+      bool all_ok = true;
+      // Two passes: straight through, then reversed, so every case follows a
+      // different predecessor and a stale buffer cannot go unnoticed.
+      for (std::size_t pass = 0; pass < 2; ++pass) {
+        for (std::size_t k = 0; k < n_cases; ++k) {
+          const std::size_t c = pass == 0 ? k : n_cases - 1 - k;
+          const bench::Case& this_case = fixture.cases()[c];
+          for (std::size_t i = 0; i < function.num_inputs(); ++i) {
+            const std::size_t n =
+                function.input_size(i) == 0 ? 1 : function.input_size(i);
+            std::memcpy(function.input(i), this_case.inputs[i].data(),
+                        n * sizeof(double));
+          }
+          function.call();
+          const double err = fixture.max_rel_error(c, ptrs);
+          const bool integral = fixture.integral_output_ok(ptrs);
+          const bool ok = err <= 1e-6 && integral;
+          all_ok = all_ok && ok;
+          std::printf("  pass %zu case %zu: max rel err %.3e %s\n", pass, c,
+                      err, ok ? "ok" : "FAIL");
+        }
+      }
+      std::cout << (all_ok ? "all cases agree with the reference\n"
+                           : "FAIL: a case disagreed\n");
+      return all_ok ? 0 : 1;
+    }
+
     Timings timings;
 
     if (args.api == "rt") {

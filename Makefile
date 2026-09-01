@@ -160,6 +160,8 @@ test_correct: artifacts/bench
 	./artifacts/bench --api rt --fixture mpc_solver --iterations 20 --warmup 5
 	./artifacts/bench --api rt --fixture synth_solver --iterations 20 --warmup 5
 	./artifacts/bench --api legacy --fixture mpc_solver --iterations 20 --warmup 5
+	./artifacts/bench --all-cases --fixture mpc_solver
+	./artifacts/bench --all-cases --fixture synth_solver
 
 # Proves the steady-state call path does not allocate. The guard is preloaded,
 # not linked, and the bench no-ops when it is absent.
