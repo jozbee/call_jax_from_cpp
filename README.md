@@ -13,6 +13,116 @@ For hacking a project quickly, I don't want to rewrite the JAX programs in bouti
 JAX also solves this problem, but because this use case is niche, the documentation is poor.
 This project provides some guiding examples for Float64 CPU integration.
 
+## Calling it from a control loop
+
+For a real-time caller, use `pjrt::Runtime` and `pjrt::Function` from
+`src/pjrt_exec/runtime.hpp`. Load once, then call in a loop:
+
+```cpp
+pjrt::Runtime runtime;                                 // one per process
+pjrt::Function mpc(runtime, "./artifacts/mpc_solver"); // load once
+
+for (;;) {
+  std::memcpy(mpc.input(3), acc_ref, 3 * sizeof(double));
+  // ... write the rest of the inputs ...
+  mpc.call();
+  const double* u = mpc.output(0);
+}
+```
+
+`input(i)` and `output(i)` point at 64-byte-aligned storage the `Function`
+owns. The input arenas are wrapped once in zero-copy PJRT buffers, so a call
+transfers nothing: XLA reads the arena in place, and the outputs are copied
+straight out of device memory. Write the inputs *between* calls, never during
+one — a `Function` is single-threaded by design.
+
+`RuntimeOptions` controls the client: `synchronous` (run inline on the calling
+thread instead of dispatching to a thread pool), `cpu_device_count`, and
+`worker_threads` (XLA's pool size, applied through `PJRT_NPROC`).
+
+The older `Client` / `Buffer` / `AOTComputation` wrappers still exist and still
+work; they create device buffers on every call, which is fine for a script and
+not what you want in a loop.
+
+### Real-time hardening
+
+`src/pjrt_exec/rt.hpp` has optional, independently-failing helpers for the
+calling thread: `harden_malloc()`, `lock_memory()`, `pin_current_thread()`,
+`corral_xla_threads()` (moves XLA's pools off your core) and
+`set_realtime_priority()`. They are Linux-only and no-op elsewhere.
+`tools/rt_check.sh` audits the host settings they depend on — governor,
+`isolcpus`, `nohz_full`, transparent hugepages, `RLIMIT_RTPRIO`.
+
+`SCHED_FIFO` and `mlockall` need privileges; the devcontainer grants them
+(`cap_add: SYS_NICE`, `ulimits: rtprio/memlock`).
+
+## Measuring
+
+`make bench` builds and runs the benchmark; `make test_correct` checks both
+APIs against reference fixtures; `make test_alloc` counts allocations in the
+steady-state call path via a preloaded interposer.
+
+```
+make fixtures                      # export mpc_solver + synth_solver here
+make bench BENCH_ARGS="--api rt --fixture mpc_solver --iterations 2000"
+tools/run_matrix.sh mpc_solver 300 3   # sweep api x sync x threads
+```
+
+Two fixtures are exported. `mpc_solver` is the real acceptance workload
+(16 in / 14 out, all rank-1 f64). `synth_solver` has the identical signature
+and a comparable cost but no data-dependent control flow, so it separates
+system jitter from the MPC's own bounded algorithmic variance.
+
+Serialized executables embed target machine code — `LoadSerializedExecutable`
+relinks it rather than recompiling — so `.binpb` files are locked to the
+architecture that exported them. Run `make fixtures` on the machine that will
+execute them.
+
+**Measure on an idle machine.** A concurrent build does not add noise to these
+numbers, it invalidates them: the same configuration measured during a bazel
+build reported a p50 2.4x higher and a max/p50 of 4.4 instead of 1.1.
+
+### What actually moved the numbers
+
+Measured on the aarch64 devcontainer, MPC fixture, medians of 3 interleaved
+rounds of 300 calls. Container numbers are relative signals only.
+
+| change | p50 | max/p50 |
+|---|---|---|
+| legacy API, per-call buffers | 4646 µs | 1.14 |
+| `Runtime`/`Function`, inline execution | **3868 µs** | 1.11 |
+
+- **Persistent zero-copy buffers are the win: ~17% off the median**, on both
+  the MPC and the synthetic twin. Zero copy requires the caller's memory to be
+  aligned to at least `xla::cpu::MinAlign()`; below that XLA silently falls
+  back to copying, which is why the runtime owns its arenas.
+- **Building the plugin `-c opt` instead of the bazel default changed nothing
+  measurable** (4719 µs vs 4728 µs). The compute kernels are LLVM-compiled at
+  export time and embedded in the artifact; the plugin only orchestrates.
+- **~15,400 allocations per call happen inside XLA's thunk runtime**, roughly
+  one per StableHLO op, and the wrapper rework only removed the ~500 that were
+  ours. That is the remaining structural jitter surface; reaching it means a
+  pooling allocator behind `CpuClientOptions::allocator`.
+- The 5.7x max/median blow-up that motivated this work did not reproduce on a
+  quiet machine. Both APIs sit near 1.1.
+
+## Patches carried in the XLA fork
+
+`third_party/xla` is a fork, and rebasing it onto a new JAX pin means carrying:
+
+1. **LAPACK FFI kernels** linked into the CPU plugin, so `jnp.linalg.*` works
+   without jaxlib's Python extension registering the handlers.
+2. **Create options in `pjrt_c_api_cpu_internal.cc`**: `asynchronous` and
+   `max_inflight_computations`, plus a `supports_synchronous_execution`
+   plugin attribute. `asynchronous=false` makes XLA run computations inline on
+   the calling thread instead of handing them to its dispatch pool. It is not
+   reachable any other way — the C API's `PJRT_ExecuteOptions` has no
+   execution-mode field.
+
+Unknown create options are ignored silently by every PJRT plugin, so dropping
+patch 2 costs performance, never correctness. The runtime reports which it got
+via `Runtime::synchronous_supported()`.
+
 ## Examples
 
 This project provides 3 examples:
@@ -26,6 +136,7 @@ It simply shows that we can execute an AOT compiled program in C++.
 3. A simple PJRT C++ wrapper: we implement some simple wrappers around the `pjrt_c_api` that performs cleanup and makes code very easy to write.
 Note that we severely underexpose the flexibility of the PJRT API.
 My applications find this to be mostly sufficient.
+The example itself now uses the `Runtime`/`Function` path described above.
 
 ## Usage
 

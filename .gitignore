@@ -9,3 +9,8 @@ __pycache__
 notebooks
 .DS_Store
 data
+
+# built example binaries
+aot_jax2exec_example
+aot_example
+lc0_example

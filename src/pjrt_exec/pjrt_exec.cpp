@@ -57,7 +57,8 @@ namespace pjrt {
 // setup //
 ///////////
 
-const PJRT_Api* get_pjrt_api_() {
+namespace {
+const PJRT_Api* init_pjrt_api() {
   const PJRT_Api* api = GetPjrtApi();
   PJRT_Plugin_Initialize_Args args = {
       .struct_size = sizeof(PJRT_Plugin_Initialize_Args),
@@ -74,20 +75,28 @@ const PJRT_Api* get_pjrt_api_() {
   }
   return api;
 }
+}  // namespace
+
+const PJRT_Api* api() {
+  // Function-local static: initialized exactly once, on first use, and
+  // thread-safe since C++11.
+  static const PJRT_Api* const api_instance = init_pjrt_api();
+  return api_instance;
+}
 
 ///////////
 // error //
 ///////////
 
 Error::Error(PJRT_Error* error)
-    : std::runtime_error(get_error_message_(api_, error)),
-      code_(get_error_code_(api_, error)),
-      message_(get_error_message_(api_, error)) {
+    : std::runtime_error(get_error_message_(api(), error)),
+      code_(get_error_code_(api(), error)),
+      message_(get_error_message_(api(), error)) {
   PJRT_Error_Destroy_Args args = {
       .struct_size = sizeof(PJRT_Error_Destroy_Args),
       .extension_start = nullptr,
       .error = error};
-  api_->PJRT_Error_Destroy(&args);
+  api()->PJRT_Error_Destroy(&args);
 }
 
 void check_error(PJRT_Error* error) {
@@ -113,7 +122,7 @@ Client::Client() {
       .client = nullptr,  // out
       .kv_try_get_callback = nullptr,
       .kv_try_get_user_arg = nullptr};
-  check_error(api_->PJRT_Client_Create(&args));
+  check_error(api()->PJRT_Client_Create(&args));
   this->client_ = args.client;
 }
 
@@ -123,7 +132,7 @@ Client::~Client() {
       .extension_start = nullptr,
       .client = client_};
   try {
-    check_error(api_->PJRT_Client_Destroy(&args));
+    check_error(api()->PJRT_Client_Destroy(&args));
   } catch (const Error& e) {
     // I don't know how to handle this error?
     std::cerr << "Client destructor error: " << e.what() << "\n";
@@ -137,7 +146,7 @@ std::vector<std::shared_ptr<Device>> Client::get_devices() const {
       .client = client_,
       .devices = nullptr,  // out
       .num_devices = 0};   // out
-  check_error(api_->PJRT_Client_Devices(&args));
+  check_error(api()->PJRT_Client_Devices(&args));
   std::vector<std::shared_ptr<Device>> devices(args.num_devices);
   for (size_t i = 0; i < args.num_devices; ++i) {
     devices[i] = std::make_shared<Device>(args.devices[i]);
@@ -170,14 +179,14 @@ Event::~Event() {
       .struct_size = sizeof(PJRT_Event_Destroy_Args),
       .extension_start = nullptr,
       .event = event_};
-  api_->PJRT_Event_Destroy(&args);
+  api()->PJRT_Event_Destroy(&args);
 }
 
 void Event::await() {
   PJRT_Event_Await_Args args = {.struct_size = sizeof(PJRT_Event_Await_Args),
                                 .extension_start = nullptr,
                                 .event = event_};
-  check_error(api_->PJRT_Event_Await(&args));
+  check_error(api()->PJRT_Event_Await(&args));
 }
 
 ////////////
@@ -195,7 +204,7 @@ Buffer::~Buffer() {
       .struct_size = sizeof(PJRT_Buffer_Destroy_Args),
       .extension_start = nullptr,
       .buffer = this->buffer_};
-  api_->PJRT_Buffer_Destroy(&args);
+  api()->PJRT_Buffer_Destroy(&args);
 }
 
 std::tuple<std::shared_ptr<Buffer>, std::shared_ptr<Event>> Buffer::to_device(
@@ -223,7 +232,7 @@ std::tuple<std::shared_ptr<Buffer>, std::shared_ptr<Event>> Buffer::to_device(
       .device_layout = nullptr,          // dense layout
       .done_with_host_buffer = nullptr,  // out
       .buffer = nullptr};                // out
-  check_error(api_->PJRT_Client_BufferFromHostBuffer(&args));
+  check_error(api()->PJRT_Client_BufferFromHostBuffer(&args));
   return {std::make_shared<Buffer>(args.buffer),
           std::make_shared<Event>(args.done_with_host_buffer)};
 }
@@ -236,6 +245,44 @@ std::shared_ptr<Buffer> Buffer::to_device_blocking(
   return buffer;
 }
 
+std::shared_ptr<Buffer> Buffer::to_device_zero_copy(
+    const double* data, size_t size, std::shared_ptr<Client> client,
+    std::shared_ptr<Device> device) {
+  const std::array<int64_t, 1> dims = {static_cast<int64_t>(size)};
+  const size_t num_dims = size == 0 ? 0 : 1;
+  PJRT_Client_BufferFromHostBuffer_Args args = {
+      .struct_size = sizeof(PJRT_Client_BufferFromHostBuffer_Args),
+      .client = client->client_,
+      .data = data,
+      .type = PJRT_Buffer_Type::PJRT_Buffer_Type_F64,
+      .dims = dims.data(),
+      .num_dims = num_dims,
+      .byte_strides = nullptr,  // dense layout
+      .num_byte_strides = 0,    // dense layout
+      // The runtime aliases `data` instead of copying it, and promises not to
+      // write it.  XLA silently falls back to a copy if `data` is not aligned
+      // to `xla::cpu::MinAlign()`, so callers must allocate accordingly.
+      .host_buffer_semantics =
+          PJRT_HostBufferSemantics::PJRT_HostBufferSemantics_kImmutableZeroCopy,
+      .device = device->device_,
+      .memory = nullptr,
+      .device_layout = nullptr,          // dense layout
+      .done_with_host_buffer = nullptr,  // out
+      .buffer = nullptr};                // out
+  check_error(api()->PJRT_Client_BufferFromHostBuffer(&args));
+
+  // Zero copy still reports a "done with host buffer" event; it fires when the
+  // buffer is destroyed, so it is not something to wait on here.
+  if (args.done_with_host_buffer != nullptr) {
+    PJRT_Event_Destroy_Args destroy = {
+        .struct_size = sizeof(PJRT_Event_Destroy_Args),
+        .extension_start = nullptr,
+        .event = args.done_with_host_buffer};
+    api()->PJRT_Event_Destroy(&destroy);
+  }
+  return std::make_shared<Buffer>(args.buffer);
+}
+
 std::shared_ptr<Event> Buffer::to_host(double* data, size_t size) {
   size = size == 0 ? 1 : size;
   PJRT_Buffer_ToHostBuffer_Args args = {
@@ -246,7 +293,7 @@ std::shared_ptr<Event> Buffer::to_host(double* data, size_t size) {
       .dst = data,
       .dst_size = size * sizeof(double),
       .event = nullptr};  // out
-  check_error(api_->PJRT_Buffer_ToHostBuffer(&args));
+  check_error(api()->PJRT_Buffer_ToHostBuffer(&args));
   return std::make_shared<Event>(args.event);
 }
 
@@ -262,7 +309,7 @@ std::vector<std::size_t> Buffer::get_dims() const {
       .buffer = this->buffer_,
       .dims = nullptr,  // out
       .num_dims = 0};   // out
-  check_error(api_->PJRT_Buffer_Dimensions(&args));
+  check_error(api()->PJRT_Buffer_Dimensions(&args));
   std::vector<std::size_t> dims(args.dims, args.dims + args.num_dims);
   return dims;
 }
@@ -326,8 +373,43 @@ AOTComputation::AOTComputation(const std::string& base_name,
       .serialized_executable = buffer.data(),
       .serialized_executable_size = buffer.size(),
       .loaded_executable = nullptr};  // out
-  check_error(api_->PJRT_Executable_DeserializeAndLoad(&args));
+  check_error(api()->PJRT_Executable_DeserializeAndLoad(&args));
   this->loaded_executable_ = args.loaded_executable;
+
+  // Cross-check the sidecar against the executable itself.  The output count
+  // sizes the array PJRT writes into, so a stale `.json` claiming fewer
+  // outputs than the program produces is a heap overflow, not a mismatch
+  // error -- exactly the bug that showed up once the example grew past three
+  // return values.
+  PJRT_LoadedExecutable_GetExecutable_Args exec_args = {
+      .struct_size = sizeof(PJRT_LoadedExecutable_GetExecutable_Args),
+      .extension_start = nullptr,
+      .loaded_executable = this->loaded_executable_,
+      .executable = nullptr};  // out
+  check_error(api()->PJRT_LoadedExecutable_GetExecutable(&exec_args));
+
+  PJRT_Executable_NumOutputs_Args num_out_args = {
+      .struct_size = sizeof(PJRT_Executable_NumOutputs_Args),
+      .extension_start = nullptr,
+      .executable = exec_args.executable,
+      .num_outputs = 0};  // out
+  PJRT_Error* num_out_error =
+      api()->PJRT_Executable_NumOutputs(&num_out_args);
+
+  PJRT_Executable_Destroy_Args destroy_args = {
+      .struct_size = sizeof(PJRT_Executable_Destroy_Args),
+      .extension_start = nullptr,
+      .executable = exec_args.executable};
+  api()->PJRT_Executable_Destroy(&destroy_args);
+
+  check_error(num_out_error);
+  if (num_out_args.num_outputs != this->output_sizes_.size()) {
+    throw std::runtime_error(
+        "Stale metadata: " + base_name + ".json declares " +
+        std::to_string(this->output_sizes_.size()) + " outputs but " +
+        base_name + ".binpb produces " +
+        std::to_string(num_out_args.num_outputs));
+  }
 }
 
 AOTComputation::~AOTComputation() {
@@ -336,7 +418,7 @@ AOTComputation::~AOTComputation() {
       .extension_start = nullptr,
       .executable = loaded_executable_};
   try {
-    check_error(api_->PJRT_LoadedExecutable_Destroy(&args));
+    check_error(api()->PJRT_LoadedExecutable_Destroy(&args));
   } catch (const Error& e) {
     std::cerr << "AOTComputation destructor error: " << e.what() << "\n";
   }
@@ -358,7 +440,10 @@ AOTComputation::execute(std::vector<std::shared_ptr<Buffer>> input) {
   PJRT_Buffer** input_rah_rah = input_raw.data();
 
   // execute options
-  const std::array<int64_t, 1> non_donatable_input_indices = {0};
+  // Nothing is donated by this path -- `jax2exec` does not pass
+  // `donate_argnums` -- so there is no need to name individual arguments as
+  // non-donatable.  (The previous fixed `{0}` protected argument 0 only,
+  // regardless of how many arguments the function actually took.)
   PJRT_ExecuteOptions execute_options = {
       .struct_size = sizeof(PJRT_ExecuteOptions),
       .extension_start = nullptr,
@@ -367,8 +452,8 @@ AOTComputation::execute(std::vector<std::shared_ptr<Buffer>> input) {
       .num_send_ops = 0,
       .num_recv_ops = 0,
       .launch_id = 0,  // only one device
-      .non_donatable_input_indices = non_donatable_input_indices.data(),
-      .num_non_donatable_input_indices = non_donatable_input_indices.size(),
+      .non_donatable_input_indices = nullptr,
+      .num_non_donatable_input_indices = 0,
       .context = nullptr};  // nothing fancy here
 
   // execute
@@ -386,7 +471,7 @@ AOTComputation::execute(std::vector<std::shared_ptr<Buffer>> input) {
       .output_lists = &output_buffer_ptr,     // out
       .device_complete_events = &exec_event,  // out
       .execute_device = nullptr};  // execute _only_ on compiled device
-  check_error(api_->PJRT_LoadedExecutable_Execute(&args));
+  check_error(api()->PJRT_LoadedExecutable_Execute(&args));
 
   std::vector<std::shared_ptr<Buffer>> output_buffers(
       this->output_sizes_.size());
@@ -400,7 +485,6 @@ AOTComputation::execute(std::vector<std::shared_ptr<Buffer>> input) {
 
 std::vector<std::shared_ptr<Buffer>> AOTComputation::execute_blocking(
     std::vector<std::shared_ptr<Buffer>> input) {
-  std::flush(std::cout);
   auto [buffers, event] = this->execute(input);
   event->await();
   return buffers;

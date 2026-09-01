@@ -40,15 +40,14 @@
 
 namespace pjrt {
 /**
- * @brief Get and initialize the PJRT api.
- * Should *NOT* be called by the user.
- * The function should only be called once when initializing the global api
- * variable.
+ * @brief Get the initialized PJRT api.
+ *
+ * The plugin is initialized on the first call and never again.  This has to be
+ * a function rather than a namespace-scope variable in this header: a `static`
+ * definition here would give every translation unit its own copy, each
+ * initializing the plugin separately at unordered static-initialization time.
  */
-const PJRT_Api* get_pjrt_api_();
-
-// global api (do not modify)
-static const PJRT_Api* const api_ = get_pjrt_api_();
+const PJRT_Api* api();
 
 /**
  * @brief Error class for PJRT errors.
@@ -82,6 +81,9 @@ class Client {
 
   std::vector<std::shared_ptr<Device>> get_devices() const;
 
+  /// Underlying handle, for code that needs the C API directly.
+  PJRT_Client* raw() const { return client_; }
+
  private:
   PJRT_Client* client_;
 
@@ -96,6 +98,9 @@ class Client {
 class Device {
  public:
   Device(PJRT_Device* device);
+
+  /// Underlying handle, for code that needs the C API directly.
+  PJRT_Device* raw() const { return device_; }
 
   // We don't need a special destructor, I guess...
   // I think that the device is owned by the client, so destroying the client
@@ -139,9 +144,23 @@ class Buffer {
   static std::shared_ptr<Buffer> to_device_blocking(
       const double* data, size_t size, std::shared_ptr<Client> client,
       std::shared_ptr<Device> device);
+  /**
+   * @brief Wrap host memory without copying it.
+   *
+   * The buffer aliases `data`, so `data` must outlive the buffer, must stay
+   * 64-byte aligned, and must not be written while a computation using it is
+   * in flight.  Writing it *between* calls is what makes a persistent input
+   * arena possible.
+   */
+  static std::shared_ptr<Buffer> to_device_zero_copy(
+      const double* data, size_t size, std::shared_ptr<Client> client,
+      std::shared_ptr<Device> device);
   std::shared_ptr<Event> to_host(double* data, size_t size);
   void to_host_blocking(double* data, size_t size);
   std::vector<std::size_t> get_dims() const;
+
+  /// Underlying handle, for code that needs the C API directly.
+  PJRT_Buffer* raw() const { return buffer_; }
 
  private:
   PJRT_Buffer* buffer_;
