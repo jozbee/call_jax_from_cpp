@@ -1,39 +1,63 @@
 [project]
 name = "jax2exec"
-version = "0.1.0"
-description = "Tooling for converting jax functions into serialized executables."
+version = "0.2.0"
+description = "Export JAX functions as serialized PJRT executables for C++ callers."
 readme = "README.md"
 requires-python = ">=3.12"
-license = {file = "LICENSE"}
-authors = [
-  {name = "Brent Koogler", email = "brkhnc@umsystem.edu"},
-]
-keywords = [
-  "jax",
-  "C++",
-  "serialize",
-]
+license = { file = "LICENSE" }
+authors = [{ name = "Brent Koogler", email = "brkhnc@umsystem.edu" }]
+keywords = ["jax", "pjrt", "xla", "c++", "real-time", "serialize"]
 classifiers = [
-  "Development Status :: 1 - Planning",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Topic :: Software Development",
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
+
+# jax and jaxlib must match exactly; see versions.env, which is the single
+# source of truth. tests/python/test_versions.py checks that they agree.
 dependencies = [
-  "jax==0.9.0.1",
+  "jax==0.11.1",
+  "jaxlib==0.11.1",
+  "numpy>=2.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/jozbee/call_jax_from_cpp"
+Documentation = "https://jozbee.github.io/call_jax_from_cpp/"
+Source = "https://github.com/jozbee/call_jax_from_cpp"
+
+[project.optional-dependencies]
+docs = [
+  "sphinx>=8.2,<9",
+  "sphinx-book-theme>=1.4.0",
+  "myst-parser>=4.0",
+  "breathe>=4.36.0",
+  "sphinx-design>=0.6.1",
+  "sphinx-copybutton>=0.5.2",
+  "sphinxcontrib-mermaid>=1.0.0",
+  "sphinx-autobuild>=2024.10.3",
+]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-timeout>=2.3",
+  "ruff>=0.9",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatch.build]
-packages = ["src/jax2exec"]
+[tool.hatch.build.targets.wheel]
+packages = ["python/jax2exec"]
 
 [tool.ruff]
 line-length = 80
+extend-exclude = ["third_party", "docs/_build"]
 
 [tool.pyright]
 typeCheckingMode = "standard"
@@ -41,3 +65,13 @@ reportIncompatibleMethodOverride = false
 reportIncompatibleVariableOverride = false
 reportOptionalMemberAccess = false
 reportAttributeAccessIssue = false
+reportPrivateImportUsage = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "slow: long campaigns and builds; needs --runslow",
+  "rt: real-time statistics gates; only run on a tuned, idle host",
+]
+addopts = "-ra --strict-markers"
+timeout = 1800
