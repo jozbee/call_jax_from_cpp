@@ -1,0 +1,56 @@
+# Doxygen configuration for the C++ headers.
+#
+# This produces XML and nothing else. Breathe reads the XML; Doxygen's own HTML
+# would be a second, worse copy of the same reference pages, so it is off.
+#
+# Run from docs/ (conf.py does exactly that), which is what the relative INPUT
+# and OUTPUT_DIRECTORY below are relative to.
+
+PROJECT_NAME           = pjrt_exec
+PROJECT_BRIEF          = "Load once, call many: JAX executables from C++"
+
+OUTPUT_DIRECTORY       = _build/doxygen
+INPUT                  = ../include/pjrt_exec
+FILE_PATTERNS          = *.hpp
+RECURSIVE              = NO
+
+GENERATE_HTML          = NO
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+
+# The source listing would be duplicated into every XML file and is never
+# rendered: Sphinx links to GitHub for source, not to a Doxygen copy of it.
+XML_PROGRAMLISTING     = NO
+
+# EXTRACT_ALL = NO is the load-bearing setting here. An undocumented public
+# member does not appear in the XML at all, so the doxygenfunction /
+# doxygenclass directive that names it fails to find it and the Sphinx build
+# fails. That is deliberate: it makes an undocumented public entity a build
+# error rather than an empty box on the reference page.
+EXTRACT_ALL            = NO
+HIDE_UNDOC_MEMBERS     = YES
+
+# ...which is also why undocumented members are not warned about here. Breathe
+# is the gate for the public API; a Doxygen warning for every private helper
+# would only drown it out.
+WARN_IF_UNDOCUMENTED   = NO
+
+JAVADOC_AUTOBRIEF      = YES
+BUILTIN_STL_SUPPORT    = YES
+
+# The headers guard the Linux-only real-time helpers behind __linux__, and the
+# reference documents the Linux behaviour.
+#
+# __unix__ is here for alloc_guard.hpp, which selects between the real
+# dlsym-based AllocGuard and an inert stand-in on
+# `defined(__unix__) || defined(__APPLE__)`. Without it Doxygen takes the
+# stand-in branch and the reference page documents a class whose every accessor
+# returns 0 -- which is not the class anyone links against.
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = __linux__=1 \
+                         __unix__=1
+
+QUIET                  = YES
+WARN_AS_ERROR          = FAIL_ON_WARNINGS

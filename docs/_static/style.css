@@ -1,0 +1,111 @@
+/* Restrained additions to sphinx-book-theme: a landing page, and tables of
+ * numbers that line up. Everything else is the theme's.
+ *
+ * Colours are defined once as tokens and overridden as a block under
+ * html[data-theme="dark"], so a new rule inherits the right value in both
+ * themes without repeating a colour literal. */
+
+:root {
+  --cjfc-primary: #0b5fa5;
+  --cjfc-primary-soft: rgba(11, 95, 165, 0.09);
+  --cjfc-accent: #0f7a6c;
+  --cjfc-card-border: rgba(15, 23, 42, 0.12);
+  --cjfc-card-shadow: rgba(15, 23, 42, 0.14);
+  --cjfc-muted: #4b5563;
+}
+
+html[data-theme="dark"] {
+  --cjfc-primary: #6fb3ee;
+  --cjfc-primary-soft: rgba(111, 179, 238, 0.12);
+  --cjfc-accent: #57c2b0;
+  --cjfc-card-border: rgba(226, 232, 240, 0.16);
+  --cjfc-card-shadow: rgba(0, 0, 0, 0.5);
+  --cjfc-muted: #a5adba;
+}
+
+/* -- Hero ---------------------------------------------------------------- */
+
+.hero-tagline {
+  font-size: 1.25rem;
+  line-height: 1.5;
+  font-weight: 400;
+  color: var(--cjfc-muted);
+  max-width: 44rem;
+  margin-bottom: 1.5rem;
+}
+
+.hero-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 2.5rem;
+}
+
+.hero-buttons .sd-btn {
+  font-weight: 600;
+}
+
+/* -- Cards --------------------------------------------------------------- */
+
+/* A small lift on hover, and nothing else: enough to read as clickable
+ * without the page moving around under the cursor. */
+.sd-card {
+  border-color: var(--cjfc-card-border);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out;
+}
+
+.sd-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 14px var(--cjfc-card-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sd-card {
+    transition: none;
+  }
+  .sd-card:hover {
+    transform: none;
+  }
+}
+
+.feature-grid .sd-card-title {
+  font-size: 1.05rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* The octicon in a feature-card title. Colouring the icon rather than the
+ * heading keeps the title the same weight as every other heading on the
+ * site. */
+.feature-grid .sd-card-title svg,
+.feature-grid .sd-card-title .octicon {
+  color: var(--cjfc-accent);
+  fill: currentColor;
+  flex: 0 0 auto;
+}
+
+/* -- Result tables ------------------------------------------------------- */
+
+/* Latency tables are read by comparing columns, so the digits have to line
+ * up: tabular figures, right-aligned, with the row label left-aligned. */
+table.results td,
+table.results th {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+table.results td:first-child,
+table.results th:first-child {
+  text-align: left;
+  font-variant-numeric: normal;
+}
+
+table.results caption {
+  caption-side: bottom;
+  padding-top: 0.5rem;
+  font-size: 0.85rem;
+  color: var(--cjfc-muted);
+  text-align: left;
+}
