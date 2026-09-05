@@ -18,6 +18,7 @@ they should be.
 
 from __future__ import annotations
 
+import json
 import math
 
 import helpers
@@ -176,3 +177,69 @@ def test_long_campaign(
     record_property("p50_us", compute["p50_us"])
     record_property("p999_over_p50", compute["p999_over_p50"])
     record_property("max_over_p50", compute["max_over_p50"])
+
+
+# ------------------------------------------------------------ the gates fire
+#
+# Every other assertion here is that a gate reported success, which is also
+# what a gate that cannot fail reports. `--inject-fault` corrupts exactly one
+# cycle so the gates can be watched failing. Until these existed, deleting
+# either check left the whole suite green.
+
+
+@pytest.mark.parametrize(
+    ("fault", "flipped", "still_ok"),
+    [
+        ("step", "step_counter_ok", "finite_outputs"),
+        ("nonfinite", "finite_outputs", "step_counter_ok"),
+    ],
+)
+def test_an_injected_fault_trips_its_own_gate(
+    build, plugin, artifacts, repo, run, fault, flipped, still_ok
+):
+    """One corrupted cycle must fail the run, and only through its own check."""
+    out = repo.report_dir / f"trajopt_fault_{fault}.json"
+    result = run(
+        [
+            build.bin("example_02_trajopt"),
+            "--iterations",
+            "40",
+            "--warmup",
+            "5",
+            "--inject-fault",
+            fault,
+            "--json",
+            out,
+        ],
+        check=False,
+    )
+
+    assert result.returncode == 2, (
+        f"--inject-fault {fault} must exit 2 (a correctness failure), "
+        f"got {result.returncode}"
+    )
+    checks = json.loads(out.read_text())["checks"]
+    assert checks[flipped] is False, f"{flipped} did not notice the fault"
+    assert checks[still_ok] is True, (
+        f"{still_ok} also failed; the fault is not as targeted as it claims"
+    )
+
+
+def test_no_fault_is_the_default(build, plugin, artifacts, repo, run):
+    """The control for the two above: the same run, uncorrupted, passes."""
+    out = repo.report_dir / "trajopt_fault_none.json"
+    result = run(
+        [
+            build.bin("example_02_trajopt"),
+            "--iterations",
+            "40",
+            "--warmup",
+            "5",
+            "--json",
+            out,
+        ]
+    )
+    assert result.returncode == 0
+    checks = json.loads(out.read_text())["checks"]
+    assert checks["step_counter_ok"] is True
+    assert checks["finite_outputs"] is True

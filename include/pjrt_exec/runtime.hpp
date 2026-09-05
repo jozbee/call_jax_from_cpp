@@ -20,7 +20,7 @@
  *
  * A call is then: execute, one await, and one `memcpy` per output read straight
  * out of device memory.  Nothing on that path allocates, locks, logs or
- * flushes.  (Roughly 15,400 allocations per call still happen inside XLA's
+ * flushes.  (thousands of allocations per call still happen inside XLA's
  * thunk runtime, about one per StableHLO op.  Those are not reachable from
  * here; the ones this wrapper used to add are gone.)
  *
@@ -284,6 +284,11 @@ class Runtime {
   /// `allow_async_fallback` permits it.
   void create_client();
 
+  /// Destroy the client if one exists, swallowing any error. Shared by the
+  /// destructor and by the constructor's failure path, which has no
+  /// destructor to fall back on.
+  void destroy_client() noexcept;
+
   RuntimeOptions options_;
   void* dl_handle_ = nullptr;
   const PJRT_Api* api_ = nullptr;
@@ -339,9 +344,13 @@ struct ArraySpec {
   /// per-call `memcpy`.
   std::size_t nbytes = 0;
 
-  /// Whether the export donated this argument, from the sidecar's
-  /// `donate_argnums`.  A donated input's buffer is consumed by the execution,
-  /// so persistent zero-copy inputs and donation are mutually exclusive.
+  /// Whether the export asked for this argument to be donated.
+  ///
+  /// Reporting only. The runtime pins every input as non-donatable regardless,
+  /// because a donated buffer is consumed by the execution it is passed to and
+  /// these buffers are created once and reused by every call. Honouring
+  /// donation would mean rebuilding input buffers per call, which is the
+  /// per-call allocation this API exists to avoid.
   bool donated = false;
 };
 
@@ -652,10 +661,10 @@ class Function {
 
   // Inputs XLA must not donate, pointed at by
   // `execute_options_.non_donatable_input_indices` for the life of the
-  // `Function`.  Every input the sidecar does not mark donated belongs here:
-  // the buffers are created once and reused, so a donation triggered by a
-  // may-alias in the compiled program would destroy a buffer the next call
-  // still needs.
+  // `Function`.  EVERY input belongs here, donated or not: the buffers are
+  // created once and reused, so any donation -- asked for by the export or
+  // inferred by the compiler from a may-alias -- would destroy a buffer the
+  // next call still needs.
   std::vector<std::int64_t> non_donatable_;
 
   // Filled in at load and reused unchanged by every call.  Value-initialized

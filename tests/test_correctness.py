@@ -17,7 +17,10 @@ promised.
 
 from __future__ import annotations
 
+import json
 import re
+import struct
+from pathlib import Path
 
 import helpers
 import pytest
@@ -177,3 +180,119 @@ def test_timed_run_is_within_tolerance(timed_run, tolerance):
     assert correctness["nan_count"] == 0
     assert correctness["exact_mismatches"] == 0
     assert correctness["max_rel_err"] <= tolerance
+
+
+# --------------------------------------------------------------- negative controls
+#
+# The tests above all assert that the comparison REPORTED agreement, which is
+# exactly what a comparator that never compares anything would print. These two
+# damage a reference case on purpose and require the sweep to notice. Without
+# them, `Fixture::compare` could be replaced by `return {.ok = true}` and the
+# whole suite would stay green -- which was true until these were written.
+
+
+def _corrupt_case_output(base: Path, *, nan: bool) -> None:
+    """Damage the first case's output region in a copied fixture.
+
+    The `.bin` layout is every input then every output, in call order, with no
+    header, so the outputs start after the summed input bytes.
+    """
+    manifest = json.loads((base.parent / f"{base.name}_cases.json").read_text())
+    itemsize = {
+        "float64": 8,
+        "float32": 4,
+        "int32": 4,
+        "int64": 8,
+        "bool": 1,
+        "int8": 1,
+        "int16": 2,
+        "uint8": 1,
+        "uint16": 2,
+        "uint32": 4,
+        "uint64": 8,
+    }
+    offset = 0
+    for spec in manifest["inputs"]:
+        numel = 1
+        for extent in spec["shape"]:
+            numel *= extent
+        offset += numel * itemsize[spec["dtype"]]
+
+    case = base.parent / manifest["cases"][0]
+    raw = bytearray(case.read_bytes())
+    assert manifest["outputs"][0]["dtype"] == "float64", "adjust for the dtype"
+    poison = struct.pack("<d", float("nan") if nan else 1.0e9)
+    raw[offset : offset + 8] = poison
+    case.write_bytes(bytes(raw))
+
+
+@pytest.mark.parametrize("nan", [False, True], ids=["wrong-value", "nan"])
+def test_a_damaged_reference_case_is_caught(
+    build, plugin, artifacts, tmp_artifacts, run, nan
+):
+    """A corrupted output must fail the sweep, not pass it quietly."""
+    base = tmp_artifacts.copy("trajopt")
+    _corrupt_case_output(base, nan=nan)
+
+    result = run(
+        [
+            build.bin("bench"),
+            "--all-cases",
+            "--fixture",
+            "trajopt",
+            "--assets-dir",
+            base.parent,
+            "--artifacts-dir",
+            base.parent,
+        ],
+        check=False,
+    )
+
+    assert result.returncode != 0, (
+        "bench reported agreement against a case whose output was corrupted; "
+        "the comparison is not looking at the data"
+    )
+    assert "FAIL" in result.stdout or "disagree" in result.stdout.lower()
+    if nan:
+        assert "nan" in result.stdout.lower()
+
+
+def test_a_fixture_wider_than_the_artifact_is_refused(
+    build, plugin, artifacts, tmp_artifacts, run
+):
+    """A manifest declaring a larger output than the artifact produces.
+
+    The comparison reads `numel` elements straight out of the arenas the
+    `Function` owns, so a manifest that overstates an output used to read past
+    the end of one. `--assets-dir` and `--artifacts-dir` are separate options,
+    so pairing a manifest with a different export takes one wrong flag.
+    """
+    base = tmp_artifacts.copy("trajopt")
+    manifest_path = base.parent / f"{base.name}_cases.json"
+    manifest = json.loads(manifest_path.read_text())
+    first = manifest["outputs"][0]
+    assert first["shape"][0] == 50, "the fixture changed; update this test"
+    first["shape"] = [60, first["shape"][1]]
+    manifest_path.write_text(json.dumps(manifest, indent=2))
+    # Pad the cases so the total-length check cannot catch it first.
+    for case in sorted(base.parent.glob(f"{base.name}_case*.bin")):
+        case.write_bytes(case.read_bytes() + b"\0" * (10 * 6 * 8))
+
+    result = run(
+        [
+            build.bin("bench"),
+            "--all-cases",
+            "--fixture",
+            "trajopt",
+            "--assets-dir",
+            base.parent,
+            "--artifacts-dir",
+            base.parent,
+        ],
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "different exports" in (result.stdout + result.stderr), (
+        "the mismatch must be named, not read past"
+    )

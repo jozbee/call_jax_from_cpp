@@ -997,6 +997,16 @@ class TmpArtifacts:
                 f"(found {copied or 'nothing'}); the `artifacts` fixture "
                 "exports one"
             )
+
+        # The reference cases travel with the artifact when there are any, so a
+        # test can damage a case without touching the originals every later
+        # test reads.
+        manifest = self._source / f"{name}_cases.json"
+        if manifest.is_file():
+            shutil.copy2(manifest, into / manifest.name)
+            for case in sorted(self._source.glob(f"{name}_case*.bin")):
+                shutil.copy2(case, into / case.name)
+
         return into / name
 
     def sidecar(self, base: Path) -> dict[str, Any]:

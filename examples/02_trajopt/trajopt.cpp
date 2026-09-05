@@ -43,6 +43,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <limits>
 #include <exception>
 #include <stdexcept>
 #include <string>
@@ -74,6 +75,8 @@ constexpr char kUsage[] =
     "  --json PATH       write the report as JSON as well as printing it\n"
     "  --samples PATH    write every raw sample as index,ns\n"
     "  --no-check        skip the per-call finite-output audit\n"
+    "  --inject-fault K  corrupt one cycle so a gate can be seen to fire:\n"
+    "                    none (default), step, nonfinite\n"
     "  --alloc-gate G    off, self or all; exit 3 when it fails (default off)\n"
     "  --require-guard   exit 4 when malloc_guard.so was not preloaded\n"
     "  --quiet           print nothing on success\n"
@@ -146,7 +149,7 @@ int run(int argc, char** argv) {
   cjfc::Cli cli(argc, argv,
                 {"artifact", "iterations", "warmup", "threads", "async",
                  "json", "samples", "no-check", "alloc-gate", "require-guard",
-                 "quiet"},
+                 "quiet", "inject-fault"},
                 kUsage);
   if (cli.help()) {
     return cjfc::kExitOk;
@@ -163,6 +166,14 @@ int run(int argc, char** argv) {
   const std::string gate = cli.get("alloc-gate", "off");
   const bool require_guard = cli.flag("require-guard");
   const bool quiet = cli.flag("quiet");
+  const std::string inject_fault = cli.get("inject-fault", "none");
+  if (inject_fault != "none" && inject_fault != "step" &&
+      inject_fault != "nonfinite") {
+    std::fprintf(stderr,
+                 "unknown --inject-fault '%s' (none, step or nonfinite)\n",
+                 inject_fault.c_str());
+    return cjfc::kExitError;
+  }
 
   // Refused rather than ignored: a gate nobody spelled correctly is a gate
   // that passes everything, which is the failure this project takes least
@@ -224,9 +235,29 @@ int run(int argc, char** argv) {
   // later.  The step check is one integer comparison and always runs;
   // --no-check drops only the value audit, which is the part that walks every
   // element of every float arena.
+  // --inject-fault corrupts exactly one cycle so that a test can watch a gate
+  // fire. A correctness gate nobody has seen fail is not evidence that the
+  // thing it guards is right; it is only evidence that the gate is quiet, and
+  // those two look identical from outside. Both faults are applied after the
+  // call and before the check, which is where a real one would appear.
+  const std::int64_t fault_cycle = 1;
   const auto finish_cycle = [&](std::int64_t k) {
     if (!cjfc::feedback(function, dims, k)) {
       ++step_errors;
+    }
+    if (inject_fault == "step" && k == fault_cycle) {
+      // Desynchronise the recirculated counter: the next cycle's check sees a
+      // step that does not follow from the last one.
+      *function.input<std::int32_t>(cjfc::kInStep) += 1;
+    }
+    if (inject_fault == "nonfinite" && k == fault_cycle && !audited.empty()) {
+      // The audit reads the output arenas, which the API hands out const
+      // because a caller has no business writing them. Writing one here is the
+      // whole point of the fault, so the cast is deliberate and confined to
+      // this branch.
+      auto* poisoned =
+          static_cast<double*>(const_cast<void*>(audited.front().data));
+      poisoned[0] = std::numeric_limits<double>::quiet_NaN();
     }
     if (audit_values && !all_finite(audited)) {
       finite_outputs = false;

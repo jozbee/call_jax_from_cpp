@@ -688,10 +688,23 @@ Runtime::Runtime(const RuntimeOptions& options) : options_(options) {
   // Before the client, not after: the attributes decide which create options
   // are safe to send, and sending an unknown one is now fatal.
   query_attributes();
-  create_client();
+
+  // A constructor that throws gets no destructor, so anything already acquired
+  // has to be released here. Creating a client starts XLA's thread pools, and
+  // `create_client()` can still throw after it succeeds -- on a device count
+  // of zero, for one -- so without this a caller probing plugin paths or
+  // option combinations and catching the failure accumulates two threads and
+  // several megabytes per attempt. The plugin handle is deliberately not
+  // closed: XLA keeps process-lifetime statics behind it.
+  try {
+    create_client();
+  } catch (...) {
+    destroy_client();
+    throw;
+  }
 }
 
-Runtime::~Runtime() {
+void Runtime::destroy_client() noexcept {
   if (client_ == nullptr) {
     return;
   }
@@ -700,6 +713,11 @@ Runtime::~Runtime() {
   args.client = client_;
   destroy_error(api_, api_->PJRT_Client_Destroy(&args));
   client_ = nullptr;
+  device_ = nullptr;
+}
+
+Runtime::~Runtime() {
+  destroy_client();
 
   // `dl_handle_` is deliberately never closed.  XLA leaves statics behind the
   // plugin boundary that live as long as the process -- LLVM's target
@@ -1166,16 +1184,24 @@ Function::Function(Runtime& runtime, const std::string& base_path,
     wrap_inputs();
     output_buffers_.assign(outputs_.size(), nullptr);
 
-    // Every input that the export did not donate is pinned here for the life
-    // of the `Function`.  The buffers are created once and reused, so a
-    // donation the compiler inferred from a may-alias would destroy a buffer
-    // the next call still needs -- and the failure would be a use-after-free
-    // inside XLA, not a diagnostic.
+    // EVERY input is pinned for the life of the `Function`, including any the
+    // export marked as donated.
+    //
+    // Donation and this design are incompatible, not merely unimplemented.
+    // The input buffers are created once in `wrap_inputs()` and reused by
+    // every call; a donated buffer is consumed by the execution it is passed
+    // to, so the second call would hand XLA a buffer that has already been
+    // taken and fail with "Buffer has been deleted or donated" -- after the
+    // first call has already succeeded, which makes it look like corruption
+    // rather than a configuration error.
+    //
+    // So `ArraySpec::donated` is reporting only: it says what the export
+    // asked for, and this says what the runtime does about it. Exploiting
+    // donation would mean recreating input buffers per call, which is the
+    // per-call allocation this whole path exists to avoid.
     non_donatable_.reserve(inputs_.size());
     for (std::size_t i = 0; i < inputs_.size(); ++i) {
-      if (!inputs_[i].donated) {
-        non_donatable_.push_back(static_cast<std::int64_t>(i));
-      }
+      non_donatable_.push_back(static_cast<std::int64_t>(i));
     }
     execute_options_.struct_size = PJRT_ExecuteOptions_STRUCT_SIZE;
     execute_options_.non_donatable_input_indices =
@@ -1275,20 +1301,13 @@ void Function::load_sidecar(const std::string& base_path) {
                                        /*wants_donation=*/false));
       }
 
-      // `donate_argnums` is the export-time truth; the per-input `donated`
-      // flag is a convenience the exporter writes from it.  Honour both, so a
-      // hand-edited sidecar that sets only one still marks the right inputs.
-      if (sidecar.contains("donation") &&
-          sidecar["donation"].contains("donate_argnums")) {
-        for (const nlohmann::json& index :
-             sidecar["donation"]["donate_argnums"]) {
-          const std::int64_t argnum = index.get<std::int64_t>();
-          if (argnum >= 0 &&
-              static_cast<std::size_t>(argnum) < inputs_.size()) {
-            inputs_[static_cast<std::size_t>(argnum)].donated = true;
-          }
-        }
-      }
+      // `donation.donate_argnums` is deliberately NOT merged into the
+      // per-input flags. It indexes the positional arguments handed to
+      // `jax.jit`, while `inputs_` indexes flattened pytree leaves, so one
+      // container argument before a donated one shifts every index and the
+      // merge would mark the wrong input. The per-input `donated` flag is
+      // already in leaf space, which is this loader's space, so it is the only
+      // one read here. `donate_argnums` is kept in the sidecar for the reader.
     } else {
       name_ = paths.stem;
       if (!sidecar.contains("args_info") || !sidecar.contains("out_info")) {

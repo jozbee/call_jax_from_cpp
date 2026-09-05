@@ -238,9 +238,10 @@ class Fixture {
    *
    * Called from inside the timed region on purpose.  Every check it makes is
    * an integer comparison against values resolved at load: the dtype and byte
-   * count of each input, re-checked every call because getting them wrong is a
-   * write past the end of an arena, and a fixture regenerated for a different
-   * signature is exactly how that happens.
+   * count of each array, re-checked every call because getting them wrong is a
+   * write past the end of an input arena or a read past the end of an output
+   * one, and a fixture regenerated for a different signature is exactly how
+   * that happens.
    *
    * @throws std::runtime_error when the function and the manifest disagree, or
    *         when @p case_index is out of range.
@@ -257,6 +258,23 @@ class Fixture {
       }
       std::memcpy(function.input_raw(i), reference.inputs[i].data(),
                   inputs_[i].nbytes);
+    }
+
+    // Outputs are checked here too, even though nothing is written to them,
+    // because `compare()` reads `numel` elements straight out of the pointers
+    // the caller hands it. Those come from the `Function`'s arenas, sized from
+    // the artifact; if the manifest declares a larger array than the artifact
+    // produces, the comparison reads past the end. The two are separate
+    // command-line options (`--assets-dir` and `--artifacts-dir`), so one
+    // wrong flag is enough to pair a manifest with a different export.
+    if (function.num_outputs() != outputs_.size()) {
+      mismatched_arity(function);
+    }
+    for (std::size_t i = 0; i < outputs_.size(); ++i) {
+      if (function.output_dtype(i) != output_types_[i] ||
+          function.output_nbytes(i) != outputs_[i].nbytes) {
+        mismatched_output(i, function);
+      }
     }
   }
 
@@ -498,6 +516,21 @@ class Fixture {
         function.name() + "' declares " +
         pjrt::dtype_name(function.input_dtype(i)) + " of " +
         std::to_string(function.input_nbytes(i)) +
+        " bytes; the fixture and the artifact came from different exports");
+  }
+
+  /// The same for an output, whose mismatch is a read past the end of an arena
+  /// rather than a write past it, and so is quieter and worth naming exactly.
+  [[noreturn]] void mismatched_output(std::size_t i,
+                                      const pjrt::Function& function) const {
+    const ArraySpec& spec = outputs_[i];
+    throw std::runtime_error(
+        manifest_path_ + " describes output " + std::to_string(i) + " ('" +
+        spec.name + "') as " + spec.dtype + " of " +
+        std::to_string(spec.nbytes) + " bytes but function '" +
+        function.name() + "' declares " +
+        pjrt::dtype_name(function.output_dtype(i)) + " of " +
+        std::to_string(function.output_nbytes(i)) +
         " bytes; the fixture and the artifact came from different exports");
   }
 
