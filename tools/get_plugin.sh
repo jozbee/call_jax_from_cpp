@@ -86,7 +86,7 @@ Options:
      or, with bazel on this machine:
        make plugin-source
   2. Publish the asset for this platform:
-       tools/release_plugin.sh --version \${JAX_VERSION}
+       tools/release_plugin.sh --version jax-v${JAX_VERSION:-<version>}
   3. Point the runtime at a plugin you already have:
        export PJRT_CPU_PLUGIN=/path/to/libpjrt_c_api_cpu_plugin.so
      A stock (unpatched) plugin works, but jnp.linalg.* executables will fail

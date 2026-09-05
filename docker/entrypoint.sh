@@ -20,4 +20,13 @@ if [[ -f /workspace/pyproject.toml ]]; then
   fi
 fi
 
+# The image sets PJRT_CPU_PLUGIN unconditionally, but the plugin is only baked
+# in when the image was built with PLUGIN_SOURCE=prebuilt or source. Pointing
+# the runtime at a file that is not there would mask a perfectly good plugin in
+# the bind-mounted workspace, because the environment variable outranks the
+# path compiled into the binary.
+if [[ -n "${PJRT_CPU_PLUGIN:-}" && ! -f "${PJRT_CPU_PLUGIN}" ]]; then
+  unset PJRT_CPU_PLUGIN
+fi
+
 exec "$@"
