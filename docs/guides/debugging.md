@@ -54,6 +54,7 @@ Angle brackets stand for whatever the message interpolates.
 | `Function '<name>'::call() re-entered` | `std::logic_error` **(debug)** | `call()` entered from inside a call — a signal handler, or a callback. | Do not call from a signal handler. |
 | `input <i> ('<name>') element <k> is nan` (or `inf`, `-inf`) | `std::domain_error`, `check_values` only | A non-finite value going in or coming out, named down to the element. | Look at what wrote that element; the check runs before *and* after the call so the caller and the computation can be told apart. |
 | `output <i> ('<name>') element <k> is <v>, bool arenas must hold 0 or 1` | `std::domain_error`, `check_values` only | A `PRED` byte that is neither 0 nor 1. | See below — this is not pedantry. |
+| *(no message; `load_kind()` reports `compiled` for an artifact exported on this machine)* | not an error | The `.binpb` did not deserialize and the `.mlirbc` was compiled instead. Usually the IFRT envelope jaxlib wraps the executable in changed shape and the exporter's unwrap no longer recognises it, so the written bytes are not what PJRT expects. Correct answers, a slower load, and no ahead-of-time compilation. | Check `artifacts.executable_source` in the sidecar and read `load_detail()`, which names the deserialize failure. See [Bumping JAX](../developer/bumping-jax.md). |
 
 ## The debug-only rows
 

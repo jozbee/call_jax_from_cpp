@@ -238,6 +238,49 @@ serialize call, and fix it in `python/jax2exec/export.py` rather than pinning
 around it. If `jax.export` has grown a supported public route to the same
 bytes, prefer it and note the change in the changelog.
 
+### The envelope check, which is the part that fails quietly
+
+This step has a second half that is easy to skip and expensive to miss.
+
+jaxlib does not hand out PJRT bytes. Since its client moved onto IFRT, both
+`client.serialize_executable(loaded)` and `loaded.serialize()` return the same
+thing: an IFRT envelope wrapping the payload the PJRT C API actually wants.
+Handing that to `PJRT_Executable_DeserializeAndLoad` fails with
+
+```
+PjRtCpuClient::DeserializeExecutable proto deserialization failed
+```
+
+The layout is `varint(header_length) || header_proto || pjrt_payload`, where the
+header names the format (`pjrt_ifrt`) and carries device and sharding
+information, and the payload is byte-for-byte the `ExecutableAndOptionsProto`.
+{mod}`jax2exec._ifrt` strips it, recognising the envelope by walking the
+header's protobuf fields rather than matching bytes, and passing anything it
+does not recognise through untouched.
+
+What makes this worth a checklist entry is the failure mode. Nothing crashes.
+The loader falls back to compiling the `.mlirbc`, so the answers stay correct
+and the tests stay green — you simply lose ahead-of-time loading, and pay a
+compile at every startup, without being told.
+
+**Verify.**
+
+```console
+$ uv run python -c "import json;print(json.load(open('artifacts/basic.json'))['artifacts']['executable_source'])"
+ifrt-unwrapped
+$ build/bin/example_01_basic | grep load_kind
+load_kind=deserialized
+```
+
+→ expected: an `executable_source` of `ifrt-unwrapped` or `as-is`, and a
+`load_kind` of **`deserialized`**. A `load_kind` of `compiled` here means the
+envelope changed shape and the unwrap no longer recognises it.
+
+**If it fails.** Dump the first bytes of the artifact and compare them with the
+format above. A payload begins with tag `0x0a`, field 1 of
+`ExecutableAndOptionsProto`. Teach `_ifrt.py` the new shape; do not disable the
+check, and do not accept the compile fallback as normal — it is the symptom.
+
 ## Step 13 — Re-export every artifact on the target machine
 
 **Do.** `make export`, and regenerate the reference cases, **on the machine that

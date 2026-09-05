@@ -43,6 +43,7 @@ holding on to while reading the rest of this page.
   "artifacts": {
     "executable": "trajopt.binpb",
     "executable_sha256": "9f2c1d0b8a7e6f5d4c3b2a1908f7e6d5c4b3a2918077665544332211aabbccdd",
+    "executable_source": "ifrt-unwrapped",
     "mlir": "trajopt.mlirbc",
     "mlir_sha256": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
     "stablehlo_calling_convention_version": 9
@@ -77,6 +78,7 @@ holding on to while reading the rest of this page.
 | `export.host.python`, `.cpu_model` | string | Diagnostic context for a load that fails somewhere else. |
 | `export.xla_flags` | string | `$XLA_FLAGS` as it was during the export, verbatim. |
 | `artifacts.executable`, `.executable_sha256` | string | File name and digest of the `.binpb`. |
+| `artifacts.executable_source` | string | How the PJRT bytes were got out of jaxlib: `ifrt-unwrapped` when an IFRT envelope was removed, `as-is` when jaxlib already returned plain PJRT bytes. See below. |
 | `artifacts.mlir`, `.mlir_sha256` | string | The same for the `.mlirbc`. **Both keys are omitted entirely** rather than written as `null` when no bytecode was written, so presence alone tests for the fallback. |
 | `artifacts.stablehlo_calling_convention_version` | int | `jax.export`'s calling convention version for that bytecode. |
 | `inputs`, `outputs` | array | One entry per array, in executable order. |
@@ -154,3 +156,24 @@ with a size of 0 meaning a scalar, and carried no names. Both the loader and
 `check` widen it to the same view: names become `arg<i>` and `out<i>`, a size of
 0 becomes an empty shape with `numel` 1, and everything else follows from the
 dtype. Version 1 artifacts still load, and nothing else about them is inferred.
+
+## Why `executable_source` exists
+
+jaxlib does not return PJRT bytes. Since its client moved onto IFRT,
+`serialize_executable` returns an envelope wrapping the payload the PJRT C API
+wants, and the exporter strips it before writing the `.binpb`. This field
+records which happened.
+
+It is recorded because the failure it guards against is silent. If a future
+jaxlib changes the envelope and the unwrap stops recognising it, the written
+artifact will not deserialize, the loader will fall back to compiling the
+`.mlirbc`, and everything will keep working — correct answers, green tests, and
+a compile on every startup where there used to be none. Nothing announces that
+ahead-of-time loading has been lost.
+
+So the pair worth checking after any JAX bump is this field and
+{cpp:func}`pjrt::Function::load_kind`: an `executable_source` that is
+`ifrt-unwrapped` or `as-is`, together with a `load_kind` of `deserialized`,
+means the ahead-of-time path is intact. `load_kind` reporting `compiled` for an
+artifact exported on the same machine is the symptom to chase, and
+{doc}`/developer/bumping-jax` says how.
