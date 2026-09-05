@@ -200,7 +200,7 @@ default `fastbuild` moved p50 by 0.2% — 4718.7 µs against 4728.4 µs. The com
 kernels were LLVM-compiled at export time and embedded in the artifact; the
 plugin only orchestrates. Do not spend effort on plugin build flags.
 
-**Roughly 15,400 allocations happen per call inside XLA's thunk runtime**, about
+**Roughly thousands of allocations happen per call inside XLA's thunk runtime**, about
 one per StableHLO op. Only ~520 were ever the wrapper's own, and those are gone.
 Reaching the rest means a pooling allocator behind `CpuClientOptions::allocator`
 — which the PJRT C API does not expose, so it would be a third patch on the XLA

@@ -272,7 +272,7 @@ the device, query a shape, or grow a vector. All of those were in the older
 per-call-buffer path, and removing them is where the tail improvement came
 from.
 
-What it cannot do anything about: roughly **15,400 allocations per call inside
+What it cannot do anything about: roughly **thousands of allocations per call inside
 XLA's thunk runtime**, about one per StableHLO op. Those happen behind the
 plugin's C API boundary and are not reachable from here. The number that must
 stay at zero is the wrapper's own, and that is what the allocation census

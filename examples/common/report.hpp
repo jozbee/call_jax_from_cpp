@@ -358,7 +358,7 @@ inline void write_json(const std::string& path, const json& report) {
  *
  * @param gate          `"self"` gates on the wrapper's own allocations, which
  *                      is the number that must be zero; `"all"` gates on every
- *                      allocation in the armed window, including the ~15,400
+ *                      allocation in the armed window, including the thousands per call
  *                      per call inside XLA's thunk runtime, so it only makes
  *                      sense for a run that calls nothing.  Anything else
  *                      (`"none"`) gates on nothing.

@@ -43,8 +43,9 @@ it: load once, call many.
 in the original wrapper and all four are gone. `make test-alloc` enforces it
 with a preloaded allocator interposer, and the number that must stay at zero is
 the wrapper's own allocations — not the process's. XLA's thunk runtime still
-allocates ~15,400 times per call inside the plugin, roughly one per StableHLO
-op, and that is not reachable through the PJRT C API.
+allocates thousands of times per call inside the plugin -- about one and a half
+per StableHLO op, so it scales with the program -- and that is not reachable
+through the PJRT C API.
 
 **Artifacts are architecture-locked.** A `.binpb` embeds machine code;
 `LoadSerializedExecutable` relinks it and never recompiles. Answer a load

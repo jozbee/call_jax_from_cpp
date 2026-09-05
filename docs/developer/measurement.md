@@ -150,7 +150,7 @@ Two more gates worth running before believing anything:
 
 - `make test-alloc` counts allocations in the steady-state call path with a
   preloaded interposer. The number that must be zero is the wrapper's own; XLA's
-  thunk runtime allocates roughly 15,400 times per call inside the plugin, and
+  thunk runtime allocates thousands of times per call inside the plugin, and
   that is not reachable from here. See
   [runtime internals](runtime-internals.md).
 - `python -m jax2exec check <base>` describes an artifact set and says whether

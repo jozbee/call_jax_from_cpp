@@ -223,7 +223,8 @@ thousand allocations.
 ### Why allocations are classified by calling module
 
 A whole-process "zero allocations" gate is not achievable here. **XLA's thunk
-runtime allocates roughly 15,400 times per call**, about one per StableHLO op,
+runtime allocates thousands of times per call** -- 9,750 for the `02_trajopt`
+example, about one and a half per StableHLO op, so it scales with the program --
 inside the plugin, through an allocator the PJRT C API does not expose. What
 *is* checkable is that this project adds none of its own, so every allocation
 made while armed is attributed to the module containing its return address:
@@ -231,7 +232,7 @@ made while armed is attributed to the module containing its return address:
 | Class | Covers | Gate |
 |---|---|---|
 | `allocs_self()` | The main executable and `libpjrt_exec` | **must be zero** |
-| `allocs_plugin()` | Inside `libpjrt_c_api_cpu_plugin` | reported, ~15,400/call |
+| `allocs_plugin()` | Inside `libpjrt_c_api_cpu_plugin` | reported, 9,750/call for `02_trajopt` |
 | `allocs_runtime()` | libc, libstdc++, LAPACK, the thread pool | reported |
 
 The C++ `operator new` family is interposed too, under its Itanium-mangled
@@ -248,6 +249,6 @@ Classification is ELF-only. On macOS the totals are still correct and
 `classified()` reports false.
 
 So the honest claim is not "this allocates nothing". It is **"the wrapper
-allocates nothing in the steady state, and roughly 15,400 allocations per call
+allocates nothing in the steady state, and thousands of allocations per call
 remain inside XLA, which is the next place to look"**. See
 {doc}`../developer/open-threads`.

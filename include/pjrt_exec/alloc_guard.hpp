@@ -17,7 +17,7 @@
  * @endcode
  *
  * A whole-process "zero allocations" gate is not achievable here -- XLA's thunk
- * runtime allocates roughly 15,400 times per call, inside the plugin, and that
+ * runtime allocates thousands of times per call, inside the plugin, and that
  * is not reachable through the PJRT C API.  So each allocation made while armed
  * is attributed to the module it came from, and the number that must stay at
  * zero is `allocs_self()`: the wrapper's own allocations in the steady-state

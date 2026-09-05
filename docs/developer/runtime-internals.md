@@ -64,7 +64,7 @@ seconds at load rather than milliseconds. `Function::load_kind()` reports which
 route ran, and a deployment that cannot afford a surprise multi-second load
 should ask for `LoadPolicy::BinaryOnly` and get a `LoadError` instead.
 
-### Roughly 15,400 allocations per call happen inside XLA
+### thousands of allocations per call happen inside XLA
 
 That is about one per StableHLO op, in XLA's thunk runtime, entirely inside the
 plugin. Only ~520 allocations per call were ever attributable to this wrapper,

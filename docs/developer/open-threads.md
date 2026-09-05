@@ -39,7 +39,7 @@ removed regardless — it was a guess about one caller's arguments.
 
 ### The pooling-allocator fork patch
 
-Roughly 15,400 allocations happen per call inside XLA's thunk runtime, about one
+Roughly thousands of allocations happen per call inside XLA's thunk runtime, about one
 per StableHLO op. That is the last known structural jitter surface, and it is
 not reachable through the PJRT C API: it would take a third fork patch
 installing a pooling allocator behind `CpuClientOptions::allocator`. See

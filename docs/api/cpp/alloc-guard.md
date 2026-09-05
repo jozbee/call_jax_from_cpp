@@ -16,7 +16,7 @@ count believable, because thousands there with zero while armed means the path
 is clean, while zero there means the preload never took effect at all.
 
 Be exact about what the gate is. A whole-process "zero allocations" claim is
-not achievable here: XLA's thunk runtime allocates roughly **15,400 times per
+not achievable here: XLA's thunk runtime allocates roughly **thousands per call times per
 call**, inside the plugin, roughly one per StableHLO op, and none of that is
 reachable through the PJRT C API. So each allocation made while armed is
 attributed to the module it came from, and the number that must stay at zero is

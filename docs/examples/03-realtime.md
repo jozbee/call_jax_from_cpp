@@ -106,7 +106,7 @@ sample is representable rather than clamped or lost.
 | deadline misses | cycles whose work did not finish before the next period | one is a bug in the period; many are a bug in the workload |
 | page faults | minor and major faults during the timed window | anything nonzero means `lock_memory` did not take effect, or the warm-up was too short |
 | context switches | voluntary and involuntary | involuntary switches on a pinned `SCHED_FIFO` thread mean something else wants that core |
-| allocations | the armed census, per call | `self` **must be zero**; `plugin` will be roughly 15,400, which is XLA's thunk runtime and not reachable from here |
+| allocations | the armed census, per call | `self` **must be zero**; `plugin` will be thousands per call (9,750 for this workload), which is XLA's thunk runtime and not reachable from here |
 
 One honest limitation belongs on the same page as the deadline column: **PJRT
 cannot cancel a running CPU computation.** A watchdog can return a stale result

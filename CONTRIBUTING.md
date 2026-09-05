@@ -61,7 +61,7 @@ make test-alloc    # the zero-wrapper-allocations gate
 `make test-alloc` is the one to run for any change to the call path. It
 preloads an allocator interposer and gates on the wrapper's own allocations
 being zero. It is not a whole-process claim: XLA's thunk runtime allocates
-~15,400 times per call inside the plugin, which is not reachable through the
+thousands of times per call inside the plugin, which is not reachable through the
 PJRT C API, and the census reports that number rather than hiding it.
 
 ## Changing the call path

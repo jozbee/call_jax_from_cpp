@@ -135,7 +135,7 @@ been tried.
 ## A candidate third patch, not yet justified
 
 A pooling allocator installed behind `CpuClientOptions::allocator` — also
-unreachable through the C API — would address the ~15,400 allocations per call
+unreachable through the C API — would address the thousands of allocations per call
 inside XLA's thunk runtime, which is the last known structural jitter surface.
 
 It is gated on evidence, deliberately. Build it when a measurement on real

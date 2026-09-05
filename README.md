@@ -85,7 +85,7 @@ carries the method, the caveats and the sign-off targets.
   arena is not the caller's pointer.
 - **An allocation-free call path, enforced by a test.** `make test-alloc`
   preloads an allocator interposer and gates on zero *wrapper* allocations per
-  call. XLA's thunk runtime still allocates ~15,400 times per call inside the
+  call. XLA's thunk runtime still allocates thousands of times per call inside the
   plugin, unreachable through the PJRT C API; that number is reported, not hidden.
 - **Dtype-generic and rank-general**: `bool`, every integer width, `float32` and
   `float64`, at any rank, through `input<T>(i)` / `output<T>(i)`, plus an opt-in
