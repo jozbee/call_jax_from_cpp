@@ -1,4 +1,7 @@
 [submodule "third_party/xla"]
 	path = third_party/xla
 	url = https://github.com/jozbee/xla.git
-	branch = call_jax_from_cpp-lapack
+	branch = cjfc/jax-v0.11.1
+	# Shallow: only the tip is needed to build the plugin, and a full XLA
+	# history is a large clone for something most users never initialise.
+	shallow = true
