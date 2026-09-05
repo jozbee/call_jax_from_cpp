@@ -1,13 +1,43 @@
 #!/usr/bin/env bash
-
+#
 # Audit the host settings that decide whether a bounded computation actually
 # finishes on time.  Read-only: it reports, it does not change anything.
 #
 # Run this before trusting any latency number from a machine, and keep the
 # output next to the numbers -- "p99.9 was 4.8 ms" means little without knowing
 # whether the governor was on `powersave` at the time.
+#
+# Usage:
+#   tools/rt_check.sh [--quiet]
+#
+#   --quiet  print only the summary line (for use in a report header).
+#
+# Exit status is non-zero when anything is worth fixing, so this can gate a
+# measurement run.  The output is grouped into greppable sections: cpu, kernel,
+# isolation, memory, process limits, container.
 
-set -uo pipefail
+set -euo pipefail
+
+QUIET=0
+
+# The header comment is the help text, and stopping at the first non-comment
+# line means there is no line range to keep in step with edits.
+usage() { awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; }
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -q|--quiet) QUIET=1; shift ;;
+    -h|--help)  usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+# The detail goes to stdout and the one-line verdict to fd 3, so --quiet is one
+# redirect instead of a conditional around every echo.
+exec 3>&1
+if [[ "$QUIET" == 1 ]]; then
+  exec 1>/dev/null
+fi
 
 pass=0
 warn=0
@@ -26,13 +56,16 @@ echo
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "  This host is $(uname -s). Real-time hardening is Linux-only;"
   echo "  use this machine for correctness, not for latency numbers."
+  echo "=== not Linux: no audit ===" >&3
   exit 0
 fi
 
 echo "cpu"
 info "cores: $(nproc)"
+# `|| true`: no cpufreq at all (a VM, or a kernel without the driver) is a
+# reportable state, not a reason to abort the audit.
 governors=$(cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null \
-            | sort -u | tr '\n' ' ')
+            | sort -u | tr '\n' ' ' || true)
 if [[ -z "$governors" ]]; then
   info "scaling governor: unavailable (virtualized?)"
 elif [[ "$governors" == "performance " ]]; then
@@ -55,6 +88,37 @@ if [[ "$smt" == "off" || "$smt" == "notsupported" ]]; then
   ok "SMT: $smt"
 else
   bad "SMT: $smt (a sibling thread steals from the control loop)"
+fi
+
+echo
+echo "kernel"
+kernel_version=$(uname -v)
+if [[ "$(read_or /sys/kernel/realtime 0)" == "1" || "$kernel_version" == *PREEMPT_RT* ]]; then
+  ok "PREEMPT_RT: $kernel_version"
+else
+  bad "not a PREEMPT_RT kernel: $kernel_version"
+  if [[ "$kernel_version" == *PREEMPT_DYNAMIC* ]]; then
+    if grep -q 'preempt=full' /proc/cmdline 2>/dev/null; then
+      info "       PREEMPT_DYNAMIC booted preempt=full: preemptible, but the"
+      info "       priority-inheritance and threaded-IRQ guarantees are still"
+      info "       missing"
+    else
+      info "       PREEMPT_DYNAMIC: boot with preempt=full to get closer"
+    fi
+  fi
+fi
+
+# Real-time throttling is a foot-gun with a 50 ms edge, not a gradual one.
+rt_runtime=$(read_or /proc/sys/kernel/sched_rt_runtime_us unavailable)
+rt_period=$(read_or /proc/sys/kernel/sched_rt_period_us unavailable)
+if [[ "$rt_runtime" == "-1" ]]; then
+  ok "sched_rt_runtime_us: -1 (real-time throttling disabled)"
+else
+  info "sched_rt_runtime_us: $rt_runtime of sched_rt_period_us $rt_period"
+  info "       the default 950000/1000000 caps every SCHED_FIFO/RR task at 95%"
+  info "       of each period; a loop that sleeps or blocks between calls never"
+  info "       reaches the cap, a busy-wait one does and is then descheduled"
+  info "       for the rest of the period"
 fi
 
 echo
@@ -114,5 +178,24 @@ else
 fi
 
 echo
+echo "container"
+if [[ -f /.dockerenv || -n "${CJFC_IN_CONTAINER:-}" ]]; then
+  info "running inside a container"
+  info "       the sections above read the HOST's kernel: governor, isolcpus,"
+  info "       nohz_full, THP and C-states are the host's to set, and this"
+  info "       audit cannot change them from in here"
+  info "       what the container itself needs is"
+  info "         --cap-add=SYS_NICE --ulimit rtprio=99 --ulimit memlock=-1"
+  info "       SYS_NICE for sched_setscheduler(SCHED_FIFO), rtprio for the"
+  info "       priority itself, memlock for mlockall; without them the"
+  info "       real-time example falls back to plain scheduling"
+else
+  info "not in a container"
+fi
+
+echo
 echo "=== $pass ok, $warn worth fixing ==="
+if [[ "$QUIET" == 1 ]]; then
+  echo "=== $pass ok, $warn worth fixing ===" >&3
+fi
 [[ "$warn" -eq 0 ]]

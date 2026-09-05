@@ -1,16 +1,33 @@
-.vscode
+# Build trees
+build/
+docs/_build/
+*.o
+*.d
+*.a
 *.so
-*.binpb
-*.hlo
-archive
-artifacts
-__pycache__
-*.dSYM
-notebooks
-.DS_Store
-data
+*.dylib
 
-# built example binaries
-aot_jax2exec_example
-aot_example
-lc0_example
+# Exported artifacts. Serialized executables embed target machine code, so they
+# are locked to the machine that exported them and must never be committed:
+# re-export with `make export` wherever you are running.
+artifacts/
+*.binpb
+*.mlirbc
+
+# Python
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+*.dSYM
+
+# Local scratch
+notebooks/
+data/
+archive/

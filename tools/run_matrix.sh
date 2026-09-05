@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-
+#
 # Sweep the configurations that plausibly move tail latency and write one CSV
 # row per (config, round).
 #
@@ -9,44 +9,80 @@
 # medians across rounds, not single runs.
 #
 # The machine must be otherwise idle.  A concurrent build saturating the cores
-# does not add a little noise to these numbers, it invalidates them.
+# does not add a little noise to these numbers, it invalidates them, which is
+# why /proc/loadavg is printed before the first run and again after the last.
 #
 # Usage:
 #   tools/run_matrix.sh [fixture] [iterations] [rounds] [csv]
+#
+#   fixture     exported function to call (default: trajopt)
+#   iterations  timed calls per (config, round) (default: 300)
+#   rounds      interleaved repeats of the whole config list (default: 3)
+#   csv         output, appended (default: artifacts/matrix_<fixture>.csv)
+#
+# Environment:
+#   BENCH  benchmark binary (default: build/bin/bench)
+#   CASE   reference case index passed to --case (default: 0)
 
 set -euo pipefail
 
-FIXTURE="${1:-mpc_solver}"
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  # The header comment is the help text; stopping at the first non-comment line
+  # means there is no line range to keep in step with edits.
+  awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"
+  exit 0
+fi
+
+FIXTURE="${1:-trajopt}"
 ITERATIONS="${2:-300}"
 ROUNDS="${3:-3}"
 CSV="${4:-artifacts/matrix_${FIXTURE}.csv}"
 CASE="${CASE:-0}"
-BENCH="${BENCH:-./artifacts/bench}"
+BENCH="${BENCH:-build/bin/bench}"
 
 if [[ ! -x "$BENCH" ]]; then
-  echo "no bench binary at $BENCH (run: make artifacts/bench)" >&2
+  echo "no bench binary at $BENCH (run: make bench, or set BENCH=)" >&2
   exit 1
 fi
 
-load=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
-echo "load average before starting: $load"
+load_before=$(cut -d' ' -f1 /proc/loadavg 2>/dev/null || echo 0)
+echo "load average before starting: $(cat /proc/loadavg 2>/dev/null || echo unknown)"
+if awk -v l="$load_before" 'BEGIN { exit !(l > 0.5) }'; then
+  echo
+  echo "  *** this machine is busy (1-minute load $load_before). These numbers"
+  echo "  *** will not be valid: a concurrent build has been measured to raise"
+  echo "  *** p50 by 2.4x and max/p50 from 1.1 to 4.4. Stop everything else."
+  echo
+fi
 
-# label:flags -- the axes are the API, whether execution is inline, and how
-# many threads XLA is allowed to use.
+# label:flags -- the axes are whether execution is inline (synchronous) and how
+# many threads XLA is allowed to use.  `tdefault` leaves PJRT_NPROC unset, which
+# is what a caller gets by accident; the numbered ones are what a control loop
+# should be pinned to.  The last row adds the real-time hardening (SCHED_FIFO,
+# mlockall, a pinned core) on top of the best-behaved configuration.
+# docs: begin matrix-configs
 CONFIGS=(
-  "legacy_default:--api legacy --threads 0 --devices 4"
-  "rt_sync_t1:--api rt --threads 1 --devices 1"
-  "rt_sync_t2:--api rt --threads 2 --devices 1"
-  "rt_sync_t4:--api rt --threads 4 --devices 1"
-  "rt_sync_tdefault:--api rt --threads 0 --devices 1"
-  "rt_async_t1:--api rt --async --threads 1 --devices 1"
-  "rt_async_t4:--api rt --async --threads 4 --devices 1"
-  "rt_async_tdefault:--api rt --async --threads 0 --devices 4"
+  "sync_t1:--threads 1"
+  "sync_t2:--threads 2"
+  "sync_t4:--threads 4"
+  "sync_tdefault:--threads 0"
+  "async_t1:--async --threads 1"
+  "async_t4:--async --threads 4"
+  "async_tdefault:--async --threads 0"
+  "sync_t1_rt:--threads 1 --rt --cpu auto"
 )
+# docs: end matrix-configs
 
 echo "fixture=$FIXTURE case=$CASE iterations=$ITERATIONS rounds=$ROUNDS"
 echo "writing $CSV"
+mkdir -p "$(dirname "$CSV")"
+if [[ -e "$CSV" ]]; then
+  echo "note: $CSV exists; rows are appended and the summary below covers all"
+  echo "      of them, including any from an earlier sweep"
+fi
 
+# Rounds are the OUTER loop on purpose: this is what interleaves the
+# configurations instead of running each one to completion in sequence.
 for round in $(seq 1 "$ROUNDS"); do
   for entry in "${CONFIGS[@]}"; do
     label="${entry%%:*}"
@@ -65,19 +101,35 @@ for round in $(seq 1 "$ROUNDS"); do
 done
 
 echo
+echo "load average after finishing: $(cat /proc/loadavg 2>/dev/null || echo unknown)"
+echo
 echo "=== medians across rounds ==="
 python3 - "$CSV" <<'PY'
 import csv, statistics, sys, re
+
 rows = list(csv.DictReader(open(sys.argv[1])))
+if not rows:
+    print("no rows in", sys.argv[1])
+    raise SystemExit(0)
+
+# p99.99 needs ~10k samples to mean anything, so it is reported only when the
+# bench binary wrote the column.
+cols = [("p50_us", "p50"), ("p99_us", "p99"), ("p999_us", "p99.9")]
+if "p9999_us" in rows[0]:
+    cols.append(("p9999_us", "p99.99"))
+cols += [("max_us", "max"), ("max_over_p50", "max/p50")]
+
 by = {}
 for r in rows:
     label = re.sub(r"_r\d+$", "", r["label"])
     by.setdefault(label, []).append(r)
-print(f"{'config':22s} {'p50':>9s} {'p99':>9s} {'p99.9':>9s} {'max':>9s} "
-      f"{'max/p50':>8s}")
+
+print(f"{'config':22s}" + "".join(f"{t:>9s}" for _, t in cols) + f"{'rounds':>8s}")
 for label, rs in by.items():
-    med = lambda k: statistics.median(float(x[k]) for x in rs)
-    print(f"{label:22s} {med('p50_us'):9.1f} {med('p99_us'):9.1f} "
-          f"{med('p999_us'):9.1f} {med('max_us'):9.1f} "
-          f"{med('max_over_p50'):8.3f}")
+    med = lambda k: statistics.median(float(x[k]) for x in rs)  # noqa: E731
+    cells = "".join(
+        f"{med(k):9.3f}" if k == "max_over_p50" else f"{med(k):9.1f}"
+        for k, _ in cols
+    )
+    print(f"{label:22s}{cells}{len(rs):8d}")
 PY
