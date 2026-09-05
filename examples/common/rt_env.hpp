@@ -230,6 +230,15 @@ inline int choose_cpu(const HostEnv& env, const std::string& spec,
         return cpu;
       }
     }
+    // An affinity mask that is already a single CPU means somebody pinned this
+    // process before it started -- `taskset`, a cpuset, a container's
+    // --cpuset-cpus. Reporting that as a skipped step reads like a failure
+    // when the job is in fact already done, so name the CPU instead.
+    if (env.affinity.size() == 1) {
+      why = "already pinned before launch (affinity is a single cpu)";
+      return env.affinity.front();
+    }
+
     why =
         "no isolated cpus available to this thread; running unpinned. "
         "Boot with isolcpus=/nohz_full=, or pass --cpu N to pin anyway";

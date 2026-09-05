@@ -662,7 +662,8 @@ int main(int argc, char** argv) {
       cjfc::print_summary("call latency (compute)", compute_summary);
       cjfc::print_summary("cycle time (wake to done)", cycle_summary);
       cjfc::print_summary("wake-up latency (late by)", wake_summary);
-      cjfc::print_summary("period jitter (signed)", jitter_summary);
+      cjfc::print_summary("period jitter (signed)", jitter_summary,
+                          /*signed_samples=*/true);
 
       std::printf("\n=== periodic behaviour ===\n");
       std::printf(

@@ -297,7 +297,8 @@ inline json runtime_json(const pjrt::Runtime& runtime,
  * pasted into the same issue, and two spellings of p99.9 in one thread is one
  * too many.
  */
-inline void print_summary(const char* label, const pjrt::LatencySummary& s) {
+inline void print_summary(const char* label, const pjrt::LatencySummary& s,
+                          bool signed_samples = false) {
   std::printf("\n=== %s (n=%zu, microseconds) ===\n",
               label != nullptr ? label : "latency", s.count);
   if (s.count == 0) {
@@ -313,6 +314,11 @@ inline void print_summary(const char* label, const pjrt::LatencySummary& s) {
   std::printf("  p90    %10.1f     p99    %10.1f\n", s.p90_us, s.p99_us);
   std::printf("  p99.9  %10.1f     p99.99 %10.1f\n", s.p999_us, s.p9999_us);
   std::printf("  max    %10.1f\n", s.max_us);
+  // A median near zero, which is what signed period jitter has by
+  // construction, makes these ratios arbitrarily large and meaningless.
+  if (signed_samples) {
+    return;
+  }
   std::printf("  --- tail ratios ---\n");
   std::printf("  max/p50   %7.3f      p99.9/p50 %7.3f\n", s.max_over_p50,
               s.p999_over_p50);
