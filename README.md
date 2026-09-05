@@ -2,6 +2,10 @@
 
 TLDR; we compile a [JAX](https://github.com/jax-ml/jax) function to a serialized executable, and we call this via the [PJRT](https://openxla.org/xla/pjrt) C API.
 
+See [`docs/`](docs/README.md) for the engineering primer: measurement
+methodology, verified PJRT/XLA:CPU behaviour, the fork patches, and open
+threads.
+
 ## Motivation
 
 I feel like it is easier to develop and debug numerics in Python and NumPy.
