@@ -111,10 +111,12 @@ On an idle i9-14900HX with the `powersave` governor, pinned to one core, with
 
 Two separate effects, and it is worth keeping them apart. Pinning does not
 move the median at all; it cuts the *tail*, because the loop stops migrating
-between cores. The governor does not move the tail much; it moves the
-*median*, because a core that is idle 80% of the time is clocked down when the
-next period arrives. Neither shows up in a back-to-back benchmark, which keeps
-the core busy and therefore boosted.
+between cores. The period does not move the tail much; it moves the *median*,
+because a core that is idle 80% of the time is in a worse state to work when
+the next period arrives. Which idle-state setting is responsible -- the
+frequency governor, deep C-states, or both -- was not isolated: the governor
+was `powersave` and `/dev/cpu_dma_latency` was unheld in every row. Neither
+effect shows up in a back-to-back benchmark, which keeps the core busy.
 
 `min` barely changes across all four rows: that is the speed this workload runs
 at when the clock is up, and it is what `make bench` reports.

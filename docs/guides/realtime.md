@@ -62,15 +62,17 @@ does, and is then descheduled for the remaining 50 ms — which arrives as one
 spectacular outlier rather than as gradual degradation.
 :::
 
-### The governor is not a small effect
+### Idling between calls is not a small effect
 
-Of everything in the table above, the governor is the one most likely to
-surprise you, because it does not look like jitter. It moves the *median*.
+Of everything in the table above, the settings that govern what a core does
+while it is *idle* are the ones most likely to surprise you, because they do
+not look like jitter. They move the *median*.
 
-Measured on an idle Intel i9-14900HX with `scaling_governor` at `powersave`,
-running the trajectory-optimisation example against the same artifact, pinned
-to the same core, with real-time priority and memory locking in effect. The
-only variable is how much of each period the loop spends computing:
+Measured on an idle Intel i9-14900HX, running the trajectory-optimisation
+example against the same artifact, pinned to the same core, with real-time
+priority and memory locking in effect, `scaling_governor` at `powersave`
+throughout and `/dev/cpu_dma_latency` not held. The only variable is how much
+of each period the loop spends computing:
 
 | Period | Duty cycle | min | p50 |
 |---|---|---|---|
@@ -79,12 +81,22 @@ only variable is how much of each period the loop spends computing:
 
 The same work, on the same core, takes 2.6 times longer at 100 Hz than at
 333 Hz. Nothing is contended and nothing is preempted. The core simply idles
-for 8 ms of every 10, the governor clocks it down, and each call then starts
-slow and spends part of its time ramping back up.
+for 8 ms of every 10, and arrives at the next period in a worse state to do
+the work.
+
+**Which idle-state setting is responsible was not isolated here**, and it is
+worth being precise about that. Two mechanisms scale with idle time in exactly
+the same way: the frequency governor clocking the core down, and the latency of
+leaving a deep C-state. This experiment varied only the period, with both
+settings fixed, so it measures their combined cost and attributes it to
+neither. To separate them, run the loop at both periods with
+`scaling_governor` at `performance`, then again holding `/dev/cpu_dma_latency`
+open at 0, and see which one closes the gap. Both are in the checklist above
+for the same reason.
 
 Two things follow. The first is that a control loop is close to the worst case
-for a laptop-style governor: it is periodic, it is mostly idle, and it needs
-the clock high exactly when it wakes. The second is a measurement trap — a
+for power management of any kind: it is periodic, it is mostly idle, and it
+needs the core at full speed exactly when it wakes. The second is a measurement trap — a
 back-to-back benchmark keeps the core busy and therefore boosted, so it
 reports the *compute* cost, while the loop at its real period reports what the
 application actually experiences. Both numbers above are honest; they answer

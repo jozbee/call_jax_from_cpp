@@ -65,8 +65,10 @@ by 0.2%: 4718.7 µs versus 4728.4 µs. The compute kernels are LLVM-compiled at
 *export* time and embedded in the artifact; the plugin only orchestrates. Do not
 repeat this experiment — a 30-to-60-minute bazel build is off the critical path.
 
-**The remaining allocations.** Roughly 15,400 allocations per call still happen
-inside XLA's thunk runtime, about one per StableHLO op. Only ~520 were ever the
+**The remaining allocations.** Thousands of allocations per call still happen
+inside XLA's thunk runtime, scaling with the size of the program: about one and
+a half per StableHLO op, which was ~15,400 for the MPC workload above and is
+9,750 for the `02_trajopt` example this tree ships. Only ~520 were ever the
 wrapper's own, and those are gone. Reaching the rest means a pooling allocator
 behind `CpuClientOptions::allocator`, which the PJRT C API does not expose — a
 third fork patch, justified only if real hardware still shows a tail.
@@ -152,10 +154,13 @@ while doing it.
 
 ### What this does and does not establish
 
-The **ordering is solid**. It holds in every individual round, not just in the
-medians: `sync_t1_rt` measured 1.37, 1.51 and 1.76, while the two `tdefault`
-rows never came in under 3.39. Three rounds of 2000 calls, interleaved so
-neither thermal drift nor a background process can favour one configuration.
+**The extremes separate in every round; the middle of the ordering does not.**
+`sync_t1_rt` measured 1.37, 1.51 and 1.76 while no `tdefault` round came in
+under 3.39, so the gap between the most and least restrictive configuration is
+not an artefact of averaging. The finer comparisons are medians only, and two
+of them inverted in individual rounds: `sync_t2` beat `sync_t4` in two rounds of
+three, and inline beat dispatch at `tdefault` in only one. Take "one thread
+beats two beats four" as the shape of the medians, not as a per-round result.
 
 The **spike frequencies are not established here**, and no claim above depends
 on them. A >2x outlier appears roughly once per 20,000 calls, and 6000 calls per
@@ -164,8 +169,8 @@ configuration is too few to say anything about how often. These are tail
 
 The absolute numbers belong to this host and this workload. On a machine with
 `isolcpus` and a `performance` governor, expect the hardened row to improve and
-the gaps to widen; {doc}`guides/realtime` has the checklist, and the measured
-2.6x the governor alone is worth on a 100 Hz loop.
+the gaps to widen; {doc}`guides/realtime` has the checklist, and the 2.6x that
+idling between calls costs on this host.
 
 ## How these were measured
 
