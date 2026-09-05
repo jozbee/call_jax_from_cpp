@@ -29,4 +29,11 @@ if [[ -n "${PJRT_CPU_PLUGIN:-}" && ! -f "${PJRT_CPU_PLUGIN}" ]]; then
   unset PJRT_CPU_PLUGIN
 fi
 
+# A workspace plugin wins over anything baked into the image: the bind-mounted
+# tree is what the caller is working on, and its binaries were built with a
+# default path that only resolves outside the container.
+if [[ -f /workspace/build/plugin/libpjrt_c_api_cpu_plugin.so ]]; then
+  export PJRT_CPU_PLUGIN=/workspace/build/plugin/libpjrt_c_api_cpu_plugin.so
+fi
+
 exec "$@"

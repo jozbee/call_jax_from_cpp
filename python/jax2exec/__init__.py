@@ -19,6 +19,7 @@ imports that pull JAX in are deferred until something actually asks for them.
 from __future__ import annotations
 
 import importlib
+import sys
 from typing import TYPE_CHECKING, Any
 
 from ._dtypes import SUPPORTED_DTYPES
@@ -62,13 +63,41 @@ _LAZY = {
 
 
 def __getattr__(name: str) -> Any:
-    """Import the module defining ``name`` the first time it is asked for."""
+    """Import the module defining ``name`` the first time it is asked for.
+
+    Every public name the imported submodule provides is bound, not just the
+    one that was asked for. That matters because ``export`` is both a submodule
+    and the function it defines: importing the submodule for any reason makes
+    the import system bind ``jax2exec.export`` to the *module*, which then
+    shadows this function forever. Binding the whole group puts the function
+    back on top, so ``from jax2exec import ExportError, export`` behaves the
+    same as ``from jax2exec import export, ExportError``. Before this, the
+    first spelling handed the caller a module and the second a function, and
+    an import sorter reordering those names was enough to break a working
+    program with ``TypeError: 'module' object is not callable``.
+    """
     module_name = _LAZY.get(name)
     if module_name is None:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = getattr(importlib.import_module(f".{module_name}", __name__), name)
-    globals()[name] = value  # subsequent lookups skip this function entirely
-    return value
+
+    importlib.import_module(f".{module_name}", __name__)
+
+    # Bind every lazy name whose module is now loaded, not just the ones from
+    # the module just asked for: `reference` imports `export`, so fetching
+    # `write_reference_cases` is enough to leave the module shadowing the
+    # function. Subsequent lookups then skip this function entirely.
+    for lazy_name, lazy_module in _LAZY.items():
+        loaded = sys.modules.get(f"{__name__}.{lazy_module}")
+        if loaded is not None and hasattr(loaded, lazy_name):
+            globals()[lazy_name] = getattr(loaded, lazy_name)
+
+    try:
+        return globals()[name]
+    except KeyError:  # pragma: no cover - a _LAZY entry naming a missing symbol
+        raise AttributeError(
+            f"module {__name__!r} maps {name!r} to {module_name!r}, "
+            f"which does not define it"
+        ) from None
 
 
 def __dir__() -> list[str]:
