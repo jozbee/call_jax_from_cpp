@@ -1,4 +1,4 @@
-#include "src/pjrt_exec/rt.hpp"
+#include "pjrt_exec/rt.hpp"
 
 #include <cstring>
 #include <string>
