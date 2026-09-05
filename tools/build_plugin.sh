@@ -152,9 +152,11 @@ if [[ "$PACKAGE" == 1 ]]; then
   arch="$(uname -m)"
   ver="${JAX_VERSION:-unknown}"
   tarball="$OUT_DIR/pjrt_cpu_plugin-jax-v${ver}-linux-${arch}.tar.gz"
-  tar czf "$tarball" -C "$OUT_DIR" \
-    libpjrt_c_api_cpu_plugin.so PLUGIN_INFO.txt \
-    $([[ -f "$OUT_DIR/LICENSE-xla" ]] && echo LICENSE-xla)
+  # LICENSE-xla only exists when the XLA tree carried one; the binary is
+  # Apache-2.0 either way, so ship it whenever it is there.
+  tar_members=(libpjrt_c_api_cpu_plugin.so PLUGIN_INFO.txt)
+  [[ -f "$OUT_DIR/LICENSE-xla" ]] && tar_members+=(LICENSE-xla)
+  tar czf "$tarball" -C "$OUT_DIR" "${tar_members[@]}"
   (cd "$OUT_DIR" && sha256sum "$(basename "$tarball")" > "$(basename "$tarball").sha256")
   echo "build_plugin: packaged $tarball"
 fi
