@@ -1,22 +1,24 @@
 {
-  "name": "jax_from_cpp",
-  "dockerFile": "Dockerfile",
-  "mounts": [
-    "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached"
-  ],
+  "name": "call_jax_from_cpp",
+  // Goes through docker/compose.yml rather than building the Dockerfile
+  // directly, so a VS Code session gets the same real-time privileges as
+  // `docker compose run dev`: SCHED_FIFO needs CAP_SYS_NICE plus an rtprio
+  // limit, and mlockall needs an unlimited memlock. A plain devcontainer build
+  // has neither, and every rt helper then reports [skip].
+  "dockerComposeFile": ["../docker/compose.yml"],
+  "service": "dev",
   "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
   "customizations": {
     "vscode": {
       "extensions": [
         "ms-vscode.cpptools",
         "ms-vscode.cpptools-extension-pack",
-        "lfs.vscode-emacs-friendly",
-        "ms-azuretools.vscode-docker",
         "ms-vscode.makefile-tools",
-        "github.copilot",
-        "github.copilot-chat",
+        "ms-vscode.cmake-tools",
         "ms-python.python",
-        "bazelbuild.vscode-bazel"
+        "charliermarsh.ruff",
+        "ms-azuretools.vscode-docker"
       ]
     }
   }

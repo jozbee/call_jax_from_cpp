@@ -1,0 +1,6 @@
+# Vendored from openxla/xla, unmodified except for the include path in
+# pjrt_c_api_cpu.h. Re-vendor whenever the JAX pin moves; see
+# docs/developer/bumping-jax.md.
+xla_commit=dcf304bc5dca1932b99f740b911dbd73631a1a69
+pjrt_api_major=0
+pjrt_api_minor=114
