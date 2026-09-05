@@ -1,0 +1,278 @@
+# Build the PJRT CPU plugin from the XLA fork and publish it as a release
+# asset, one per architecture.
+#
+# What this costs, honestly: a from-scratch XLA CPU plugin build compiles LLVM
+# from source, and on a 4-vCPU hosted runner that takes hours. The primary
+# producer of release assets is tools/release_plugin.sh on a developer machine
+# with real cores and a warm bazel cache; this workflow is the reproducible
+# secondary path - it proves the tarball can be regenerated from nothing but
+# versions.env and the fork, and it fills in an architecture the developer
+# machine does not have. timeout-minutes is 355 because the hard job limit is
+# 360, and a job killed at the limit tells you nothing about why it was slow.
+#
+# Action versions verified 2026-09-05 with
+#   gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
+# and each action.yml checked for its runtime, because Node 20 is removed from
+# GitHub runners in September 2026:
+#   actions/checkout             latest v7.0.1   pinned v7        node24
+#   bazel-contrib/setup-bazel    latest 0.19.0   pinned 0.19.0    node24
+#   actions/upload-artifact      latest v7.0.1   pinned v7        node24
+#   actions/download-artifact    latest v8.0.1   pinned v8        node24
+#   softprops/action-gh-release  latest v3.0.3   pinned v3        node24
+# bazel-contrib/setup-bazel publishes no floating major tag (its releases are
+# 0.x), so it is pinned to the exact release.
+
+name: plugin
+
+on:
+  workflow_dispatch:
+    inputs:
+      jax_version:
+        description: "JAX version to build the plugin for, e.g. 0.11.1"
+        required: true
+        type: string
+      build_mode:
+        description: >-
+          bazel -c mode. Measured to be irrelevant to call latency (p50 moved
+          0.2% between opt and fastbuild), because the compute kernels are
+          LLVM-compiled at export time and embedded in the artifact; opt is
+          what ships.
+        type: choice
+        options: [opt, fastbuild]
+        default: opt
+      publish:
+        description: "Publish a GitHub release with the built assets"
+        type: boolean
+        default: true
+  push:
+    tags: ["plugin-jax-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 355
+    strategy:
+      # One architecture failing must not cancel the other: a partial set can
+      # be published, and the missing architecture added later with
+      # tools/release_plugin.sh.
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    steps:
+      # This one needs the fork: third_party/xla is the tree bazel builds. It
+      # therefore only works once the fork branch is PUSHED. A commit that
+      # exists only locally cannot be fetched by anyone, including its author -
+      # see the lost-commit lesson in docs/developer/bumping-jax.md.
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Resolve the version and the fork commit
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.jax_version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_VERSION}" ]; then
+            version="${INPUT_VERSION}"
+          else
+            version="${REF_NAME#plugin-jax-v}"
+          fi
+          . ./versions.env
+          # build_plugin.sh names the tarball and fills PLUGIN_INFO.txt from
+          # versions.env, so a version that disagrees with the tree would
+          # publish assets whose names contradict the release tag.
+          if [ "${version}" != "${JAX_VERSION}" ]; then
+            echo "::error::asked for JAX ${version} but versions.env pins ${JAX_VERSION}; bump the tree first (docs/developer/bumping-jax.md)"
+            exit 1
+          fi
+          fork_commit="$(git -C third_party/xla rev-parse HEAD)"
+          if [ -n "${XLA_FORK_COMMIT:-}" ] && \
+             [ "${fork_commit}" != "${XLA_FORK_COMMIT}" ]; then
+            echo "::warning::submodule is at ${fork_commit} but versions.env records ${XLA_FORK_COMMIT}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "fork_commit=${fork_commit}" >> "$GITHUB_OUTPUT"
+          {
+            echo "JAX ${version}"
+            echo "XLA commit ${XLA_COMMIT}"
+            echo "fork ${XLA_FORK_BRANCH} @ ${fork_commit}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # bazel wants ~25G for an XLA build and the runner root disk does not
+      # have it with the preinstalled toolchains in place.
+      - name: Free disk space
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force || true
+          df -h
+
+      - name: Install the build dependencies
+        run: |
+          set -euo pipefail
+          # liblapack/libblas: the fork links jaxlib's LAPACK FFI kernels into
+          # the plugin, so the link step needs them. xxd and python3-dev are
+          # used by XLA's own build rules.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            clang lld liblapack-dev libblas-dev xxd python3-dev
+
+      # The hosted x86_64 runners mount a large temporary disk at /mnt; the
+      # arm64 image may not. build_plugin.sh passes BAZEL_STARTUP_ARGS through
+      # to bazel, so the output base moves without touching the script.
+      - name: Point the bazel output base at /mnt when it exists
+        run: |
+          set -euo pipefail
+          if [ -d /mnt ] && sudo mkdir -p /mnt/bazel 2>/dev/null; then
+            sudo chown "$(id -u):$(id -g)" /mnt/bazel
+            echo "BAZEL_STARTUP_ARGS=--output_user_root=/mnt/bazel" >> "$GITHUB_ENV"
+            echo "bazel output base: /mnt/bazel ($(df -h /mnt | tail -1))"
+          else
+            echo "no writable /mnt; leaving the output base under \$HOME"
+          fi
+
+      - uses: bazel-contrib/setup-bazel@0.19.0
+        with:
+          # XLA is the bazel module here, not the repository root: this is
+          # where .bazelversion and WORKSPACE live, and what the caches key on.
+          module-root: third_party/xla
+          bazelisk-cache: true
+          repository-cache: true
+          disk-cache: plugin-${{ matrix.arch }}
+          bazelrc: |
+            # 4 vCPU, and the LLVM link steps are memory-hungry enough to be
+            # OOM-killed if bazel assumes it owns all of RAM.
+            build --jobs=4
+            build --local_resources=memory=HOST_RAM*.7
+
+      - name: Build and package the plugin
+        env:
+          BUILD_MODE: ${{ inputs.build_mode || 'opt' }}
+        run: |
+          set -euo pipefail
+          # No ARCH_FLAGS: release assets are built baseline so they run on any
+          # machine of that architecture. Serialized executables are the
+          # ISA-locked part, not the plugin.
+          tools/build_plugin.sh --package --mode "${BUILD_MODE}"
+
+      # Bazel's own disk-cache garbage collection is behind experimental flags
+      # whose availability depends on the Bazel version XLA pins, so the cap is
+      # applied here instead: trim to 5G before setup-bazel's post step saves
+      # the directory, or this cache alone evicts everything else the
+      # repository has under the 10G limit.
+      - name: Cap the bazel disk cache
+        if: always()
+        run: |
+          set -euo pipefail
+          cache="$(grep -ho -- '--disk_cache=[^ ]*' "$HOME/.bazelrc" 2>/dev/null | tail -1 | cut -d= -f2- || true)"
+          cache="${cache/#\~/$HOME}"
+          if [ -z "${cache}" ] || [ ! -d "${cache}" ]; then
+            echo "no disk cache to cap"
+            exit 0
+          fi
+          limit=$((5 * 1024 * 1024 * 1024))
+          total="$(du -sb "${cache}" | cut -f1)"
+          echo "disk cache ${cache}: ${total} bytes"
+          if [ "${total}" -gt "${limit}" ]; then
+            # Oldest first, deleting until the total is under the limit.
+            find "${cache}" -type f -printf '%T@\t%s\t%p\n' \
+              | sort -n \
+              | awk -F'\t' -v total="${total}" -v limit="${limit}" \
+                  '{ if (total <= limit) exit; total -= $2; print $3 }' \
+              | xargs -r -d '\n' rm -f
+            echo "capped to $(du -sh "${cache}" | cut -f1)"
+          fi
+
+      - name: Upload the plugin tarball
+        uses: actions/upload-artifact@v7
+        with:
+          name: plugin-${{ matrix.arch }}
+          path: |
+            build/plugin/*.tar.gz
+            build/plugin/*.tar.gz.sha256
+            build/plugin/PLUGIN_INFO.txt
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: release
+    needs: build
+    # !cancelled() rather than always(): publish whatever architectures did
+    # build - the missing one can be added to the same release later with
+    # tools/release_plugin.sh - but a cancelled run publishes nothing.
+    if: ${{ !cancelled() && (github.event_name == 'push' || inputs.publish) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Resolve the version
+        id: ver
+        env:
+          INPUT_VERSION: ${{ inputs.jax_version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_VERSION}" ]; then
+            version="${INPUT_VERSION}"
+          else
+            version="${REF_NAME#plugin-jax-v}"
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: plugin-*
+
+      - name: Assemble the release notes
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -R dist
+          {
+            cat <<NOTES
+          PJRT CPU plugin for JAX ${VERSION}.
+
+          Built from the XLA fork, which adds jaxlib's LAPACK FFI kernels and
+          the CPU plugin create options. Install it with \`make plugin\`, which
+          verifies the sha256 recorded in tools/plugin_versions.txt.
+          NOTES
+            echo
+            for info in dist/*/PLUGIN_INFO.txt; do
+              [ -f "${info}" ] || continue
+              echo "## $(basename "$(dirname "${info}")")"
+              echo
+              echo '```'
+              cat "${info}"
+              echo '```'
+              echo
+            done
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: plugin-jax-v${{ steps.ver.outputs.version }}
+          name: PJRT CPU plugin for JAX ${{ steps.ver.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            dist/*/*.tar.gz
+            dist/*/*.tar.gz.sha256
+          # A release with no assets is a silent failure: the manifest row it
+          # is meant to feed would point at nothing.
+          fail_on_unmatched_files: true
+          # These are per-JAX-version toolchain assets, not the project's
+          # releases; "latest" must keep meaning the latest source release.
+          make_latest: "false"

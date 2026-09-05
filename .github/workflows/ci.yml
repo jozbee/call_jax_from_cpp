@@ -1,0 +1,275 @@
+# Lint, build the documentation, and run the test suite in the project's
+# Docker image on both architectures.
+#
+# Action versions verified 2026-09-05 with
+#   gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
+# and each action.yml then checked for its runtime, because Node 20 is removed
+# from GitHub runners in September 2026 and anything still on a Node 20 major
+# stops working there:
+#   actions/checkout            latest v7.0.1   pinned v7        node24
+#   actions/cache               latest v6.1.0   pinned v6        node24
+#   actions/upload-artifact     latest v7.0.1   pinned v7        node24
+#   astral-sh/setup-uv          latest v10.0.1  pinned v10.0.1   node24
+#   docker/setup-buildx-action  latest v4.3.0   pinned v4        node24
+#   docker/build-push-action    latest v7.3.0   pinned v7        node24
+# astral-sh/setup-uv stopped publishing a floating major tag after v7, so it is
+# pinned to the exact release; every other action resolves its major alias.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_plugin:
+        description: >-
+          Build the PJRT plugin in Docker instead of downloading the release
+          asset (hours)
+        type: boolean
+        default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Sync the Python environment
+        run: |
+          set -euo pipefail
+          # --locked only once a lock file is committed; a tree without one
+          # must still lint rather than fail on a missing uv.lock.
+          if [ -f uv.lock ]; then
+            uv sync --locked
+          else
+            uv sync
+          fi
+
+      # --no-sync: `uv run` otherwise re-syncs the environment to the flags it
+      # is given, which would undo the step above.
+      - name: ruff check
+        run: uv run --no-sync ruff check .
+
+      - name: ruff format --check
+        run: uv run --no-sync ruff format --check .
+
+      - name: shellcheck
+        run: |
+          set -euo pipefail
+          # Preinstalled on the ubuntu-24.04 image; install it if that changes.
+          command -v shellcheck >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends shellcheck
+          }
+          shellcheck --version
+          shellcheck tools/*.sh examples/03_realtime/run_realtime.sh
+
+  docs:
+    name: docs (build only)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      # The same steps as the build job in docs.yml, minus the deploy: a pull
+      # request must fail on a broken cross-reference without touching Pages.
+      - uses: actions/checkout@v7
+
+      - name: Install doxygen
+        run: |
+          set -euo pipefail
+          # breathe reads doxygen's XML, and conf.py generates it during the
+          # sphinx run, so doxygen has to be on PATH before sphinx-build.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends doxygen graphviz
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Sync the Python environment
+        run: |
+          set -euo pipefail
+          if [ -f uv.lock ]; then
+            uv sync --locked --extra docs
+          else
+            uv sync --extra docs
+          fi
+
+      # -W turns warnings into errors and --keep-going reports all of them in
+      # one run instead of stopping at the first. --no-sync keeps the
+      # environment the step above built: a bare `uv run` re-syncs without the
+      # docs extra and removes sphinx out from under this command.
+      - name: sphinx-build
+        run: |
+          uv run --no-sync sphinx-build -W --keep-going -b html \
+            docs docs/_build/html
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: docs-html
+          path: docs/_build/html
+          retention-days: 7
+
+  test:
+    name: test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    # aarch64 is a signal, not a gate: hosted arm64 runners are free for public
+    # repositories, but the plugin asset for that architecture may lag.
+    continue-on-error: ${{ !matrix.required }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+            required: true
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+            required: false
+    steps:
+      # No submodules: third_party/xla is only needed to build the plugin from
+      # source, which plugin.yml does.
+      - uses: actions/checkout@v7
+
+      - name: Read the pinned versions
+        id: versions
+        run: |
+          set -euo pipefail
+          # versions.env is the single source of truth; nothing here restates a
+          # version by hand.
+          . ./versions.env
+          echo "jax_version=${JAX_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "plugin_release=${PLUGIN_RELEASE}" >> "$GITHUB_OUTPUT"
+          echo "JAX ${JAX_VERSION}, plugin release ${PLUGIN_RELEASE}"
+
+      - uses: docker/setup-buildx-action@v4
+
+      # docker compose reuses an image that is already tagged locally, so
+      # building call_jax_from_cpp:dev here (load: true) is what the `ci`
+      # service picks up below. The cache scope is per architecture: an x86_64
+      # layer is useless to the arm64 runner.
+      - name: Build the dev image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: dev
+          build-args: PLUGIN_SOURCE=none
+          tags: call_jax_from_cpp:dev
+          load: true
+          cache-from: type=gha,scope=dev-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=dev-${{ matrix.arch }}
+
+      # Restore and save are split so a failed download is never cached: the
+      # save step below only runs once a plugin is actually present.
+      - name: Restore the cached plugin
+        id: plugin-restore
+        uses: actions/cache/restore@v6
+        with:
+          path: build/plugin
+          key: plugin-${{ matrix.arch }}-${{ steps.versions.outputs.plugin_release }}-${{ hashFiles('tools/plugin_versions.txt') }}
+
+      # Expected to fail until the first plugin release is published for this
+      # JAX version: tools/get_plugin.sh then prints the remedies (build from
+      # the fork, publish the asset, or point PJRT_CPU_PLUGIN at your own).
+      # That is a missing artifact, not a broken tree, so it does not fail CI.
+      - name: Download the prebuilt plugin
+        id: plugin-download
+        if: steps.plugin-restore.outputs.cache-hit != 'true'
+        continue-on-error: true
+        run: make plugin
+
+      # Opt-in, and slow enough to blow this job's 90-minute budget on a
+      # 4-vCPU runner: bazel compiles LLVM from source. plugin.yml is the
+      # supported builder; this exists to reproduce a build failure under CI
+      # conditions. It also needs the XLA fork branch to be pushed
+      # (see docs/developer/bumping-jax.md).
+      - name: Build the plugin from source in Docker
+        if: >-
+          ${{ inputs.build_plugin
+          && steps.plugin-restore.outputs.cache-hit != 'true' }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: plugin-export
+          build-args: PLUGIN_SOURCE=source
+          outputs: type=local,dest=build/plugin
+
+      - name: Check whether a plugin is present
+        id: plugin
+        run: |
+          set -euo pipefail
+          if [ -f build/plugin/libpjrt_c_api_cpu_plugin.so ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+            ls -l build/plugin
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Only the downloaded asset is cached. The optional source build above is
+      # a one-off; caching it under the release key would hand later runs
+      # something other than the published artifact.
+      - name: Save the plugin to the cache
+        if: ${{ always() && steps.plugin-download.outcome == 'success' && steps.plugin.outputs.present == 'true' }}
+        uses: actions/cache/save@v6
+        with:
+          path: build/plugin
+          key: ${{ steps.plugin-restore.outputs.cache-primary-key }}
+
+      # --user root: the runner user is uid 1001 while the image user is 1000,
+      # and both the bind-mounted workspace and /opt/venv (which the entrypoint
+      # re-syncs) must be writable. PJRT_CPU_PLUGIN is redirected because the
+      # image was built with PLUGIN_SOURCE=none, so /opt/pjrt is empty and the
+      # plugin we fetched lives in the bind mount instead.
+      #
+      # docker/compose.yml asks for CAP_SYS_NICE and rtprio/memlock ulimits.
+      # Whether SCHED_FIFO then takes effect on a hosted VM is not something
+      # this project relies on: every real-time step reports [skip] when the
+      # privilege is absent, and nothing in CI gates on it. Latency numbers
+      # from a shared runner are not reportable either way.
+      - name: make test
+        if: steps.plugin.outputs.present == 'true'
+        run: |
+          docker compose -f docker/compose.yml run --rm --user root \
+            -e PJRT_CPU_PLUGIN=/workspace/build/plugin/libpjrt_c_api_cpu_plugin.so \
+            ci make test
+
+      - name: Skip the tests (no plugin for this architecture)
+        if: steps.plugin.outputs.present != 'true'
+        env:
+          ARCH: ${{ matrix.arch }}
+          RELEASE: ${{ steps.versions.outputs.plugin_release }}
+        run: |
+          echo "::notice title=tests skipped::no PJRT CPU plugin for ${ARCH} at release ${RELEASE}; publish the asset with tools/release_plugin.sh, or re-run this workflow with build_plugin=true"
+          echo "The tests need a plugin to load; nothing was run."
+
+      # The container wrote as root; hand the tree back so the artifact upload
+      # and the runner's own workspace cleanup can read it.
+      - name: Restore workspace ownership
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" .
+
+      - name: Upload the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: reports-${{ matrix.arch }}
+          path: artifacts/reports/
+          if-no-files-found: ignore
+          retention-days: 14

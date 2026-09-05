@@ -1,0 +1,94 @@
+# Build the Sphinx documentation and publish it to GitHub Pages.
+#
+# One manual step, once per repository: Settings -> Pages -> Source:
+# "GitHub Actions". Without it the deploy job fails with a 404 from the Pages
+# API. .nojekyll is written by sphinx.ext.githubpages, so directories whose
+# names start with an underscore (_static, _sources) are served correctly.
+#
+# Action versions verified 2026-09-05 with
+#   gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
+# and each action.yml checked for its runtime, because Node 20 is removed from
+# GitHub runners in September 2026:
+#   actions/checkout               latest v7.0.1   pinned v7        node24
+#   astral-sh/setup-uv             latest v10.0.1  pinned v10.0.1   node24
+#   actions/configure-pages        latest v6.0.0   pinned v6        node24
+#   actions/upload-pages-artifact  latest v5.0.0   pinned v5        composite
+#   actions/deploy-pages           latest v5.0.1   pinned v5        node24
+# astral-sh/setup-uv stopped publishing a floating major tag after v7, so it is
+# pinned to the exact release; every other action resolves its major alias.
+
+name: docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one in flight: a half-finished
+# deploy would leave the published site inconsistent.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install doxygen
+        run: |
+          set -euo pipefail
+          # breathe reads doxygen's XML, and conf.py generates it during the
+          # sphinx run, so doxygen has to be on PATH before sphinx-build.
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends doxygen graphviz
+
+      - uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Sync the Python environment
+        run: |
+          set -euo pipefail
+          # --locked only once a lock file is committed; a tree without one
+          # must still build rather than fail on a missing uv.lock.
+          if [ -f uv.lock ]; then
+            uv sync --locked --extra docs
+          else
+            uv sync --extra docs
+          fi
+
+      # -W turns warnings into errors and --keep-going reports all of them in
+      # one run instead of stopping at the first. --no-sync keeps the
+      # environment the step above built: a bare `uv run` re-syncs without the
+      # docs extra and removes sphinx out from under this command.
+      - name: sphinx-build
+        run: |
+          uv run --no-sync sphinx-build -W --keep-going -b html \
+            docs docs/_build/html
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/_build/html
+
+  deploy:
+    name: deploy
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
