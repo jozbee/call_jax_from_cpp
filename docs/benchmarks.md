@@ -103,6 +103,70 @@ The `max/p50` bound has a floor worth knowing: in-process Python PJRT on the
 same workload sits at 1.14–1.25, so 2.0 is a bound on the wrapper's
 contribution, not on the ratio itself.
 
+## A campaign you can reproduce
+
+The comparison above predates the shipped examples and cannot be re-run from
+this tree. This one can:
+
+```console
+$ tools/run_matrix.sh trajopt 2000 3 artifacts/reports/matrix.csv
+```
+
+`examples/02_trajopt`, 2000 calls per run, three interleaved rounds per
+configuration, on an idle x86-64 i9-14900HX. The host is **not** real-time
+tuned: `powersave` governor, transparent hugepages on, no `isolcpus`, no
+`nohz_full`. Medians across the three rounds:
+
+```{table}
+:class: results
+
+| Configuration | p50 (µs) | p99 (µs) | p99.9 (µs) | max/p50 |
+|---|---|---|---|---|
+| `sync_t1` inline, 1 thread | 2240 | 2670 | 3355 | 2.00 |
+| `sync_t2` inline, 2 threads | 2129 | 3690 | 4523 | 2.20 |
+| `sync_t4` inline, 4 threads | 2070 | 4403 | 5350 | 2.88 |
+| `sync_tdefault` inline, XLA's pool | 2141 | 6167 | 7462 | 3.96 |
+| `async_t1` dispatched, 1 thread | 2263 | 3203 | 4569 | 2.26 |
+| `async_t4` dispatched, 4 threads | 2196 | 5064 | 5866 | 3.23 |
+| `async_tdefault` dispatched, XLA's pool | 2391 | 7314 | 8521 | 3.99 |
+| **`sync_t1_rt`** inline, 1 thread, hardened | 2239 | **2378** | **2825** | **1.51** |
+```
+
+Read the first column and then the last, because they disagree.
+
+**The median barely moves.** Every configuration lands between 2070 and 2391 µs
+— a 15% spread with no clear ordering. Giving this workload four threads, or
+XLA's whole default pool, does not make it faster. A benchmark reporting means
+would conclude that none of these settings matters.
+
+**The tail moves by a factor of three.** p99.9 runs from 2825 µs to 8521 µs, and
+`max/p50` from 1.51 to 3.99, ordered almost perfectly by how much concurrency
+the runtime was allowed: one thread beats two, two beat four, and four beat
+letting XLA size the pool itself. Inline execution beats dispatch at every
+thread count. The best configuration is the most restrictive one — a single
+thread, executing inline, with the memory locked and the allocator pinned down.
+
+That is the whole argument for this project in one table. The work is the same
+in every row; what changes is how many ways the runtime can be interrupted
+while doing it.
+
+### What this does and does not establish
+
+The **ordering is solid**. It holds in every individual round, not just in the
+medians: `sync_t1_rt` measured 1.37, 1.51 and 1.76, while the two `tdefault`
+rows never came in under 3.39. Three rounds of 2000 calls, interleaved so
+neither thermal drift nor a background process can favour one configuration.
+
+The **spike frequencies are not established here**, and no claim above depends
+on them. A >2x outlier appears roughly once per 20,000 calls, and 6000 calls per
+configuration is too few to say anything about how often. These are tail
+*ratios* within a run, which is a different and much cheaper question.
+
+The absolute numbers belong to this host and this workload. On a machine with
+`isolcpus` and a `performance` governor, expect the hardened row to improve and
+the gaps to widen; {doc}`guides/realtime` has the checklist, and the measured
+2.6x the governor alone is worth on a 100 Hz loop.
+
 ## How these were measured
 
 Every trap below produced numbers that looked plausible and were meaningless.

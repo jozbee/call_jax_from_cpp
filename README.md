@@ -39,13 +39,13 @@ jax2exec.export(
         jax.ShapeDtypeStruct((40, 2), jnp.float64),
     ],
     "artifacts",
-    "trajopt",
-)  # -> trajopt.binpb/.mlirbc/.json
+    "damped_step",
+)  # -> damped_step.binpb/.mlirbc/.json
 ```
 
 ```cpp
 pjrt::Runtime rt;                              // one per process
-pjrt::Function f(rt, "artifacts/trajopt");     // load once
+pjrt::Function f(rt, "artifacts/damped_step"); // load once
 const std::size_t x0 = *f.find_input("x0");    // resolve names at startup
 double* state = f.input<double>(x0);
 
