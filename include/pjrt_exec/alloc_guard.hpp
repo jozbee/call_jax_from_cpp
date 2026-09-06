@@ -122,6 +122,7 @@ class AllocGuard {
   /**
    * @brief Print the armed-window census to @p out.
    *
+   * @param out        Where to print; a null stream prints nothing.
    * @param iterations Calls made while armed; turns the totals into per-call
    *                   figures, which is the form the numbers are quoted in.
    */
