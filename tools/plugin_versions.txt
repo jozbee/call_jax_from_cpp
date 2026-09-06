@@ -6,6 +6,8 @@
 # published; the diff is reviewed and committed by hand. Read by
 # tools/get_plugin.sh and cmake/GetPjrtPlugin.cmake.
 #
-# No assets are published yet for this JAX version. Until one is,
-# `make plugin` prints the remedies and `make plugin-source` builds from the
-# fork. See docs/developer/release-process.md.
+# linux-x86_64 is published for this JAX version. linux-aarch64 is not: on
+# that platform `make plugin` prints the remedies and `make plugin-source`
+# builds from the fork. Either producer may add the missing architecture to
+# the same tag later. See docs/developer/release-process.md.
+plugin-jax-v0.11.1     linux-x86_64   https://github.com/jozbee/call_jax_from_cpp/releases/download/plugin-jax-v0.11.1/pjrt_cpu_plugin-jax-v0.11.1-linux-x86_64.tar.gz  e55aeda84520b207573243cc766c55c3838ac690193dfcccd34807398570da5c

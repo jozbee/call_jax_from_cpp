@@ -26,8 +26,9 @@ Notable changes to this project. The format follows
   default.
 - Machinery for prebuilt plugin binaries as GitHub Release assets per JAX
   version: `make plugin` downloads and checksums one, `make plugin-source`
-  builds it from the XLA fork. No asset is published for JAX 0.11.1 yet, so
-  `make plugin` currently prints the remedies and exits non-zero.
+  builds it from the XLA fork. The first release, `plugin-jax-v0.11.1`,
+  publishes a `linux-x86_64` asset; `linux-aarch64` is not published yet, so
+  on that platform `make plugin` prints the remedies and exits non-zero.
 - `pjrt::LatencyRecorder` and `pjrt::AllocGuard` promoted to public headers, so
   a caller can measure their own loop with the same tools this project uses.
 - Four examples: a basic one, a trajectory-optimisation workload heavy enough
