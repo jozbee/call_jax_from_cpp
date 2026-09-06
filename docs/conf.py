@@ -228,6 +228,10 @@ html_title = "call_jax_from_cpp"
 html_baseurl = "https://jozbee.github.io/call_jax_from_cpp/"
 html_static_path = ["_static"]
 html_css_files = ["style.css"]
+# The favicon follows the browser's colour scheme on its own (a media query
+# inside the SVG); the sidebar logo cannot, because the site's theme toggle
+# sets data-theme rather than the OS preference, so it is two files.
+html_favicon = "_static/favicon.svg"
 # The project is released under the Unlicense -- it is in the public domain --
 # so a copyright line in the footer would be a false claim.
 html_show_copyright = False
@@ -249,4 +253,9 @@ html_theme_options = {
         "toggle-primary-sidebar.html",
         "breadcrumbs.html",
     ],
+    "logo": {
+        "image_light": "_static/logo-light.svg",
+        "image_dark": "_static/logo-dark.svg",
+        "alt_text": "call_jax_from_cpp",
+    },
 }

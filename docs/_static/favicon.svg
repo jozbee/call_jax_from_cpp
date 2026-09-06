@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="call_jax_from_cpp">
+  <style>
+    .l { stroke: #0b5fa5; }
+    .b { stroke: #0f7a6c; }
+    @media (prefers-color-scheme: dark) {
+      .l { stroke: #6fb3ee; }
+      .b { stroke: #57c2b0; }
+    }
+  </style>
+  <g fill="none" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <path class="l" d="M10 10 L38 56"/>
+    <path class="l" d="M23 30 L8 56"/>
+    <path class="b" d="M42 8 L57 30 L42 52"/>
+  </g>
+</svg>

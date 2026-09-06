@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 72" width="200" height="72" role="img" aria-labelledby="t">
+  <title id="t">call_jax_from_cpp: a JAX function, called from C++</title>
+  <!-- Hand-drawn paths rather than text: a font inside an <img> SVG is not
+       portable, and the mark has to render identically everywhere.
+       Colours are the site's tokens (docs/_static/style.css). -->
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <!-- lambda: the long stroke and the short leg -->
+    <path d="M18 13 L54 60" stroke="#0b5fa5" stroke-width="9"/>
+    <path d="M34 34 L14 60" stroke="#0b5fa5" stroke-width="9"/>
+    <!-- the call: one arrow -->
+    <path d="M74 36 L114 36" stroke="#0b5fa5" stroke-width="5"/>
+    <!-- angle brackets -->
+    <path d="M152 14 L140 36 L152 58" stroke="#0f7a6c" stroke-width="9"/>
+    <path d="M176 14 L188 36 L176 58" stroke="#0f7a6c" stroke-width="9"/>
+  </g>
+  <path d="M112 26 L128 36 L112 46 Z" fill="#0b5fa5"/>
+</svg>
