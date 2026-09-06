@@ -71,6 +71,19 @@ Notable changes to this project. The format follows
   flag a periodic loop needs) and `names.hpp` (the `SyncMode` and `LoadKind`
   spellings, so a program can name what it loaded without pulling in JSON).
 
+### Fixed
+- `pjrt::rt::corral_xla_threads()` finds XLA's pool threads again. It matched
+  thread names by the prefix `XLAEigen` / `XLAPjRtCpuClient`, and TSL prefixes
+  the name it sets, so at the pinned XLA version the threads are called
+  `tf_XLAEigen` and the search matched nothing on any host. The step reported
+  "no XLA worker threads found (client not created?)", which reads as nothing
+  to do rather than as a helper that had stopped working, so example 03
+  printed `[skip]` and no test objected. The match is now a substring test for
+  `XLA`, which also covers the un-prefixed names older versions used, and the
+  calling thread is excluded by thread id so the corral can never undo its own
+  pinning. `tests/test_examples_realtime.py` now asserts that a two-worker run
+  moves two threads.
+
 ### Removed
 - The legacy `Client` / `Buffer` / `AOTComputation` wrappers, which rebuilt
   device buffers on every call and were the original source of the jitter this

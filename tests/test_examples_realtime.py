@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import numbers
+import re
 
 import helpers
 import pytest
@@ -69,10 +70,18 @@ MAX_WAKE_P99_US = 100.0
 #: Hardening steps whose ``ok: false`` is not a failure of the host to
 #: provide something.  ``cpu_dma_latency`` needs write access to the device
 #: and is off unless asked for; ``corral_xla_threads`` reports this detail
-#: when the client created no pool threads to move, which is what
-#: ``--threads 1`` produces -- a step with nothing to do, not a step that
-#: could not do it.  Both are matched on the detail rather than waved
-#: through by name, so a corral that genuinely fails still fails the gate.
+#: when it found no pool threads at all, which is a plugin that named none
+#: rather than a step that could not do its work.  Both are matched on the
+#: detail rather than waved through by name, so a corral that genuinely
+#: fails still fails the gate.
+#:
+#: This excuse used to be load-bearing for the wrong reason: it was written
+#: believing ``--threads 1`` created no pool threads, and it was silently
+#: covering a helper that found none on any host.  Reading
+#: ``/proc/<pid>/task/*/comm`` of a live run shows ``--threads N`` gives
+#: exactly N ``tf_XLAEigen`` threads, one included, so on this plugin the
+#: excuse should now never be needed -- and
+#: ``test_the_corral_finds_xlas_pool_threads`` is what says so.
 NOT_A_FAILURE = {
     "cpu_dma_latency": ("needs root", "not requested", "not supported"),
     "corral_xla_threads": ("no XLA worker threads found",),
@@ -172,6 +181,47 @@ def test_every_hardening_step_says_what_it_did(realtime):
     for name, step in hardening.items():
         assert isinstance(step["ok"], bool), name
         assert step["detail"].strip(), f"{name} reports ok without a reason"
+
+
+def test_the_corral_finds_xlas_pool_threads(
+    run, build, plugin, artifacts, tmp_path, load_json
+):
+    """``corral_xla_threads`` moves the threads XLA actually started.
+
+    Its own run, because the shared fixture asks for one worker thread and
+    pins the loop, and neither tells you much: what is being checked is that
+    the helper *finds* something, so the run asks for two workers and leaves
+    the affinity mask whole (``--cpu none``) so the corral has somewhere to
+    move them to.  Needs no privilege -- a thread's own affinity is not a
+    capability -- and Linux-only by way of the ``build`` fixture, which the
+    conftest skips elsewhere.
+
+    This is the test that was missing.  The helper matched thread names by a
+    prefix that XLA had stopped using, so it found nothing on every host and
+    said so in a sentence that reads like success ("no XLA worker threads
+    found (client not created?)").  Every assertion that existed passed
+    throughout.  Asserting on the count is what makes the difference
+    visible.
+    """
+    out = tmp_path / "corral.json"
+    result = run(
+        realtime_argv(build, artifacts, out, 20, warmup=5)
+        + ["--threads", "2", "--cpu", "none"],
+        timeout=180.0,
+    )
+    assert result.returncode == 0, result.stderr
+    step = load_json(out)["hardening"]["corral_xla_threads"]
+    assert step["ok"] is True, step["detail"]
+
+    # "moved 2 of 2 XLA threads" -- read as numbers rather than matched as a
+    # string, so a version of XLA that names more threads than were asked for
+    # still passes.  Two workers were requested; fewer than two found means
+    # the search is missing them again.
+    counts = re.search(r"moved (\d+) of (\d+)", step["detail"])
+    assert counts, f"unreadable detail: {step['detail']!r}"
+    moved, seen = int(counts.group(1)), int(counts.group(2))
+    assert moved == seen, step["detail"]
+    assert moved >= 2, step["detail"]
 
 
 def test_every_cycle_was_recorded(realtime, iterations):
@@ -297,10 +347,11 @@ def test_hardening_succeeded(realtime):
 
     Two steps are exempt, and only for a stated reason rather than by name.
     ``cpu_dma_latency`` needs write access to the device, so it is exempt
-    unless this process is root.  ``corral_xla_threads`` has nothing to move
-    when the client created no pool threads, which is exactly what
-    ``--threads 1`` gives it; a corral that fails for any other reason still
-    fails here.
+    unless this process is root.  ``corral_xla_threads`` is exempt only when
+    it found no pool threads to move; a corral that fails for any other
+    reason still fails here.  That the threads are there to be found is
+    ``test_the_corral_finds_xlas_pool_threads``, which does not need the
+    ``rt`` mark to be worth running.
     """
     _, report = realtime
     failed = {}

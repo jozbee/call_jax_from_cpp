@@ -75,11 +75,17 @@ Status set_realtime_priority(int priority = 80);
 /**
  * @brief Move XLA's worker threads onto `cpus`, away from the caller's core.
  *
- * XLA starts its pools when the client is created and names the threads
- * ("XLAEigen", "XLAPjRtCpuClient"), so they can be found afterwards by walking
- * `/proc/self/task`.  Call this after the `Runtime` exists.  With inline
- * execution the pools should be idle, and this keeps them from waking up on
- * the core the control loop is using.
+ * XLA starts its pools when the client is created and puts "XLA" in the names
+ * it gives those threads (`tf_XLAEigen…` at the pinned version), so they can
+ * be found afterwards by walking `/proc/self/task` for a name containing it.
+ * Call this after the `Runtime` exists.  With inline execution the pools
+ * should be idle, and this keeps them from waking up on the core the control
+ * loop is using.
+ *
+ * The calling thread is never moved, and threads XLA leaves unnamed -- they
+ * inherit the executable's name and are indistinguishable from the caller's
+ * own -- are not found, so a successful result is "every pool thread that
+ * could be identified", not "every thread the plugin started".
  */
 Status corral_xla_threads(const std::vector<int>& cpus);
 

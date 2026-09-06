@@ -10,6 +10,8 @@
 #include <sched.h>
 #include <sys/mman.h>
 #include <sys/resource.h>
+#include <sys/syscall.h>
+#include <unistd.h>
 
 #include <cerrno>
 #include <cstdio>
@@ -110,6 +112,13 @@ Status corral_xla_threads(const std::vector<int>& cpus) {
     return errno_failure("opendir(/proc/self/task)");
   }
 
+  // The caller's own thread is never a candidate: it has just been pinned to
+  // the core it wants, and corralling it onto `cpus` would undo that.  Skipped
+  // by id rather than by name, because a name test cannot tell the loop thread
+  // from a pool thread if the executable is itself called something with "XLA"
+  // in it.
+  const long self_tid = syscall(SYS_gettid);
+
   int moved = 0;
   int seen = 0;
   while (const dirent* entry = readdir(dir)) {
@@ -117,14 +126,26 @@ Status corral_xla_threads(const std::vector<int>& cpus) {
       continue;
     }
     const std::string tid = entry->d_name;
+    if (std::atol(tid.c_str()) == self_tid) {
+      continue;
+    }
     std::ifstream comm_file("/proc/self/task/" + tid + "/comm");
     std::string comm;
     if (!comm_file || !std::getline(comm_file, comm)) {
       continue;
     }
-    // XLA names both of its pools; anything else here is ours.
-    if (comm.rfind("XLAEigen", 0) != 0 &&
-        comm.rfind("XLAPjRtCpuClient", 0) != 0) {
+    // Any thread whose name carries "XLA" is one of XLA's; anything else here
+    // is ours.  This was a prefix match on "XLAEigen"/"XLAPjRtCpuClient", and
+    // it rotted silently: TSL prefixes the name it sets, so at the pinned XLA
+    // version the pool threads are called "tf_XLAEigen" and the prefix match
+    // found nothing on any host.  The step then reported "no XLA worker
+    // threads found (client not created?)", which reads as "there was nothing
+    // to move" rather than as a helper that had stopped working.  A substring
+    // test survives that rename and still matches the un-prefixed names older
+    // versions used.  Verified by reading /proc/<pid>/task/*/comm of a running
+    // example 03: `--threads N` yields exactly N `tf_XLAEigen` threads,
+    // under inline and asynchronous dispatch alike.
+    if (comm.find("XLA") == std::string::npos) {
       continue;
     }
     ++seen;
