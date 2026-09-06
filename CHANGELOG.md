@@ -48,6 +48,12 @@ Notable changes to this project. The format follows
   reports what actually took effect.
 - `input_size(i)` became `input_numel(i)`, and a scalar is now 1 element rather
   than the 0 that version 1 sidecars encode.
+- `examples/02_trajopt/export.py` takes `--preset default|small` in place of
+  the `--time` and `--stats` tuning aids. `default` is the workload the
+  benchmark, example 03 and the tests all describe and is unchanged; `small`
+  exports the same model at a quarter of the work, for a smoke test rather
+  than for a number. The refusal that keeps `cost_history` non-increasing
+  stayed; the advice about which constant to halve did not.
 - Each example is now a call path and a `support.hpp` beside it. The `.cpp`
   holds the sequence a caller performs and nothing else; the flags, the host
   audit, the summaries and the reports moved into the header.
