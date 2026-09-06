@@ -147,12 +147,10 @@ its own so that what the docs show is what builds:
 :end-before: docs: end cmake-submodule
 ```
 
-The library brings its own include directories (`include/` and
-`third_party/`), `cxx_std_17`, `dl` and `Threads::Threads`, and is built
-`POSITION_INDEPENDENT_CODE`. Cache options worth knowing:
+The library brings its own include directories, `cxx_std_17`, `dl` and
+`Threads::Threads`, and is position-independent. Cache options:
 `PJRT_EXEC_FETCH_PLUGIN` (download the published plugin at configure time,
-default `ON`), `PJRT_EXEC_PLUGIN_PATH` (use one you already have),
-`PJRT_EXEC_PLUGIN_SOURCE_BUILD` (bazel, 30–60 minutes), and
+default `ON`), `PJRT_EXEC_PLUGIN_PATH` (use one you already have), and
 `PJRT_EXEC_BUILD_EXAMPLES` / `_TESTS` / `_BENCH`, which default to `OFF` when
 this project is not the top level.
 
@@ -208,10 +206,7 @@ and `pjrt_exec.mk` — and include one fragment. It defines
 ```
 
 **Verify.** `make controller && nm -C build/controller | grep -c 'pjrt::Function'`
-→ expected: a non-zero count on an unstripped binary. If `make` picked the
-library as its default goal instead of yours, the fragment was included
-before your first target *and* the `.DEFAULT_GOAL` restore failed — check that
-you are on GNU Make.
+→ expected: a non-zero count on an unstripped binary.
 
 ## The plugin at run time
 
@@ -220,12 +215,11 @@ the artifacts were exported with. `Runtime` looks in three places, in order:
 `RuntimeOptions::plugin_path`, `$PJRT_CPU_PLUGIN`, then the path compiled in
 at build time — wherever `make plugin` writes.
 
-Getting one: `make plugin` downloads the published, sha256-verified asset;
-`make plugin-source` builds it from the XLA fork; a CMake consumer can let
-`PJRT_EXEC_FETCH_PLUGIN` do it at configure time. A stock, unpatched plugin
-also works, with two losses: an executable that lowers to a LAPACK custom call
-will not load, and inline execution cannot be confirmed. See
-{doc}`../developer/xla-fork`.
+Getting one: `make plugin` downloads the published, sha256-verified asset,
+`make plugin-source` builds it from the XLA fork, and a CMake consumer can let
+`PJRT_EXEC_FETCH_PLUGIN` do it at configure time. A stock plugin also works,
+with two losses: a LAPACK custom call will not load, and inline execution
+cannot be confirmed ({doc}`../developer/xla-fork`).
 
 ## The artifacts at run time
 

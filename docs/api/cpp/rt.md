@@ -19,8 +19,8 @@ The mistake people make is expecting these to be sufficient. They are the
 process's half of the bargain; the host has to cooperate as well, with a
 performance governor, isolated cores, and deep C-states disabled.
 `tools/rt_check.sh` audits that side, read-only, and its output belongs
-alongside any latency number you record — "p99.9 was 4.8 ms" means little
-without knowing whether the governor was on `powersave` at the time.
+alongside any latency number you record — a p99.9 means little without
+knowing whether the governor was on `powersave` at the time.
 
 ## Order of operations
 
