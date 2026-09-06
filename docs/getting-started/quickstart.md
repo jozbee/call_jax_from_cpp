@@ -140,3 +140,6 @@ each.
 :::
 
 ::::
+
+Terms you have not met yet — C-states, `mlockall`, StableHLO, the sidecar —
+are two lines each in the {doc}`glossary <../background/glossary>`.

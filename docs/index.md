@@ -107,6 +107,22 @@ The Python environment, the PJRT CPU plugin, and the C++ build.
 How it works, exporting, calling, real-time hardening, measuring, debugging.
 :::
 
+:::{grid-item-card} {octicon}`code;1em` Examples
+:link: examples/index
+:link-type: doc
+
+Four programs, one artifact set. Each page names what it borrows from the
+others, so read them in any order.
+:::
+
+:::{grid-item-card} {octicon}`light-bulb;1em` Background
+:link: background/index
+:link-type: doc
+
+Real-time on Linux, XLA and PJRT, latency and tails, a glossary: one
+paragraph per mechanism, linking out.
+:::
+
 :::{grid-item-card} {octicon}`plug;1em` Integrate
 :link: guides/integration
 :link-type: doc
@@ -125,7 +141,14 @@ The C++ classes, the Python exporter, and the artifact format.
 :link: developer/index
 :link-type: doc
 
-Measurement, runtime internals, the benchmarks, the XLA fork.
+Measurement, runtime internals, the XLA fork, bumping JAX.
+:::
+
+:::{grid-item-card} {octicon}`pulse;1em` Benchmarks
+:link: benchmarks
+:link-type: doc
+
+The measured tail, with the host each number came from.
 :::
 
 ::::
@@ -159,6 +182,17 @@ examples/index
 examples/01-basic
 examples/02-trajopt
 examples/04-realtime
+```
+
+```{toctree}
+:hidden:
+:caption: Background
+
+background/index
+background/realtime-linux
+background/xla-and-pjrt
+background/latency
+background/glossary
 ```
 
 ```{toctree}
