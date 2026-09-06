@@ -173,6 +173,7 @@ api/cpp/latency
 api/cpp/alloc-guard
 api/cpp/error
 api/cpp/dtype
+api/cpp/examples
 api/python
 api/artifact-format
 ```

@@ -10,9 +10,8 @@
  * actually inline.  A JSON report that carries the summary without the host is
  * a number without a provenance.
  *
- * ### Exit codes
- *
- * The examples share one set, so a script can tell the failures apart:
+ * **Exit codes.**  The examples share one set, so a script can tell the
+ * failures apart:
  *
  * | code | meaning |
  * |---|---|

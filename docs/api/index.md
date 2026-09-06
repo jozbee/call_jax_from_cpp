@@ -67,6 +67,14 @@ The eleven element types, their PJRT and NumPy spellings, and the C++ trait
 that maps a scalar type back.
 :::
 
+:::{grid-item-card} Example helpers
+:link: cpp/examples
+:link-type: doc
+
+`cjfc`: the layer the examples share, under `examples/common/`. Not part of
+the library's API or ABI.
+:::
+
 ::::
 
 ## Python and artifacts

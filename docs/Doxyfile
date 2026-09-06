@@ -10,7 +10,7 @@ PROJECT_NAME           = pjrt_exec
 PROJECT_BRIEF          = "Load once, call many: JAX executables from C++"
 
 OUTPUT_DIRECTORY       = _build/doxygen
-INPUT                  = ../include/pjrt_exec
+INPUT                  = ../include/pjrt_exec ../examples/common
 FILE_PATTERNS          = *.hpp
 RECURSIVE              = NO
 
@@ -29,6 +29,13 @@ XML_PROGRAMLISTING     = NO
 # error rather than an empty box on the reference page.
 EXTRACT_ALL            = NO
 HIDE_UNDOC_MEMBERS     = YES
+
+# The `detail` namespaces are the examples' internals: a slot table, a signal
+# handler, a throw helper. They are documented for whoever reads the header,
+# but they are not part of what a reference page offers, and Breathe would
+# raise a duplicate declaration for each one it saw twice.
+EXCLUDE_SYMBOLS        = cjfc::detail cjfc::detail::* \
+                         cjfc::workload::detail cjfc::workload::detail::*
 
 # ...which is also why undocumented members are not warned about here. Breathe
 # is the gate for the public API; a Doxygen warning for every private helper

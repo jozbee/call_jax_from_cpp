@@ -193,7 +193,7 @@ breathe_default_members = ()
 breathe_show_include = False
 
 # Trims "pjrt::" from the C++ index so entries sort under their own names.
-cpp_index_common_prefix = ["pjrt::rt::", "pjrt::"]
+cpp_index_common_prefix = ["pjrt::rt::", "pjrt::", "cjfc::workload::", "cjfc::"]
 
 # -- Cross-project references -----------------------------------------------
 
