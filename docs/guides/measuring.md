@@ -25,7 +25,8 @@ the load average with the numbers, and the sweep says so loudly above 0.5.
 
 ### 2. Rare spikes need long campaigns, not long runs
 
-A >2x max/p50 outlier appears roughly **once per 20,000+ calls**. Runs of 300,
+How often a >2x max/p50 outlier appears **depends on the configuration**, and
+on a well-behaved one it is rare enough to hide. Runs of 300,
 or even 4000, miss it entirely — which is exactly why the original bug report
 read "most of the time there is little jitter, but on some runs there are large
 spikes".
@@ -182,7 +183,7 @@ gets by accident, and worth having in the table for that reason.
 |---|---|---|
 | Did this change break anything? | 20–200 calls, any machine | Correctness only. Never quote the latencies. |
 | Did the median move? | 300–2000 calls × 3+ interleaved rounds | Enough for p50 and p99; drift is controlled by interleaving. |
-| Did the tail move? | ≥ 20,000 calls per configuration | The 2x outlier rate is about one per 20,000. Fewer calls cannot see it. |
+| Did the tail move? | ≥ 20,000 calls per configuration | On a well-behaved configuration the 2x outlier rate is low enough that shorter runs miss it per 20,000. Fewer calls cannot see it. |
 | Did spike *frequency* change? | Many runs × thousands of calls, interleaved | And even 28 × 4000 was not enough to call two-versus-zero significant. |
 
 Whatever the shape: record `tools/rt_check.sh` output and `/proc/loadavg`

@@ -243,21 +243,31 @@ jobs:
       # this project relies on: every real-time step reports [skip] when the
       # privilege is absent, and nothing in CI gates on it. Latency numbers
       # from a shared runner are not reportable either way.
+      # Always, plugin or not. Nothing links against the plugin -- it is
+      # dlopen'ed at run time -- so the whole tree compiles without one, and a
+      # job that skipped this would turn a green badge into "ruff and sphinx
+      # passed", which is worse than no badge.
+      - name: make (compile everything)
+        run: |
+          docker compose -f docker/compose.yml run --rm --user root \
+            ci make lib examples tests-cpp guard tools build/bin/bench
+
+      # Also always. Tests that need a plugin skip themselves with the reason,
+      # so without one this still runs everything that can run; with one it
+      # runs the lot.
       - name: make test
-        if: steps.plugin.outputs.present == 'true'
         run: |
           docker compose -f docker/compose.yml run --rm --user root \
             -e PJRT_CPU_PLUGIN=/workspace/build/plugin/libpjrt_c_api_cpu_plugin.so \
             ci make test
 
-      - name: Skip the tests (no plugin for this architecture)
-        if: steps.plugin.outputs.present != 'true'
+      - name: Note how much was skipped for want of a plugin
+        if: ${{ always() && steps.plugin.outputs.present != 'true' }}
         env:
           ARCH: ${{ matrix.arch }}
           RELEASE: ${{ steps.versions.outputs.plugin_release }}
         run: |
-          echo "::notice title=tests skipped::no PJRT CPU plugin for ${ARCH} at release ${RELEASE}; publish the asset with tools/release_plugin.sh, or re-run this workflow with build_plugin=true"
-          echo "The tests need a plugin to load; nothing was run."
+          echo "::warning title=no plugin::the tree compiled and the plugin-free tests ran, but everything needing a PJRT CPU plugin skipped (no asset for ${ARCH} at release ${RELEASE}). Publish one with tools/release_plugin.sh, or re-run with build_plugin=true."
 
       # The container wrote as root; hand the tree back so the artifact upload
       # and the runner's own workspace cleanup can read it.

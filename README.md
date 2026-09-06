@@ -17,6 +17,8 @@ steady state that allocates, locks, logs or flushes. The figure of merit is
 ```console
 uv sync              # Python environment (uv comes from mise)
 make plugin          # the prebuilt PJRT CPU plugin, sha256-verified
+                     # (no asset is published for JAX 0.11.1 yet -- until one
+                     #  is, use `make plugin-source`, or docker: see below)
 make                 # the library and the three examples
 make export          # run the export scripts with JAX
 make run-examples    # call and measure
@@ -101,8 +103,11 @@ carries the method, the caveats and the sign-off targets.
   `pin_current_thread`, `corral_xla_threads`, `set_realtime_priority` — each
   reporting whether it took effect, plus `tools/rt_check.sh` to audit the host.
 - **Prebuilt plugins.** There is no official prebuilt CPU PJRT C-API plugin, so
-  this project publishes its own per JAX version; `make plugin` downloads and
-  verifies one, `make plugin-source` builds it from the fork.
+  this project publishes its own per JAX version: `make plugin` downloads and
+  checksums one, `make plugin-source` builds it from the fork. *No asset is
+  published for JAX 0.11.1 yet*, so today `make plugin` prints the remedies and
+  exits non-zero; build from source, or point `$PJRT_CPU_PLUGIN` at a plugin
+  you already have.
 - **Two patches in the XLA fork.** *LAPACK FFI kernels* linked into the plugin;
   without them anything lowering to `jnp.linalg.inv` fails at load with `No FFI
   handler registered for lapack_dgetrf_ffi on a platform Host`, because a bare

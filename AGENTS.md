@@ -27,7 +27,8 @@ answer.
 **2. The goal is the tail, not the mean.** p99.9/p50, max/p50, and the worst
 call in a long campaign. Do not substitute an average-latency objective, and do
 not offer a mean improvement as a result. Rare spikes need long *campaigns*,
-not long runs: a >2x max/p50 outlier appears roughly once per **20,000+ calls**,
+not long runs: how often a >2x max/p50 outlier appears depends on the
+configuration, and on a good one it is rare enough to hide in a short run,
 so a claim about spike *frequency* needs at least that many calls, interleaved
 between the configurations being compared — a sequential A/B drifts with CPU
 temperature by the same order as the effect being measured.

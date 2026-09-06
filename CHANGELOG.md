@@ -24,9 +24,10 @@ Notable changes to this project. The format follows
 - The PJRT CPU plugin is now `dlopen`-ed at run time rather than linked, and is
   located by `RuntimeOptions::plugin_path`, `$PJRT_CPU_PLUGIN`, or a build-time
   default.
-- Prebuilt plugin binaries published as GitHub Release assets per JAX version,
-  with `make plugin` to download and verify one and `make plugin-source` to
-  build it from the XLA fork.
+- Machinery for prebuilt plugin binaries as GitHub Release assets per JAX
+  version: `make plugin` downloads and checksums one, `make plugin-source`
+  builds it from the XLA fork. No asset is published for JAX 0.11.1 yet, so
+  `make plugin` currently prints the remedies and exits non-zero.
 - `pjrt::LatencyRecorder` and `pjrt::AllocGuard` promoted to public headers, so
   a caller can measure their own loop with the same tools this project uses.
 - Three examples: a minimal one, a trajectory-optimisation workload heavy

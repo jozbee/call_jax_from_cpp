@@ -31,7 +31,8 @@ in the middle of a campaign.
 
 ## Trap 2 — rare spikes need long campaigns, not long runs
 
-A greater-than-2x max/p50 outlier appears roughly once per 20,000+ calls. A run
+How often a greater-than-2x max/p50 outlier appears depends on the
+configuration; on a well-behaved one it is rare enough to hide. A run
 of 300 calls misses it entirely, and so does a run of 4000 most of the time.
 This is precisely why the original bug report read "most of the time there is
 little jitter, but on some runs there are large spikes" rather than "the

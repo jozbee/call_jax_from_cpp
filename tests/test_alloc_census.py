@@ -136,12 +136,17 @@ def test_the_plugin_allocation_is_visible_and_nonzero(bench_census):
 
 
 def test_require_guard_fails_when_nothing_was_measured(
-    run, build, artifacts, tmp_path
+    run, build, plugin, artifacts, tmp_path
 ):
     """Exit 4, not 0: "nobody measured" is not a pass.
 
     Distinct from exit 3 on purpose.  A gate that cannot see what it is
     gating should complain rather than wave the run through.
+
+    Takes the ``plugin`` fixture even though the guard is what is under test:
+    the binary has to get far enough to reach the gate, and without a plugin it
+    exits earlier with a load error, which would fail this test on a tree that
+    is merely missing an artifact.
     """
     out = tmp_path / "unmeasured.json"
     result = run(census_argv(build, artifacts, out), check=False)

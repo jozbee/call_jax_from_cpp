@@ -89,8 +89,9 @@ before producing a number. Two rules override normal instincts:
 2. **The goal is the tail, not the mean.** p99.9/p50, max/p50, and the worst
    call in a long campaign. An average-latency improvement is not the objective
    and should not be offered as one. A claim about how *often* spikes happen
-   needs 20,000+ calls per configuration, interleaved in short rounds — a >2x
-   outlier appears about once per 20,000 calls, and a sequential A/B drifts with
+   needs 20,000+ calls per configuration, interleaved in short rounds — on a
+   well-behaved configuration a >2x outlier is rare enough to hide in a short
+   run, and a sequential A/B drifts with
    CPU temperature by the same order as the effect being measured.
 
 Keep `tools/rt_check.sh` output next to any numbers you record.

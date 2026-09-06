@@ -115,7 +115,7 @@ meaningless. {doc}`../guides/measuring` has them in full.
   reported p50 2.4x high and max/p50 4.4 instead of 1.1. Discard a contaminated
   run; never correct it.
 - **Rare spikes need long campaigns, not long runs.** A >2x `max/p50` outlier
-  appears roughly once per 20,000+ calls, so a 500- or 4000-call run can miss it
+  is rare on a well-behaved configuration, so a 500- or 4000-call run can miss it
   entirely.
 - **Interleave configurations in short rounds.** A sequential A/B drifts with
   CPU temperature by the same order as the effect being measured.

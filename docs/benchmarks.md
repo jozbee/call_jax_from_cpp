@@ -163,8 +163,11 @@ three, and inline beat dispatch at `tdefault` in only one. Take "one thread
 beats two beats four" as the shape of the medians, not as a per-round result.
 
 The **spike frequencies are not established here**, and no claim above depends
-on them. A >2x outlier appears roughly once per 20,000 calls, and 6000 calls per
-configuration is too few to say anything about how often. These are tail
+on them, and the campaign is a good illustration of why. How often a >2x
+outlier appears is not one number: 19 of these 24 runs contain one, and the
+five that do not are exactly the two most restrictive configurations. The rate
+is a property of the configuration, so 6000 calls per configuration is too few
+to pin it down for any of them. These are tail
 *ratios* within a run, which is a different and much cheaper question.
 
 The absolute numbers belong to this host and this workload. On a machine with
@@ -182,7 +185,8 @@ Every trap below produced numbers that looked plausible and were meaningless.
   a bazel build reported p50 2.4x high and max/p50 4.4 instead of 1.1. Discard;
   never correct.
 - **Long campaigns, not long runs.** A >2x max/p50 outlier appears roughly once
-  per 20,000+ calls, so runs of 300 or 4000 miss it. Hence 28 × 4000.
+  configuration, and on a well-behaved one it can be rare enough that runs of
+  300 or 4000 miss it entirely. Hence 28 × 4000 for the campaign above.
 - **Warm up blocking on every output**, or async dispatch backlog from the
   warm-up lands on the first timed call.
 - **Interleave configurations in short rounds.** A sequential A/B drifts with
