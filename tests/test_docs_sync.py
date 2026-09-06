@@ -86,12 +86,14 @@ RATIO = re.compile(r"(?<![\dx.])\d+(?:\.\d+)?x\b")
 #: Numbers these patterns match that are not measurements of this project,
 #: and why each one is not.  Keyed by the text rather than by a line number,
 #: because a line number goes stale the next time a paragraph moves.
+#:
+#: Kept to what is actually excused today.  The kernel constants that used to
+#: sit here (the ``/dev/cpu_dma_latency`` values, ``sched_rt_period``) now
+#: appear only under ``docs/developer/``, which this rule exempts outright, so
+#: an entry for them would excuse nothing and would quietly widen the rule.
+#: Add one back when a page needs it, with the reason it is not a result.
 NOT_A_MEASUREMENT = {
-    "950000 µs": "a kernel constant: the idle /dev/cpu_dma_latency value",
-    "1000000 µs": "a kernel constant: the value that means no constraint",
-    "50 ms": "a kernel constant: the default sched_rt_period",
     ">2x": "the threshold in the rule, not a result",
-    "\u22652x": "the threshold in the rule, not a result",
 }
 
 
@@ -270,8 +272,17 @@ def test_measured_figures_stay_under_developer_and_benchmarks(repo):
     that holds the figure, because a number reprinted away from the machine
     it was measured on cannot be checked, compared or refuted later.
 
-    Reported rather than asserted for now: the pages are still being moved,
-    and a warning names the drift without blocking the move.
+    Asserted, not warned.  It warned while the pages were being moved, which
+    was the right setting for a week and the wrong one afterwards: a warning
+    about a figure is itself the thing that gets copied forward.  What it
+    costs when it fires is a sentence rewritten to name a shape and link to
+    the page holding the number, or one allowlist entry saying why the match
+    is not a result.
+
+    Prose only: fenced blocks are blanked first, so a figure in sample
+    output or in a command line is not a claim the page is making.  The two
+    ``{include}`` pages (``changelog``, ``contributing``) are a fence each,
+    so what those files say is governed where they live, not here.
     """
     hits = []
     for page in pages(repo.root):
@@ -293,13 +304,13 @@ def test_measured_figures_stay_under_developer_and_benchmarks(repo):
                     if not excused:
                         hits.append(f"{where}:{number}: {found!r}")
 
-    if hits:
-        warnings.warn(
-            "measured figures outside docs/developer/ and docs/benchmarks.md:"
-            "\n  " + "\n  ".join(hits),
-            UserWarning,
-            stacklevel=1,
-        )
+    assert not hits, (
+        "measured figures belong under docs/developer/ or on "
+        "docs/benchmarks.md, beside the host they were measured on.  State "
+        "the shape of the result here and link to the page that holds the "
+        "number, or add the match to NOT_A_MEASUREMENT with the reason it "
+        "is not a result:\n  " + "\n  ".join(hits)
+    )
 
 
 def test_the_pinned_jax_version_agrees_everywhere(repo, jax2exec):
