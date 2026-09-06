@@ -19,12 +19,16 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _package_version
 from pathlib import Path
 
 DOCS_DIR = Path(__file__).parent.resolve()
 REPO_ROOT = DOCS_DIR.parent
+
+# Extensions written for this site only, not installed as packages.
+sys.path.insert(0, str(DOCS_DIR / "_ext"))
 
 # -- Project ----------------------------------------------------------------
 
@@ -136,6 +140,18 @@ extensions = [
     "sphinx_copybutton",
     "sphinxcontrib.mermaid",
     "breathe",
+    "cpp_autolink",  # docs/_ext: links qualified names inside code blocks
+]
+
+# A name under one of these prefixes that is spelled in a code block and has
+# no reference entry is a warning, and the build runs with -W.  That is the
+# extensibility guarantee: showing a new helper in a documented region fails
+# the build until the helper is documented.
+cpp_autolink_strict_prefixes = ["pjrt", "cjfc"]
+cpp_autolink_ignore = [
+    r"^pjrt::detail::",
+    r"^cjfc::detail::",
+    r"^cjfc::workload::detail::",
 ]
 
 exclude_patterns = [
