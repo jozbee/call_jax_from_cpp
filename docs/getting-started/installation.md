@@ -163,7 +163,7 @@ whatever the file is called. `api_version` must agree with `PJRT_API_MAJOR` and
 ## Building
 
 ```console
-$ make            # the library and the three examples
+$ make            # the library and the four examples
 $ make examples   # just the examples
 $ make bench      # build and run the benchmark
 $ make test       # build everything, then run the suite
@@ -185,8 +185,9 @@ $ cmake --build build -j
 ## Docker
 
 The container exists because two of the real-time helpers need privileges a
-default container does not have: `SCHED_FIFO` needs `CAP_SYS_NICE` plus an
-`rtprio` limit, and `mlockall` needs an unlimited `memlock`. `docker/compose.yml`
+default container does not have: {term}`SCHED_FIFO` needs `CAP_SYS_NICE`
+plus an `rtprio` limit, and {term}`mlockall <memory locking>` needs an
+unlimited `memlock` — the {term}`rlimits`. `docker/compose.yml`
 grants both to `dev` and `ci`.
 
 ```console

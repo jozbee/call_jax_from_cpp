@@ -1,9 +1,13 @@
 # Exporting a JAX function
 
-`jax2exec.export` compiles a function ahead of time and writes three files:
-the serialized PJRT executable, StableHLO bytecode to compile in-process when
-that executable will not run here, and a JSON sidecar describing every input
-and output. Nothing reaches the disk until every check has passed.
+*Assumes the {doc}`Quickstart </getting-started/quickstart>`: you have run
+`export` once and seen the three files. No C++ on this page.*
+
+{py:func}`jax2exec.export` compiles a function ahead of time and writes three
+files: the serialized PJRT executable, {term}`StableHLO` bytecode to compile
+in-process when that executable will not run here, and a JSON
+{term}`sidecar` describing every input and output. Nothing reaches the disk
+until every check has passed.
 
 ## The three files
 
@@ -112,12 +116,13 @@ relinks it and never recompiles. Two things follow:
 2. **The `.mlirbc` is the answer when artifacts must travel.** The sidecar
    records the exporting host's ISA level, the loader compares it with this
    host's before opening the `.binpb`, and compiles the bytecode instead when
-   they disagree. `Function::load_kind()` reports which happened.
+   they disagree. {cpp:func}`~pjrt::Function::load_kind` reports which
+   happened.
 
 Compiling costs seconds at load and nothing per call. A deployment that
 cannot afford a surprise several-second startup sets
-`FunctionOptions::load_policy = LoadPolicy::BinaryOnly` and fails loudly
-instead.
+{cpp:member}`~pjrt::FunctionOptions::load_policy` to
+{cpp:enumerator}`~pjrt::LoadPolicy::BinaryOnly` and fails loudly instead.
 
 ## Custom calls and `jnp.linalg`
 
@@ -136,7 +141,8 @@ keep `jnp.linalg` out of the exported function.
 :end-before: docs: end export
 ```
 
-`export` returns an `ExportResult`: the three paths, the sidecar as a dict,
+`export` returns an {py:class}`~jax2exec.ExportResult`: the three paths, the
+sidecar as a dict,
 and the `jax.stages.Compiled` it came from, which lets a test run the same
 function in-process and compare.
 
@@ -176,4 +182,5 @@ when it is not, and 2 when the sidecar could not be read at all.
 {doc}`../developer/exporter-internals` — why nothing is written before the
 checks, the x64 and pruned-parameter traps in full, freezing what JAX returns.
 {doc}`../api/python` — every argument. {doc}`../api/artifact-format` — the
-sidecar, field by field.
+sidecar, field by field. {doc}`/background/xla-and-pjrt` — what StableHLO,
+XLA and PJRT are.

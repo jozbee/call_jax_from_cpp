@@ -1,13 +1,17 @@
 # Debugging
 
+*Assumes the {doc}`Quickstart </getting-started/quickstart>`. Every message
+the library can raise has a row below; come here when one appears.*
+
 Almost everything that can go wrong goes wrong at load. That is deliberate: the
 sidecar is read and cross-checked, the artifact is chosen, the arenas are
 allocated and the warm-up calls are made before the caller's loop starts, so a
 control process either fails at startup or runs.
 
-Two exception types carry the failures. `pjrt::LoadError` is an artifact or
-plugin problem — something a caller can act on. `pjrt::Error` wraps an error the
-PJRT plugin returned and carries its status code. The rest are standard library
+Two exception types carry the failures. {cpp:class}`pjrt::LoadError` is an
+artifact or plugin problem — something a caller can act on.
+{cpp:class}`pjrt::Error` wraps an error the PJRT plugin returned and carries
+its status code. The rest are standard library
 exceptions raised by the optional debug checks, and those are marked **(debug)**
 below.
 
@@ -64,8 +68,9 @@ Angle brackets stand for whatever the message interpolates.
 
 ## The debug-only rows
 
-Everything marked **(debug)** exists only under `FunctionOptions::debug`
-(`check_values` for the last two). They cost a predictable branch on a member
+Everything marked **(debug)** exists only under
+{cpp:member}`~pjrt::FunctionOptions::debug`
+({cpp:member}`~pjrt::FunctionOptions::check_values` for the last two). They cost a predictable branch on a member
 that is always in cache, which is why they are cheap enough to leave on outside
 a control loop.
 
@@ -90,8 +95,8 @@ bool arenas instead of trusting the caller to have written a clean 0 or 1.
 
 **`SIGILL` inside the executable.** A `.binpb` carries machine code for the
 machine that exported it, and deserializing relinks it without checking whether
-this CPU has those instructions. With `isa_guard` on (the default under
-`LoadPolicy::Auto`) the loader compares the sidecar's `isa_level` against this
+this CPU has those instructions. With {cpp:member}`~pjrt::FunctionOptions::isa_guard`
+on (the default under {cpp:enumerator}`~pjrt::LoadPolicy::Auto`) the loader compares the sidecar's `isa_level` against this
 host's and compiles the `.mlirbc` instead. With the guard off, or under
 `BinaryOnly`, the failure is an illegal instruction with nothing in the
 backtrace pointing at an artifact. `python -m jax2exec check <base>` answers the
@@ -109,7 +114,7 @@ can report. See {doc}`measuring`.
 
 Three things describe a running process, and all three belong in a bug report.
 
-**`Runtime::describe()`** — log it once at startup:
+**{cpp:func}`~pjrt::Runtime::describe`** — log it once at startup:
 
 ```text
 pjrt_exec 0.2.0 on cpu (...) through build/plugin/libpjrt_c_api_cpu_plugin.so,
@@ -121,7 +126,7 @@ Four parts: which plugin was actually opened; the platform and API version,
 with a warning when the plugin's minor version differs from the vendored
 header's; the execution mode; and the device and thread configuration.
 
-**`Function::load_detail()`** — which artifact, and why:
+**{cpp:func}`~pjrt::Function::load_detail`** — which artifact, and why:
 
 ```text
 deserialized artifacts/trajopt.binpb
@@ -136,7 +141,7 @@ successful loads that cost seconds instead of milliseconds, which is exactly
 the kind of thing that should never be a surprise in a deployment — hence
 `LoadPolicy::BinaryOnly`.
 
-**`Function::fingerprint()`** — two processes reporting the same fingerprint
+**{cpp:func}`~pjrt::Function::fingerprint`** — two processes reporting the same fingerprint
 are running the same compiled program; the cheap way to confirm a benchmark
 and a deployment agree.
 
@@ -147,3 +152,10 @@ $ build/bin/plugin_probe            # what the plugin is and what it accepts
 $ python -m jax2exec check <base>   # what the artifacts declare, and whether they run here
 $ tools/rt_check.sh                 # what the host is willing to give a real-time loop
 ```
+
+## Deeper
+
+{doc}`../api/cpp/error` — the exception types and what distinguishes them.
+{doc}`../developer/exporter-internals` — the traps behind the load-time
+refusals. {doc}`/background/xla-and-pjrt` — what a plugin is, for the
+`dlopen` rows.

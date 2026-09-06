@@ -1,7 +1,11 @@
 # How it works
 
-Export lowers a JAX function to StableHLO, compiles it, and serializes the
-result; the compute kernels are LLVM-compiled at that point and embedded in the
+*Assumes the {doc}`Quickstart </getting-started/quickstart>`. The names —
+StableHLO, XLA, PJRT — are one paragraph each in
+{doc}`/background/xla-and-pjrt`.*
+
+Export lowers a JAX function to {term}`StableHLO`, compiles it, and serializes
+the result; the compute kernels are LLVM-compiled at that point and embedded in the
 artifact. Loading relinks that machine code — it never recompiles — and the call
 path is then execute, one await, and one `memcpy` per output.
 
@@ -37,7 +41,7 @@ flowchart TB
   end
 ```
 
-The sidecar is the thin arrow holding the two halves together. The PJRT C API
+The {term}`sidecar` is the thin arrow holding the two halves together. The PJRT C API
 can be asked
 how many outputs an executable has, what their element types are and what their
 dimensions are — and **nothing at all about its parameters**. The sidecar is
@@ -112,11 +116,13 @@ export time and the plugin only orchestrates, so its build flags do not move
 the numbers. What remains inside the process is XLA's thunk runtime, which
 allocates about once per StableHLO op inside the plugin, out of reach of the
 PJRT C API. The other half of the variance is not in the process at all — the
-scheduler, the timer tick, the C-states and the governor — and that is
-{doc}`realtime`.
+scheduler, the timer tick, the {term}`C-states <C-state>` and the
+{term}`governor` — and that is {doc}`realtime`.
 
 ## Deeper
 
 {doc}`../developer/runtime-internals` — the PJRT C API conventions this
 depends on, the verified XLA:CPU behaviour, and the three design decisions.
 {doc}`../developer/open-threads` — what is deliberately not done yet.
+{doc}`/background/xla-and-pjrt` — the four names, for a reader who has never
+opened openxla.org.

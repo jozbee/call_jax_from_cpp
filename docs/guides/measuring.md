@@ -1,5 +1,9 @@
 # Measuring
 
+*Assumes the {doc}`Quickstart </getting-started/quickstart>` and
+`make export`: the benchmark loads example 02's artifact. p50, p99.9 and the
+two ratios are defined in {doc}`/background/latency`.*
+
 A latency number from this project means something only if the machine was
 idle, the campaign was long enough to contain a rare spike, and the
 configurations being compared were interleaved rather than run in sequence.
@@ -33,9 +37,9 @@ $ build/bin/bench --help                            # every flag
 | `--iterations N` | Timed calls. |
 | `--warmup N` | Discarded calls first, all of them blocking. |
 | `--case i` | Which reference case to feed in, and check against. |
-| `--threads N` | `RuntimeOptions::worker_threads`; `0` leaves XLA's default. |
-| `--async` | Ask for asynchronous dispatch instead of inline execution. |
-| `--rt` | Apply the `pjrt::rt` hardening before the timed run. |
+| `--threads N` | {cpp:member}`~pjrt::RuntimeOptions::worker_threads`; `0` leaves XLA's default. |
+| `--async` | Ask for asynchronous dispatch instead of {term}`inline execution`. |
+| `--rt` | Apply the `pjrt::rt` hardening ({doc}`realtime`) before the timed run. |
 | `--cpu N`, `--cpu auto` | Pin to a core; `auto` picks an isolated one when the host has any. |
 | `--label <name>` | Names the run in the CSV; without it a row is unattributable. |
 | `--csv <path>` | Append one summary row. |
@@ -57,8 +61,8 @@ and `--all-cases` sweeps them forwards and backwards.
 :end-before: docs: end latency-recorder
 ```
 
-Reserve the recorder's capacity once, before the loop: it drops rather than
-grows. Write the raw samples out as well as the summary — a spike on call 3
+Reserve the {cpp:class}`~pjrt::LatencyRecorder`'s capacity once, before the
+loop: it drops rather than grows. Write the raw samples out as well as the summary — a spike on call 3
 and a spike on call 30,000 have the same p99.9 and different causes. The
 field meanings and the CSV columns are on {doc}`../api/cpp/latency`.
 
@@ -99,10 +103,10 @@ $ make test-alloc
 ```
 
 Grepping the source for `malloc` proves nothing about what the linked binary
-does at run time, so the census interposes the allocator: it preloads
+does at run time, so the {term}`allocation census` interposes the allocator: it preloads
 `build/lib/malloc_guard.so` and runs the benchmark with the gate armed.
-Nothing links against the guard; `pjrt::AllocGuard` resolves its markers with
-`dlsym` and degrades to no-ops when they are absent.
+Nothing links against the guard; {cpp:class}`pjrt::AllocGuard` resolves its
+markers with `dlsym` and degrades to no-ops when they are absent.
 
 ```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
@@ -116,9 +120,9 @@ it:
 
 | Class | Covers | Gate |
 |---|---|---|
-| `allocs_self()` | The main executable and `libpjrt_exec` | **must be zero** |
-| `allocs_plugin()` | Inside `libpjrt_c_api_cpu_plugin` | reported: XLA's thunk runtime, about one per StableHLO op |
-| `allocs_runtime()` | libc, libstdc++, LAPACK, the thread pool | reported |
+| {cpp:func}`~pjrt::AllocGuard::allocs_self` | The main executable and `libpjrt_exec` | **must be zero** |
+| {cpp:func}`~pjrt::AllocGuard::allocs_plugin` | Inside `libpjrt_c_api_cpu_plugin` | reported: XLA's thunk runtime, about one per StableHLO op |
+| {cpp:func}`~pjrt::AllocGuard::allocs_runtime` | libc, libstdc++, LAPACK, the thread pool | reported |
 
 So the honest claim is not "this allocates nothing". It is "the wrapper
 allocates nothing in the steady state, and thousands of allocations per call
@@ -129,4 +133,4 @@ rest, is on {doc}`../developer/runtime-internals`.
 
 {doc}`../developer/measurement` — the traps, and what each one cost.
 {doc}`../benchmarks` — every figure, with its host. {doc}`../api/cpp/latency`
-— the recorder.
+— the recorder. {doc}`/background/latency` — the words.

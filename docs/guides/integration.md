@@ -1,11 +1,14 @@
 # Integrating into your build
 
+*Assumes the {doc}`Quickstart </getting-started/quickstart>` built the tree
+once. Pick the recipe for your build and stop there.*
+
 For dropping this library into an existing C++ project. Pick the row that
 matches your build, follow that recipe, and stop — each one is complete.
 
 Three facts shape all of them:
 
-- **Nothing links against the PJRT plugin.** It is `dlopen`-ed at run time, so
+- **Nothing links against the {term}`PJRT plugin`.** It is `dlopen`-ed at run time, so
   integrating adds two include roots and `-ldl -lpthread` to a link line — no
   bazel, no network access, no XLA anywhere in your build.
 - **The library is vendored, not installed.** Three translation units and no
@@ -83,17 +86,19 @@ ament_package()
 
 Resolve both paths at run time from
 `ament_index_cpp::get_package_share_directory`, and pass the plugin through
-`RuntimeOptions::plugin_path` rather than a compiled-in default.
+{cpp:member}`~pjrt::RuntimeOptions::plugin_path` rather than a compiled-in
+default.
 
 **Where the objects live.** `controller_manager` hosts every controller in one
-process, and a `Runtime` is one per process — creating a client starts XLA's
+process, and a {cpp:class}`~pjrt::Runtime` is one per process — creating a client starts XLA's
 thread pools, and creating a second one mid-run is a latency spike. So:
 
 - **One `Runtime` for the process**, behind an accessor — a function-local
   `static std::shared_ptr<pjrt::Runtime>` is enough — shared by every
   controller.
-- **One `Function` per controller**, created in `on_configure` with
-  `LoadPolicy::BinaryOnly`, never in `update()`. Loading takes milliseconds
+- **One {cpp:class}`~pjrt::Function` per controller**, created in
+  `on_configure` with {cpp:enumerator}`~pjrt::LoadPolicy::BinaryOnly`, never
+  in `update()`. Loading takes milliseconds
   for a `.binpb` and seconds if it falls back to compiling the `.mlirbc`.
 
 **One side effect to decide once.** The first `Runtime` constructed calls
@@ -103,11 +108,13 @@ and every client created later in the process inherits it. Choose
 documentation.
 
 **Hardening inside a plugin.** The update thread belongs to
-`controller_manager`. Call the memory helpers — `harden_malloc`,
-`lock_memory` — from `on_configure`, and leave affinity and `SCHED_FIFO` to
-the manager's configuration rather than calling `pin_current_thread` or
-`set_realtime_priority` on a thread you do not own. {doc}`realtime` has the
-menu.
+`controller_manager`. Call the memory helpers —
+{cpp:func}`~pjrt::rt::harden_malloc`, {cpp:func}`~pjrt::rt::lock_memory` —
+from `on_configure`, and leave affinity and {term}`SCHED_FIFO` to the
+manager's configuration rather than calling
+{cpp:func}`~pjrt::rt::pin_current_thread` or
+{cpp:func}`~pjrt::rt::set_realtime_priority` on a thread you do not own.
+{doc}`realtime` says what each one buys.
 
 **A deadline is not a cancellation.** PJRT cannot cancel a running CPU
 computation. An overrun means the controller reads a stale result, not that
