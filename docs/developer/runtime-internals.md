@@ -165,8 +165,8 @@ fork patch, justified only if real hardware still shows a tail. See
 ### Thread-pool sizing needs no fork patch
 
 `DefaultThreadPoolSize()` reads the environment variable `PJRT_NPROC` (then
-`NPROC`) before falling back to one thread per core. Both pools — named
-`XLAEigen*` and `XLAPjRtCpuClient*` — are sized
+`NPROC`) before falling back to one thread per core. Both pools — whose
+threads carry TSL's `tf_XLAEigen…` names at the pinned version — are sized
 `max(DefaultThreadPoolSize(), cpu_device_count)`.
 `RuntimeOptions::worker_threads` is therefore applied with `setenv` before the
 client is created, and no patch is involved. It is a process environment

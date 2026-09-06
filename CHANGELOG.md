@@ -36,9 +36,19 @@ Notable changes to this project. The format follows
   allocations.
 - CMake support (`pjrt_exec::pjrt_exec`) beside the Makefile, plus a
   `pjrt_exec.mk` fragment for Make-based consumers.
-- A documentation site built with Sphinx and published to GitHub Pages.
+- A documentation site built with Sphinx and published to GitHub Pages, with
+  a logo: a lambda, an arrow, and angle brackets.
 
 ### Changed
+- The documentation was reorganised for brevity. The guides keep the main
+  ideas and end with a "Deeper" line; the reasoning moved under the developer
+  guide, which gained `exporter-internals` and `realtime-notes`. The
+  integration recipes moved under Guides with ROS 2 first, the real-time
+  guide opens with a menu of every helper, and the example pages show marked
+  regions of the code rather than whole files.
+- Measured figures now live only under the developer guide and on the
+  benchmarks page, and every one names the machine it came from or says the
+  host was not recorded. `tests/test_docs_sync.py` checks the placement.
 - JAX pin moved from 0.9.0.1 to 0.11.1 (jaxlib must match exactly), which moves
   the XLA base to `dcf304bc`. The fork's two patches were re-applied on top.
 - The plugin now negotiates create options: at this XLA version the CPU plugin
