@@ -4,7 +4,7 @@ Prose drifts silently.  Nothing fails when a dtype is added to the exporter
 and not to the table, or when a ``throw`` grows a new message that no page
 explains, or when a code sample's markers are renamed out from under a
 ``literalinclude`` -- the docs simply become wrong, and stay wrong until a
-reader is misled by them.  These four checks cost milliseconds and catch the
+reader is misled by them.  These checks cost milliseconds and catch the
 kinds of drift that a human review reliably misses.
 
 None of them tries to check that the prose is *good*, only that the nouns in
@@ -82,6 +82,25 @@ DURATION = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?\s*(?:µs|us|ms)\b")
 #: A ratio: ``2.4x``, ``4x``.  The trailing ``\b`` already excludes a size
 #: like ``1024x768``, where the ``x`` is followed by a digit.
 RATIO = re.compile(r"(?<![\dx.])\d+(?:\.\d+)?x\b")
+
+#: How far below the H1 the assumes line may sit.  Three is the shape every
+#: page has today -- H1, blank, assumes -- and six leaves room for a label or
+#: a directive above it without letting the line drift out of the first
+#: screenful, which is the only place it does its job.
+ASSUMES_WINDOW = 6
+
+#: What the opening line of the ``{glossary}`` directive says, so that its
+#: block can be picked out of :data:`FENCE`'s matches.  Inside it a term is
+#: flush against the left margin and its definition is indented under it.
+GLOSSARY_DIRECTIVE = "{glossary}"
+
+#: A ``{term}`` reference, in either spelling: ``{term}`arena``` names the
+#: term directly, ``{term}`arenas <arena>``` displays one word and links
+#: another.
+TERM_ROLE = re.compile(r"\{term\}`(?P<text>[^`]*)`")
+
+#: The ``title <target>`` half of a reference, when it has one.
+TERM_TARGET = re.compile(r"^.*?<(?P<target>[^<>]*)>$", re.DOTALL)
 
 #: Numbers these patterns match that are not measurements of this project,
 #: and why each one is not.  Keyed by the text rather than by a line number,
@@ -311,6 +330,93 @@ def test_measured_figures_stay_under_developer_and_benchmarks(repo):
         "number, or add the match to NOT_A_MEASUREMENT with the reason it "
         "is not a result:\n  " + "\n  ".join(hits)
     )
+
+
+def entry_pages(root):
+    """Every guide and numbered example page: what a reader lands on."""
+    docs = pathlib.Path(root, "docs")
+    return sorted(docs.glob("guides/*.md")) + sorted(
+        docs.glob("examples/0*.md")
+    )
+
+
+def test_every_guide_and_example_page_states_what_it_assumes(repo):
+    """A reader arrives from a search engine, not from the page before.
+
+    Every guide and example page opens with an italic line saying what it
+    takes for granted and where the rest is, so that landing in the middle
+    of the site tells you immediately whether you are in the right place.
+    The line is a convention rather than a mechanism, which is exactly the
+    kind of thing that survives one pass and erodes over the next three, so
+    it is asserted.
+    """
+    missing = []
+    for page in entry_pages(repo.root):
+        lines = page.read_text().splitlines()
+        heading = next(
+            (n for n, line in enumerate(lines) if line.startswith("# ")), None
+        )
+        if heading is None:
+            missing.append(f"{page.relative_to(repo.root)}: no H1")
+            continue
+        window = lines[heading + 1 : heading + 1 + ASSUMES_WINDOW]
+        if not any(line.startswith("*Assumes") for line in window):
+            missing.append(f"{page.relative_to(repo.root)}")
+
+    assert not missing, (
+        "every guide and example page opens with an italic line starting "
+        f"'*Assumes' within {ASSUMES_WINDOW} lines of its H1, saying what "
+        "the page takes for granted and where the rest is.  Missing from:"
+        "\n  " + "\n  ".join(missing)
+    )
+
+
+def test_glossary_terms_are_used(repo):
+    """A term nothing links is a definition nobody reaches.
+
+    The glossary exists so that a guide can link a word on its first use
+    instead of defining it inline; a term no page references is either a
+    link that was never made or an entry that has outlived its page.  Both
+    are worth seeing and neither is worth failing a build over -- a term
+    added ahead of the page that will link it is legitimate -- so this
+    reports, like the unused-marker check.
+
+    Comparison is case-insensitive, as Sphinx's own glossary lookup is, and
+    the ``{term}`title <target>``` form is compared on its target.
+    """
+    glossary = pathlib.Path(repo.root, "docs/background/glossary.md")
+    blocks = [
+        block.group(0)
+        for block in FENCE.finditer(glossary.read_text())
+        if GLOSSARY_DIRECTIVE in block.group(0).splitlines()[0]
+    ]
+    assert blocks, f"no {GLOSSARY_DIRECTIVE} directive in {glossary.name}"
+
+    terms = [
+        line.strip()
+        for block in blocks
+        for line in block.splitlines()[1:-1]
+        if line.strip() and not line[:1].isspace()
+    ]
+    assert terms, "the glossary defines no terms; did the directive change?"
+
+    referenced = set()
+    for page in pages(repo.root):
+        for reference in TERM_ROLE.finditer(page.read_text()):
+            text = reference.group("text").strip()
+            explicit = TERM_TARGET.match(text)
+            if explicit:
+                text = explicit.group("target").strip()
+            referenced.add(text.lower())
+
+    unused = [term for term in terms if term.lower() not in referenced]
+    if unused:
+        warnings.warn(
+            "glossary terms no page references with {term}:\n  "
+            + "\n  ".join(unused),
+            UserWarning,
+            stacklevel=1,
+        )
 
 
 def test_the_pinned_jax_version_agrees_everywhere(repo, jax2exec):
