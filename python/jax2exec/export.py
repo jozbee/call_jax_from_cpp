@@ -125,7 +125,7 @@ def default_input_names(
         The function being exported; its signature is consulted.
     count : int
         Number of flattened inputs.
-    provided : Sequence[str] or None, optional
+    provided : Sequence of str or None, optional
         Explicit names, which win outright.
 
     Returns
@@ -192,7 +192,7 @@ def default_output_names(
         The output pytree, of ``ShapeDtypeStruct`` or of arrays.
     count : int
         Number of flattened outputs.
-    provided : Sequence[str] or None, optional
+    provided : Sequence of str or None, optional
         Explicit names, which win outright.
 
     Returns
@@ -543,11 +543,11 @@ def export(
     name : str
         Base name, matching ``[A-Za-z0-9_.-]+``.  The C++ side is handed this
         same path without an extension.
-    donate_argnums : Iterable[int], optional
+    donate_argnums : Iterable of int, optional
         Passed to ``jax.jit`` and recorded in the sidecar.  Note that the C++
         runtime wraps input arenas once and reuses them, so a donated input is
         described faithfully but not yet exploited.
-    input_names : Sequence[str] or None, optional
+    input_names : Sequence of str or None, optional
         Names for the flattened inputs.  Defaults to the parameter names of
         ``fun`` when they line up, else ``arg0``, ``arg1``, ...
     write_mlir : bool, optional

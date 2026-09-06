@@ -3,7 +3,7 @@
  * @brief One spelling of `SyncMode` and `LoadKind`, for the reports, the tests
  *        and anything that prints them.
  *
- * Separate from `report.hpp` so that a program which only wants to name what it
+ * Separate from `%report.hpp` so that a program which only wants to name what it
  * loaded does not pull in nlohmann/json to do it.  Two spellings of "inline" in
  * one project is one too many: these strings are a machine interface -- the
  * test suite parses them -- and a second copy is a second thing to reword.

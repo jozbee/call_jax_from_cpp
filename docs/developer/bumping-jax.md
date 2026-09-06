@@ -261,7 +261,7 @@ PjRtCpuClient::DeserializeExecutable proto deserialization failed
 The layout is `varint(header_length) || header_proto || pjrt_payload`, where the
 header names the format (`pjrt_ifrt`) and carries device and sharding
 information, and the payload is byte-for-byte the `ExecutableAndOptionsProto`.
-{mod}`jax2exec._ifrt` strips it, recognising the envelope by walking the
+`jax2exec._ifrt` strips it, recognising the envelope by walking the
 header's protobuf fields rather than matching bytes, and passing anything it
 does not recognise through untouched.
 

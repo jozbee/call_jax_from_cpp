@@ -545,7 +545,7 @@ class Function {
    *
    * With `FunctionOptions::debug` off this is one indexed load and a cast: the
    * branch is on a member that is always in cache and always predicted.  `T`
-   * must be one of the types `dtype_of` names -- anything else is a compile
+   * must be one of the types `%dtype_of` names -- anything else is a compile
    * error naming the type -- and with `debug` on it must also agree with the
    * dtype the sidecar declares, which is what catches an artifact that was
    * re-exported as float32 under calling code that still says `double`.

@@ -198,6 +198,21 @@ napoleon_numpy_docstring = True
 # it as a ":rtype:" line adds a row that says the same thing twice.
 napoleon_use_rtype = False
 
+# nitpicky mode turns every parameter type in a NumPy-style docstring into a
+# cross-reference that has to resolve. Without preprocessing, "int, optional"
+# is split on the comma and "optional" is looked up as a class; with it,
+# Napoleon recognises the qualifier and leaves it as prose. The aliases give
+# the short spellings the docstrings use the full names the domain indexes.
+napoleon_preprocess_types = True
+napoleon_type_aliases = {
+    "Any": "typing.Any",
+    "Iterable": "collections.abc.Iterable",
+    "Mapping": "collections.abc.Mapping",
+    "Path": "pathlib.Path",
+    "Sequence": "collections.abc.Sequence",
+    "callable": "collections.abc.Callable",
+}
+
 # -- C++ API ----------------------------------------------------------------
 
 breathe_projects = {"pjrt_exec": str(DOXYGEN_XML)}
@@ -232,16 +247,23 @@ linkcheck_ignore = [
     r"https://wiki\.linuxfoundation\.org/realtime/.*",
 ]
 
-# nitpicky mode is off until the C++ pages are written, because Breathe emits a
-# cross-reference for every type it sees -- including PJRT C API structs and
-# libstdc++ types that have no target here. The ignore list below is ready for
-# the day it is turned on.
-nitpicky = False
+# nitpicky mode makes an unresolved cross-reference a warning, and -W makes
+# that a failed build: a {cpp:func} or {doc} that has stopped pointing at
+# anything is caught here rather than found by a reader.
+#
+# The ignore list is everything Breathe legitimately emits a reference for and
+# this site does not document: the PJRT C API structs, libstdc++, nlohmann,
+# and the namespaces themselves, which Breathe names as identifiers in the
+# declarations it renders but never declares as targets.
+nitpicky = True
 nitpick_ignore_regex = [
     ("cpp:identifier", r"^PJRT_.*"),
     ("cpp:identifier", r"^std::.*"),
     ("cpp:type", r"^PJRT_.*"),
     ("cpp:type", r"^std::.*"),
+    ("cpp:identifier", r"^(pjrt|pjrt::rt|pjrt::detail|cjfc|cjfc::workload)$"),
+    ("cpp:identifier", r"^nlohmann(::.*)?$"),
+    ("cpp:type", r"^nlohmann(::.*)?$"),
 ]
 
 # -- HTML -------------------------------------------------------------------

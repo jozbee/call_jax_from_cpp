@@ -128,18 +128,18 @@ def write_reference_cases(
         The same function that was exported.  It is jitted here, so the values
         frozen are the ones XLA computes, not the ones an eager interpreter
         would.
-    arg_tuples : Iterable[Sequence]
+    arg_tuples : Iterable of Sequence
         One entry per case, each a full argument tuple of concrete values.
     directory : str or Path
         Where ``{name}_cases.json`` and ``{name}_case<i>.bin`` go.
     name : str
         Base name, matching the exported artifacts.
-    input_names, output_names : Sequence[str] or None, optional
+    input_names, output_names : Sequence of str or None, optional
         Names for the manifest.  Default to the same names
         :func:`jax2exec.export` would give, so the two files line up.
-    tolerance : Mapping[str, float] or None, optional
+    tolerance : Mapping of str to float, or None, optional
         Per-dtype maximum relative error, merged over
-        :data:`DEFAULT_TOLERANCE`.
+        :data:`~jax2exec.reference.DEFAULT_TOLERANCE`.
 
     Returns
     -------

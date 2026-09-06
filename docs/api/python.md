@@ -78,6 +78,14 @@ rather than with the caller's intent.
 
 ## Constants
 
+```{eval-rst}
+.. autodata:: jax2exec.SUPPORTED_JAX
+
+.. autodata:: jax2exec.SCHEMA_VERSION
+
+.. autodata:: jax2exec.reference.DEFAULT_TOLERANCE
+```
+
 `SUPPORTED_JAX` is the JAX release this exporter was written against and is
 tested on — {{ jax_version }}. A different version is a warning rather than a
 refusal: artifacts are validated by the C++ loader on the way in, and a bump
