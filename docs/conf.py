@@ -209,6 +209,13 @@ intersphinx_mapping = {
 # copy; the fetch then never leaves the machine.
 intersphinx_timeout = 10
 
+# The Linux Foundation's real-time wiki answers 403 to anything that is not a
+# browser, so linkcheck would fail on a page that is there. Everything else
+# is checked.
+linkcheck_ignore = [
+    r"https://wiki\.linuxfoundation\.org/realtime/.*",
+]
+
 # nitpicky mode is off until the C++ pages are written, because Breathe emits a
 # cross-reference for every type it sees -- including PJRT C API structs and
 # libstdc++ types that have no target here. The ignore list below is ready for
