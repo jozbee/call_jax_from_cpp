@@ -106,6 +106,18 @@ bought, and the remaining number is the budget everything else has to fit
 inside. [cyclictest](https://wiki.linuxfoundation.org/realtime/documentation/howto/tools/cyclictest/start)
 is documented by the Linux Foundation's real-time wiki.
 
+## The sleep
+
+Example 03 sleeps until an absolute `CLOCK_MONOTONIC` time, not for a
+relative interval, so wake-up latency does not accumulate into the phase and
+a deadline already in the past returns at once:
+
+```{literalinclude} ../../examples/common/periodic.hpp
+:language: cpp
+:start-after: docs: begin sleep-until
+:end-before: docs: end sleep-until
+```
+
 ## `apply_hardening`, in full
 
 The example layer applies the six steps in the one order that is safe, and
