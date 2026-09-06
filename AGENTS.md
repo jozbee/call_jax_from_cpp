@@ -76,6 +76,15 @@ documentation comes from marked regions (`docs: begin <name>` /
 `docs: end <name>`) via `literalinclude`, never pasted. A pasted snippet is a
 copy that rots silently.
 
+**Every guide and example page opens with what it assumes, and links every
+foreign name.** The first line under the H1 is the italic *Assumes the
+Quickstart …* line. API names in prose are `{cpp:…}` / `{py:…}` roles,
+glossary terms are `{term}` on their first use on a page, and every identifier
+a shown region borrows from another namespace gets one line and a link under
+the block. Code blocks link themselves. `nitpicky` is on, so a dead reference
+fails the build, and so does a `pjrt::` or `cjfc::` name in a code block that
+has no reference entry.
+
 **Measured figures live only under `docs/developer/` and on
 `docs/benchmarks.md`.** A guide, an example page, a reference page or the
 landing page states the *shape* of a result and links to the page that holds
@@ -92,11 +101,11 @@ but must name the fixture. `tests/test_docs_sync.py` checks the placement.
 | `include/pjrt_exec/` | The public headers: `runtime.hpp` (Runtime, Function, Error, LoadError), `dtype.hpp`, `rt.hpp`, `latency.hpp`, `alloc_guard.hpp`. |
 | `src/pjrt_exec/` | The implementation: `runtime.cpp`, `rt.cpp`, `isa.cpp`. |
 | `python/jax2exec/` | The exporter, the sidecar writer, the dtype table, ISA detection, and the `check` CLI. |
-| `examples/` | `01_basic`, `02_trajopt` (the workload for the benchmark **and** for example 04), `03_minimal`, `04_realtime`, and `common/cli.hpp`. |
+| `examples/` | `01_basic`, `02_trajopt` (the workload for the benchmark **and** for example 04), `03_minimal` (the loop with nothing else in it; no `common/` include), `04_realtime`, and `common/` (namespace `cjfc`, documented on `docs/api/cpp/examples.md`). |
 | `bench/` | The measurement spine. Every runtime change is judged by its output. |
 | `tests/` | `cpp/`, `python/`, and `support/malloc_guard.c` — preloaded, never linked. |
 | `tools/` | `get_plugin.sh`, `build_plugin.sh`, `rt_check.sh`, `run_matrix.sh`, `plugin_probe.cpp`. |
-| `docs/` | The Sphinx site. `developer/` is the engineering primer; the rest is user-facing. |
+| `docs/` | The Sphinx site. `developer/` is the engineering primer, `background/` the primers that link out, `_ext/cpp_autolink.py` the extension that links C++ names in code blocks to the reference; the rest is user-facing. |
 | `third_party/xla` | The fork submodule. See `versions.env` for the branch and commit. |
 | `versions.env` | The single source of truth for every pinned version. |
 | `artifacts/` | Export output and run reports. Gitignored: `.binpb` files belong to the machine that made them. |

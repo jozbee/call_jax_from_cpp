@@ -114,6 +114,16 @@ On the C++ reference pages, name every member explicitly: an undocumented
 public member does not reach the Doxygen XML at all, so a directive that names
 one is a build failure rather than an empty box.
 
+**Every guide and example page can be read first.** Its first line under the
+heading is the italic *Assumes the Quickstart …* line saying what it takes for
+granted and where the rest is. API names in prose are `{cpp:…}` / `{py:…}`
+cross-references, glossary terms are `{term}` on their first use on a page,
+and every identifier a shown region borrows from another namespace or example
+gets one line and a link under the block. Code blocks link themselves through
+`docs/_ext/cpp_autolink.py`. `nitpicky` is on: a dead reference fails the
+build, and so does a `pjrt::` or `cjfc::` name in a code block that has no
+reference entry — add the directive, not an ignore.
+
 **Measured figures live only under the Developer guide and on the Benchmarks
 page.** A guide, an example page, a reference page or the landing page states
 the *shape* of a result and links to the page that holds the figure. Every
@@ -132,6 +142,8 @@ commit, and a message that explains *why*.
 - [ ] `make format` has been run.
 - [ ] `make docs` builds clean under `-W`.
 - [ ] Any snippet added to the docs comes from a marked region, not a paste.
+- [ ] A new or rewritten guide or example page starts with the *Assumes* line,
+      and every identifier its regions borrow has a line and a link.
 - [ ] Any measured figure sits under `docs/developer/` or on
       `docs/benchmarks.md`, and names the machine it came from.
 - [ ] No version was hand-typed; `versions.env` is still the only place.

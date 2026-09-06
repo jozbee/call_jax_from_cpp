@@ -1,11 +1,22 @@
 # Example helpers (`cjfc`)
 
-`cjfc` is `call_jax_from_cpp`. It is the layer the examples share, under
-`examples/common/`, and it is not part of the library's API or ABI.
+`cjfc` — call_jax_from_cpp — is the layer the examples share, under
+`examples/common/`. It is not part of the library's API or ABI: nothing in
+`include/pjrt_exec` depends on it, it is header-only, and it is written to be
+copied into a program that wants the same thing. Five headers are generic —
+the flag parser, the absolute-time sleep and stop flag, the host audit and the
+hardening order, the JSON report, the enum names — and one is the trajopt
+{ref}`workload's I/O contract <cjfc-workload>`, which is what examples 02 and
+04 and the benchmark run and what a program with its own function replaces.
+
+Members are listed explicitly, as on every reference page. A name shown in an
+example that is missing here is a build failure, not an omission.
 
 ## `cli.hpp`
 
-Flag parsing for the example programs.
+Flag parsing for the example programs: known flags, typed getters, `--help`,
+and a refusal on anything unknown. Example 03 takes positional arguments and
+needs none of it.
 
 ```{doxygenfile} cli.hpp
 :sections: briefdescription detaileddescription
@@ -17,7 +28,9 @@ Flag parsing for the example programs.
 
 ## `periodic.hpp`
 
-The absolute sleep and the stop flag a periodic loop needs.
+The absolute sleep and the stop flag a periodic loop needs. Example 03 inlines
+the same two functions so that it stays self-contained; example 04 and the
+benchmark include this.
 
 ```{doxygenfile} periodic.hpp
 :sections: briefdescription detaileddescription
@@ -41,7 +54,9 @@ The absolute sleep and the stop flag a periodic loop needs.
 ## `rt_env.hpp`
 
 What the host is willing to give a real-time loop, and the steps that ask for
-it.
+it. {cpp:func}`~cjfc::apply_hardening` is the six steps in the one safe order,
+each reported as a {cpp:struct}`~cjfc::Step`; {doc}`/guides/realtime` says
+what each buys.
 
 ```{doxygenfile} rt_env.hpp
 :sections: briefdescription detaileddescription
@@ -92,7 +107,10 @@ it.
 
 ## `workload.hpp`
 
-The I/O contract of the function `examples/02_trajopt/export.py` exports.
+The I/O contract of the function `examples/02_trajopt/export.py` exports:
+which input is which, how to start, how to feed one cycle's outputs into the
+next cycle's inputs. A program with its own function replaces this header and
+keeps the rest of the layer.
 
 ```{doxygenfile} workload.hpp
 :sections: briefdescription detaileddescription
@@ -128,7 +146,8 @@ The I/O contract of the function `examples/02_trajopt/export.py` exports.
 
 ## `report.hpp`
 
-The JSON report and the shared exit codes.
+The JSON report and the shared exit codes — the table every example and the
+benchmark agree on.
 
 ```{doxygenfile} report.hpp
 :sections: briefdescription detaileddescription

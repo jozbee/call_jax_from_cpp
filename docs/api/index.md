@@ -5,7 +5,8 @@ Python API from the docstrings in `python/jax2exec`. Members are listed
 explicitly on each page, and an undocumented public member does not appear in
 the Doxygen XML at all, so a directive naming one fails the build. That is
 deliberate: it makes an undocumented public entity a build error rather than an
-empty box on a reference page.
+empty box on a reference page. The examples' shared layer, `cjfc`, has a page
+of its own, documented the same way; it is not part of the library.
 
 ## C++
 

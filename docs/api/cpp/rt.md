@@ -7,7 +7,8 @@ function is independent, reports whether it took effect, and is a no-op
 returning `false` on platforms that do not provide it — macOS, mainly, where
 these are development conveniences rather than a deployment target.
 
-Nothing fails the program. A `Status` comes back with `ok` false and a `detail`
+Nothing fails the program. A {cpp:struct}`~pjrt::rt::Status` comes back with
+`ok` false and a `detail`
 saying why, because the useful behaviour for a process that could not raise its
 own priority is to run anyway and say so in its startup log, not to refuse to
 start. That is also why these are separate calls rather than one
@@ -21,21 +22,24 @@ performance governor, isolated cores, and deep C-states disabled.
 `tools/rt_check.sh` audits that side, read-only, and its output belongs
 alongside any latency number you record — a p99.9 means little without
 knowing whether the governor was on `powersave` at the time.
+{doc}`/guides/realtime` maps each helper to the problem it removes;
+{doc}`/background/realtime-linux` explains the mechanisms.
 
 ## Order of operations
 
-A control process calls these once, after loading its `Function` and before
-entering the loop. The order matters: `corral_xla_threads` walks
-`/proc/self/task` looking for threads XLA names when the client is created, so
-the `Runtime` must already exist, and raising priority last keeps the setup
-work itself off a real-time thread.
+A control process calls these once, around loading its `Function` and before
+entering the loop. The order matters: {cpp:func}`~pjrt::rt::harden_malloc`
+before the `Runtime`, so the heap it configures is the one startup grows;
+{cpp:func}`~pjrt::rt::corral_xla_threads` after it, because it walks
+`/proc/self/task` looking for threads XLA names when the client is created;
+priority last, so the setup work itself never runs on a real-time thread.
 
-```cpp
-pjrt::rt::harden_malloc();
-pjrt::rt::lock_memory();
-pjrt::rt::pin_current_thread(2);
-pjrt::rt::corral_xla_threads({3});   // keep XLA's pools off cpu 2
-pjrt::rt::set_realtime_priority(80);
+Example 03's setup, which is the whole of it:
+
+```{literalinclude} ../../../examples/03_minimal/minimal.cpp
+:language: cpp
+:start-after: docs: begin minimal-setup
+:end-before: docs: end minimal-setup
 ```
 
 ## Status

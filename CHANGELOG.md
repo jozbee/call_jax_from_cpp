@@ -30,16 +30,26 @@ Notable changes to this project. The format follows
   `make plugin` currently prints the remedies and exits non-zero.
 - `pjrt::LatencyRecorder` and `pjrt::AllocGuard` promoted to public headers, so
   a caller can measure their own loop with the same tools this project uses.
-- Three examples: a minimal one, a trajectory-optimisation workload heavy
-  enough to time, and a periodic real-time control loop that reports jitter,
-  wake-up latency, deadline misses, page faults, context switches and
-  allocations.
+- Four examples: a basic one, a trajectory-optimisation workload heavy enough
+  to time, a minimal hardened periodic loop in one self-contained file, and the
+  same loop instrumented to report jitter, wake-up latency, deadline misses,
+  page faults, context switches and allocations.
+- A Background section — real-time on Linux, XLA and PJRT, latency and tails,
+  a glossary — one paragraph per mechanism, linking out; every guide and
+  example page opens with what it assumes and links every foreign name.
+- A reference page for the examples' shared layer (`cjfc`), and an extension
+  that links C++ names inside code blocks to their reference entries.
 - CMake support (`pjrt_exec::pjrt_exec`) beside the Makefile, plus a
   `pjrt_exec.mk` fragment for Make-based consumers.
 - A documentation site built with Sphinx and published to GitHub Pages, with
   a logo: a lambda, an arrow, and angle brackets.
 
 ### Changed
+- The trajopt workload's I/O helpers moved from `cjfc::` into
+  `cjfc::workload::` (`examples/common/workload.hpp`), so the code says which
+  helpers are the workload's contract and which are generic.
+- The instrumented real-time loop is example 04; example 03 is now the minimal
+  loop. The docs build is `nitpicky`: a dead cross-reference fails it.
 - The documentation was reorganised for brevity. The guides keep the main
   ideas and end with a "Deeper" line; the reasoning moved under the developer
   guide, which gained `exporter-internals` and `realtime-notes`. The
