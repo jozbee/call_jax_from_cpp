@@ -1,5 +1,5 @@
 /**
- * @file trajopt_signature.hpp
+ * @file workload.hpp
  * @brief What the `02_trajopt` artifact looks like, and how to drive it in a
  *        loop.
  *
@@ -54,7 +54,8 @@
 #include "pjrt_exec/dtype.hpp"
 #include "pjrt_exec/runtime.hpp"
 
-namespace cjfc {
+// call_jax_from_cpp: helpers the examples share; not the library
+namespace cjfc::workload {
 
 /// Input indices, in JAX's argument order.
 enum In {
@@ -352,4 +353,4 @@ inline bool feedback(pjrt::Function& function, const Dims& dims,
 }
 // docs: end recirculate
 
-}  // namespace cjfc
+}  // namespace cjfc::workload

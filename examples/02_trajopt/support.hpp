@@ -23,7 +23,7 @@
 #include "common/cli.hpp"
 #include "common/report.hpp"
 #include "common/rt_env.hpp"
-#include "common/trajopt_signature.hpp"
+#include "common/workload.hpp"
 #include "pjrt_exec/alloc_guard.hpp"
 #include "pjrt_exec/latency.hpp"
 #include "pjrt_exec/runtime.hpp"
@@ -226,7 +226,7 @@ class FaultInjector {
     if (fault_ == Fault::Step) {
       // Desynchronise the recirculated counter: the next cycle's check sees a
       // step that does not follow from the last one.
-      *function.input<std::int32_t>(cjfc::kInStep) += 1;
+      *function.input<std::int32_t>(cjfc::workload::kInStep) += 1;
     }
     if (fault_ == Fault::NonFinite && !audited.empty()) {
       // The audit reads the output arenas, which the API hands out const
@@ -266,12 +266,12 @@ struct Outcome {
 
 /// @brief Read the solver's own answer out of the output arenas.
 inline void read_solution(const pjrt::Function& function, Outcome& outcome) {
-  outcome.cost = *function.output<float>(cjfc::kOutCost);
-  outcome.grad_norm = *function.output<double>(cjfc::kOutGradNorm);
+  outcome.cost = *function.output<float>(cjfc::workload::kOutCost);
+  outcome.grad_norm = *function.output<double>(cjfc::workload::kOutGradNorm);
   outcome.iterations_used =
-      *function.output<std::int32_t>(cjfc::kOutIterationsUsed);
+      *function.output<std::int32_t>(cjfc::workload::kOutIterationsUsed);
   outcome.backtracks_used =
-      *function.output<std::int32_t>(cjfc::kOutBacktracksUsed);
+      *function.output<std::int32_t>(cjfc::workload::kOutBacktracksUsed);
 }
 
 /// @brief Print the run: what was loaded, the tail of the call latency, the

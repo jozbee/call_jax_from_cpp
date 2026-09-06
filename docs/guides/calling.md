@@ -106,7 +106,7 @@ The PJRT buffers alias the arenas for the life of the `Function`, and XLA is
 reading them while `call()` runs. Writing from another thread, or from a
 signal handler, mid-call is a data race on the computation's own operands.
 
-```{literalinclude} ../../examples/common/trajopt_signature.hpp
+```{literalinclude} ../../examples/common/workload.hpp
 :language: cpp
 :start-after: docs: begin recirculate
 :end-before: docs: end recirculate

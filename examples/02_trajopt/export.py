@@ -111,7 +111,7 @@ GRAD_TOL = 1e-3
 
 #: Plant parameters in the order the kernel unpacks them: mass, k_lin, k_cub,
 #: damp, grav, k_couple, u_gain, dt_scale.  Kept identical to
-#: ``cjfc::kNominalParams`` in ``examples/common/trajopt_signature.hpp``; the
+#: ``cjfc::workload::kNominalParams`` in ``examples/common/workload.hpp``; the
 #: C++ examples fill their ``params`` arena from that table.
 NOMINAL_PARAMS = np.array(
     [1.0, 4.0, 1.0, 0.5, 2.0, 0.5, 1.0, 1.0], dtype=np.float64
@@ -119,7 +119,7 @@ NOMINAL_PARAMS = np.array(
 
 #: Cost weights: tracking, effort, terminal, smoothing.  float32 because the
 #: kernel takes them that way -- a knob, not a quantity the answer's accuracy
-#: depends on.  Identical to ``cjfc::kWeights``.
+#: depends on.  Identical to ``cjfc::workload::kWeights``.
 WEIGHTS = np.array([1.0, 0.01, 5.0, 0.1], dtype=np.float32)
 
 #: The values ``step`` is drawn from for the random cases.  Three magnitudes,
@@ -195,9 +195,9 @@ class Model:
     def specs(self) -> tuple[jax.ShapeDtypeStruct, ...]:
         """The argument shapes the function is traced with, in call order.
 
-        This table and ``examples/common/trajopt_signature.hpp`` must agree;
-        the C++ side checks dtypes and ranks against it at load and refuses to
-        run otherwise.
+        This table and ``examples/common/workload.hpp`` must agree; the C++
+        side checks dtypes and ranks against it at load and refuses to run
+        otherwise.
         """
         return (
             jax.ShapeDtypeStruct((self.nx,), jnp.float64),  # x0
@@ -212,11 +212,11 @@ class Model:
     def reference_trajectory(self, k: int) -> np.ndarray:
         """The reference the C++ examples feed at cycle ``k``.
 
-        The NumPy twin of ``cjfc::write_reference`` in
-        ``examples/common/trajopt_signature.hpp``, and it has to stay
-        identical: case 0 is what makes a C++ run and a Python run comparable,
-        and the two are only comparable if they solved the same problem.  A
-        slow sine sweeping along the positions, velocities left at zero.
+        The NumPy twin of ``cjfc::workload::write_reference`` in
+        ``examples/common/workload.hpp``, and it has to stay identical: case 0
+        is what makes a C++ run and a Python run comparable, and the two are
+        only comparable if they solved the same problem.  A slow sine sweeping
+        along the positions, velocities left at zero.
         """
         t = np.arange(self.h, dtype=np.float64)[:, None]
         j = np.arange(self.nq, dtype=np.float64)[None, :]

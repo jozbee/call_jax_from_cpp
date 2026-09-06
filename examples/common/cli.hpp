@@ -35,6 +35,7 @@
 #include <utility>
 #include <vector>
 
+// call_jax_from_cpp: helpers the examples share; not the library
 namespace cjfc {
 
 /**
@@ -58,7 +59,10 @@ class Cli {
    * the command line is then not validated, because a user asking for help has
    * probably just typed something wrong.  The caller is expected to return 0.
    *
-   * @param known Flag names this program accepts, with or without dashes.
+   * @param argc  As handed to `main`.
+ * @param argv  As handed to `main`.  `argv[0]` becomes `program()`, which is
+ *              what error messages spell back.
+ * @param known Flag names this program accepts, with or without dashes.
    * @param usage One-paragraph usage text, printed on `--help`.
    * @throws std::runtime_error on an unknown flag or a stray argument, naming
    *         it.

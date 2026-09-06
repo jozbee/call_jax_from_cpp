@@ -21,7 +21,7 @@
 #include "common/cli.hpp"
 #include "common/periodic.hpp"
 #include "common/rt_env.hpp"
-#include "common/trajopt_signature.hpp"
+#include "common/workload.hpp"
 #include "pjrt_exec/alloc_guard.hpp"
 #include "pjrt_exec/runtime.hpp"
 #include "support.hpp"
@@ -38,7 +38,7 @@ namespace {
  */
 struct LoopState {
   pjrt::Function* function = nullptr;
-  cjfc::Dims dims;
+  cjfc::workload::Dims dims;
   double* x_ref = nullptr;  ///< Resolved once; arenas do not move.
   rt::Recorders* rec = nullptr;
 
@@ -67,6 +67,7 @@ struct LoopState {
 std::size_t run_cycles(LoopState& s, std::size_t count, bool forever,
                        bool record) {
   std::size_t done = 0;
+  // cjfc = call_jax_from_cpp helpers
   for (std::size_t i = 0; (forever || i < count) && !cjfc::stopping(); ++i) {
     // A target already in the past returns immediately, which is how the loop
     // catches up after an overrun instead of skipping a cycle.
@@ -88,11 +89,11 @@ std::size_t run_cycles(LoopState& s, std::size_t count, bool forever,
     s.prev_wake_ns = wake_ns;
     s.have_prev = true;
 
-    cjfc::write_reference(s.x_ref, s.dims, s.k);
+    cjfc::workload::write_reference(s.x_ref, s.dims, s.k);
     const std::int64_t call_start_ns = cjfc::now_ns();
     s.function->call();
     const std::int64_t call_end_ns = cjfc::now_ns();
-    const bool step_ok = cjfc::feedback(*s.function, s.dims, s.k);
+    const bool step_ok = cjfc::workload::feedback(*s.function, s.dims, s.k);
     const std::int64_t end_ns = cjfc::now_ns();
 
     if (record) {
@@ -147,8 +148,8 @@ int main(int argc, char** argv) {
     pjrt::Function function(runtime, options.artifact, function_options);
     timing.load_ms = rt::ms_since(load_start);
 
-    const cjfc::Dims dims = cjfc::check_signature(function);
-    cjfc::init_inputs(function, dims);
+    const cjfc::workload::Dims dims = cjfc::workload::check_signature(function);
+    cjfc::workload::init_inputs(function, dims);
 
     // docs: begin rt-harden
     // 5. Ask the operating system for everything it will give, in the order
@@ -172,7 +173,7 @@ int main(int argc, char** argv) {
     LoopState state;
     state.function = &function;
     state.dims = dims;
-    state.x_ref = function.input<double>(cjfc::kInXRef);
+    state.x_ref = function.input<double>(cjfc::workload::kInXRef);
     state.rec = &recorders;
     state.period_ns = static_cast<std::int64_t>(options.period_us) * 1000;
 

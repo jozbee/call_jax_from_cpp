@@ -44,7 +44,7 @@
 
 #include "common/cli.hpp"
 #include "common/rt_env.hpp"
-#include "common/trajopt_signature.hpp"
+#include "common/workload.hpp"
 #include "pjrt_exec/alloc_guard.hpp"
 #include "pjrt_exec/latency.hpp"
 #include "pjrt_exec/runtime.hpp"
@@ -82,12 +82,12 @@ int run(int argc, char** argv) {
   outcome.runtime_ms = trajopt::millis(t_start, t_runtime);
   outcome.load_ms = trajopt::millis(t_runtime, t_loaded);
 
-  const cjfc::Dims dims = cjfc::check_signature(function);
-  cjfc::init_inputs(function, dims);
+  const cjfc::workload::Dims dims = cjfc::workload::check_signature(function);
+  cjfc::workload::init_inputs(function, dims);
 
   // Resolved once.  Everything the loop touches is a pointer or an integer by
   // the time the stopwatch starts.
-  double* const x_ref = function.input<double>(cjfc::kInXRef);
+  double* const x_ref = function.input<double>(cjfc::workload::kInXRef);
   const std::vector<trajopt::FloatArena> audited =
       options.audit_values ? trajopt::float_outputs(function)
                            : std::vector<trajopt::FloatArena>();
@@ -102,7 +102,7 @@ int run(int argc, char** argv) {
   // --no-check drops only the value audit, which is the part that walks every
   // element of every float arena.
   const auto finish_cycle = [&](std::int64_t k) {
-    if (!cjfc::feedback(function, dims, k)) {
+    if (!cjfc::workload::feedback(function, dims, k)) {
       ++outcome.step_errors;
     }
     injector.apply(function, audited, k);
@@ -114,7 +114,8 @@ int run(int argc, char** argv) {
   // docs: begin trajopt-run
   // The cold call, timed alone, then the warm-up: the same loop body, on the
   // same arenas, recording nothing.
-  cjfc::write_reference(x_ref, dims, cycle);
+  // cjfc = call_jax_from_cpp helpers
+  cjfc::workload::write_reference(x_ref, dims, cycle);
   const auto t_call = trajopt::Clock::now();
   function.call();
   outcome.first_call_us = trajopt::micros(t_call, trajopt::Clock::now());
@@ -122,7 +123,7 @@ int run(int argc, char** argv) {
   ++cycle;
 
   for (std::size_t i = 0; i < options.warmup; ++i) {
-    cjfc::write_reference(x_ref, dims, cycle);
+    cjfc::workload::write_reference(x_ref, dims, cycle);
     function.call();
     finish_cycle(cycle);
     ++cycle;
@@ -141,7 +142,7 @@ int run(int argc, char** argv) {
     for (std::size_t i = 0; i < options.iterations; ++i) {
       // Fresh reference for this cycle, written straight into the input arena
       // XLA will read.  Between calls, never during one.
-      cjfc::write_reference(x_ref, dims, cycle);
+      cjfc::workload::write_reference(x_ref, dims, cycle);
       {
         pjrt::ScopedLatency sample(compute);
         function.call();

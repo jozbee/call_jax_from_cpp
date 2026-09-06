@@ -47,6 +47,7 @@
 #include "pjrt_exec/latency.hpp"
 #include "pjrt_exec/runtime.hpp"
 
+// call_jax_from_cpp: helpers the examples share; not the library
 namespace cjfc {
 
 /// The JSON type the reports are built from.
@@ -199,6 +200,10 @@ inline json spec_json(const pjrt::ArraySpec& spec) {
  * @brief Everything about the plugin, the client and the loaded function that a
  *        later reader will wish had been recorded.
  *
+ * @param runtime        The client the run was made through; its plugin,
+ *                       options and device count are recorded from here.
+ * @param function       The loaded executable, read for its signature and the
+ *                       kind of load that produced it.
  * @param runtime_ms     Wall time to create the `Runtime` (plugin load, client
  *                       creation, XLA's pools starting).
  * @param load_ms        Wall time to construct the `Function`, warm-up
@@ -337,6 +342,9 @@ inline void write_json(const std::string& path, const json& report) {
 /**
  * @brief Decide what an allocation gate says about this run.
  *
+ * @param guard         The guard the window was recorded into, already
+ *                      disarmed.  Whether it was preloaded at all is part of
+ *                      the verdict, not a precondition of asking.
  * @param gate          `"self"` gates on the wrapper's own allocations, which
  *                      is the number that must be zero; `"all"` gates on every
  *                      allocation in the armed window, including the thousands

@@ -12,6 +12,7 @@
 
 #include "pjrt_exec/runtime.hpp"
 
+// call_jax_from_cpp: helpers the examples share; not the library
 namespace cjfc {
 
 /// @brief `SyncMode` as the string the reports use.

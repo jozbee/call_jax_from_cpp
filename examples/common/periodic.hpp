@@ -28,6 +28,7 @@
 #define CJFC_HAVE_CLOCK_NANOSLEEP 0
 #endif
 
+// call_jax_from_cpp: helpers the examples share; not the library
 namespace cjfc {
 
 /// Nanoseconds in a second, spelled once.

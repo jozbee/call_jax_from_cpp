@@ -60,7 +60,7 @@
 #include <string>
 #include <thread>
 
-#include "common/trajopt_signature.hpp"
+#include "common/workload.hpp"
 #include "pjrt_exec/dtype.hpp"
 #include "pjrt_exec/runtime.hpp"
 
@@ -215,9 +215,10 @@ void fill_inputs(pjrt::Function& f, bool singular) {
     return;
   }
   try {
-    const cjfc::Dims dims = cjfc::check_signature(f);
-    cjfc::init_inputs(f, dims);
-    cjfc::write_reference(f.input<double>(cjfc::kInXRef), dims, 0);
+    const cjfc::workload::Dims dims = cjfc::workload::check_signature(f);
+    cjfc::workload::init_inputs(f, dims);
+    cjfc::workload::write_reference(
+        f.input<double>(cjfc::workload::kInXRef), dims, 0);
   } catch (const std::runtime_error&) {
     // Neither of the two known signatures. The zeroed arenas the loader left
     // are a valid input to every function that got this far, since the warm-up

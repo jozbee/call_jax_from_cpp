@@ -53,6 +53,7 @@
 #define CJFC_HAVE_RUSAGE 0
 #endif
 
+// call_jax_from_cpp: helpers the examples share; not the library
 namespace cjfc {
 
 /**
@@ -195,6 +196,8 @@ inline std::vector<int> cpus_except(const std::vector<int>& mask, int cpu) {
 /**
  * @brief Pick the CPU the loop should run on, and say why.
  *
+ * @param env   The host audit this decision is read out of: which CPUs are
+ *              isolated, and which are `nohz_full`.
  * @param spec  `"auto"` to choose one, `"none"` to stay unpinned, or a CPU
  *              number.
  * @param why   Filled in with the reason, in every case including success.  It
@@ -586,6 +589,11 @@ struct HardeningOptions {
  *      allocation that comes with them do not run at real-time priority where
  *      a long operation would starve the rest of the machine.
  *
+ * @param env          The host audit.  A step whose precondition is absent
+ *                     here is reported as skipped rather than attempted.
+ * @param options      Which of the six steps to run.  Priority and the
+ *                     C-state hold are off by default, because both need a
+ *                     privilege an ordinary run does not have.
  * @param dma          Kept alive by the caller; closing it releases the C-state
  *                     constraint.
  * @param chosen_cpu   Set to the CPU that was pinned to, or -1.  Optional.
