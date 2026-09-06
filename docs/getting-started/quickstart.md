@@ -139,6 +139,15 @@ A ROS 2 package, a CMake submodule, FetchContent, or plain Make — one recipe
 each.
 :::
 
+:::{grid-item-card} {octicon}`stopwatch;1em` 03 · Minimal real-time loop
+:link: ../examples/03-minimal
+:link-type: doc
+
+The artifact you just exported, called on a period with the hardening
+applied, in one file you can copy. Skip examples 01 and 02 if the loop is
+your use case.
+:::
+
 ::::
 
 Terms you have not met yet — C-states, `mlockall`, StableHLO, the sidecar —

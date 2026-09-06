@@ -33,21 +33,30 @@ in a loop. Nothing on the steady-state path allocates, locks, logs or flushes.
 :class-container: feature-grid
 
 :::{grid-item-card} {octicon}`package;1.1em` Load once, call many
+:link: guides/calling
+:link-type: doc
+
 Every input and output gets a 64-byte-aligned arena the runtime owns. Inputs
 are wrapped once in zero-copy PJRT buffers and outputs are read straight out
 of device memory, so a call transfers nothing.
 :::
 
 :::{grid-item-card} {octicon}`pulse;1.1em` Built for the tail
+:link: benchmarks
+:link-type: doc
+
 The figure of merit is the worst call, not the average one: p99.9 relative to
 p50, and the worst call in a long campaign. The numbers, and the machines they
-came from, are on the {doc}`benchmarks page <benchmarks>`.
+came from, are on the benchmarks page.
 :::
 
 :::{grid-item-card} {octicon}`clock;1.1em` Real-time ready
+:link: examples/03-minimal
+:link-type: doc
+
 Optional helpers lock memory, pin the thread, move XLA's pools off its core
 and raise scheduling priority. Each reports whether it took effect, and none
-of them fails the program.
+of them fails the program. The whole loop fits in one file.
 :::
 
 ::::
@@ -181,6 +190,7 @@ guides/debugging
 examples/index
 examples/01-basic
 examples/02-trajopt
+examples/03-minimal
 examples/04-realtime
 ```
 
