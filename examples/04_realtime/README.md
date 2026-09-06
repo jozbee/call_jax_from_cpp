@@ -10,8 +10,8 @@ There is **no export script here.** This example loads what
 
 ```console
 $ make plugin && make && make export
-$ ./build/bin/example_03_realtime --iterations 3000
-$ examples/03_realtime/run_realtime.sh --iterations 3000   # audit + launch
+$ ./build/bin/example_04_realtime --iterations 3000
+$ examples/04_realtime/run_realtime.sh --iterations 3000   # audit + launch
 ```
 
 `run_realtime.sh` prints the `tools/rt_check.sh` audit and the load average

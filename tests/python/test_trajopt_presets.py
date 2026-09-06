@@ -1,7 +1,7 @@
 """The ``small`` preset of the 02_trajopt workload still traces.
 
 ``default`` is exercised by every other test in the suite -- it is the
-workload the benchmark, example 03 and the shape-pinning tests all describe.
+workload the benchmark, example 04 and the shape-pinning tests all describe.
 ``small`` is exported by nobody, so without this it would break silently and
 be discovered by whoever reached for it on a slow machine.
 

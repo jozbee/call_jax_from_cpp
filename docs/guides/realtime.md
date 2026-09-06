@@ -30,10 +30,10 @@ layer in `examples/common/rt_env.hpp`, written to be copied.
 
 ## Applying them
 
-The call site from example 03. Nothing here is fatal: an unprivileged run
+The call site from example 04. Nothing here is fatal: an unprivileged run
 reports what it did not get and continues.
 
-```{literalinclude} ../../examples/03_realtime/realtime.cpp
+```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
 :start-after: docs: begin rt-harden
 :end-before: docs: end rt-harden
@@ -49,9 +49,9 @@ how a machine stops responding.
 
 ## The loop
 
-Example 03's cycle, as it runs:
+Example 04's cycle, as it runs:
 
-```{literalinclude} ../../examples/03_realtime/realtime.cpp
+```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
 :start-after: docs: begin rt-loop
 :end-before: docs: end rt-loop
@@ -92,7 +92,7 @@ signals.
 
 ## Reading the report
 
-Example 03 records four distributions and prints them when it stops. Each
+Example 04 records four distributions and prints them when it stops. Each
 answers a different question.
 
 | Line | Question | A bad value means |

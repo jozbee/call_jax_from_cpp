@@ -143,7 +143,7 @@ Status corral_xla_threads(const std::vector<int>& cpus) {
     // to move" rather than as a helper that had stopped working.  A substring
     // test survives that rename and still matches the un-prefixed names older
     // versions used.  Verified by reading /proc/<pid>/task/*/comm of a running
-    // example 03: `--threads N` yields exactly N `tf_XLAEigen` threads,
+    // example 04: `--threads N` yields exactly N `tf_XLAEigen` threads,
     // under inline and asynchronous dispatch alike.
     if (comm.find("XLA") == std::string::npos) {
       continue;

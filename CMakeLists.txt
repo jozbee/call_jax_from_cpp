@@ -147,7 +147,8 @@ endif()
 if(PJRT_EXEC_BUILD_EXAMPLES)
   foreach(_pair "example_01_basic;examples/01_basic/basic.cpp"
                 "example_02_trajopt;examples/02_trajopt/trajopt.cpp"
-                "example_03_realtime;examples/03_realtime/realtime.cpp")
+                "example_03_minimal;examples/03_minimal/minimal.cpp"
+                "example_04_realtime;examples/04_realtime/realtime.cpp")
     list(GET _pair 0 _name)
     list(GET _pair 1 _src)
     add_executable(${_name} "${_src}")
@@ -256,16 +257,17 @@ if(PROJECT_IS_TOP_LEVEL)
       COMMAND $<TARGET_FILE:example_01_basic> --debug
       COMMAND $<TARGET_FILE:example_02_trajopt>
               --iterations 500 --json "${_reports}/trajopt.json"
+      COMMAND $<TARGET_FILE:example_03_minimal> artifacts/basic 1000 1000
       COMMAND ${CMAKE_COMMAND} -E env
               "${_preload_var}=$<TARGET_FILE:malloc_guard>"
-              $<TARGET_FILE:example_03_realtime>
+              $<TARGET_FILE:example_04_realtime>
               --iterations 1000 --json "${_reports}/realtime.json"
       WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
       COMMENT "Running the examples end to end"
       USES_TERMINAL
       VERBATIM)
     add_dependencies(run-examples export example_01_basic example_02_trajopt
-                     example_03_realtime malloc_guard)
+                     example_03_minimal example_04_realtime malloc_guard)
   endif()
 
   add_custom_target(test
@@ -282,7 +284,7 @@ if(PROJECT_IS_TOP_LEVEL)
   endif()
   if(PJRT_EXEC_BUILD_EXAMPLES)
     add_dependencies(test example_01_basic example_02_trajopt
-                     example_03_realtime)
+                     example_03_minimal example_04_realtime)
   endif()
 
   # The gate that matters: the wrapper's own allocations in the steady-state

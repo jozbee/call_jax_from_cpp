@@ -77,7 +77,8 @@ LIB_SRCS := \
   src/pjrt_exec/isa.cpp
 LIB_OBJS := $(patsubst %.cpp,$(OBJ_DIR)/%.o,$(LIB_SRCS))
 
-EXAMPLE_BINS := example_01_basic example_02_trajopt example_03_realtime
+EXAMPLE_BINS := example_01_basic example_02_trajopt example_03_minimal \
+                example_04_realtime
 TEST_BINS    := fn_info test_debug_checks test_load_errors test_latency \
                 test_guard_selftest
 BENCH_BIN    := bench
@@ -90,7 +91,8 @@ TOOL_BINS    := $(if $(wildcard tools/plugin_probe.cpp),plugin_probe)
 # is what keeps this to a single rule instead of one per binary.
 main_example_01_basic    := $(OBJ_DIR)/examples/01_basic/basic.o
 main_example_02_trajopt  := $(OBJ_DIR)/examples/02_trajopt/trajopt.o
-main_example_03_realtime := $(OBJ_DIR)/examples/03_realtime/realtime.o
+main_example_03_minimal  := $(OBJ_DIR)/examples/03_minimal/minimal.o
+main_example_04_realtime := $(OBJ_DIR)/examples/04_realtime/realtime.o
 main_bench               := $(OBJ_DIR)/bench/bench_main.o
 main_fn_info             := $(OBJ_DIR)/tests/cpp/fn_info.o
 main_test_debug_checks   := $(OBJ_DIR)/tests/cpp/test_debug_checks.o
@@ -152,7 +154,7 @@ all: lib examples  ## Build the library and the examples (default)
 
 lib: $(LIB)  ## Build build/lib/libpjrt_exec.a
 
-examples: $(EXAMPLE_PATHS)  ## Build the three example binaries
+examples: $(EXAMPLE_PATHS)  ## Build the four example binaries
 
 tests-cpp: $(TEST_PATHS)  ## Build the C++ test binaries
 
@@ -236,12 +238,13 @@ export: $(BASIC_ARTIFACT) $(TRAJOPT_ARTIFACT)  ## Export the example artifacts w
 
 # ---------------------------------------------------------------------- runs
 
-run-examples: examples export guard plugin-hint | $(REPORTS)  ## Run all three examples end to end
+run-examples: examples export guard plugin-hint | $(REPORTS)  ## Run all four examples end to end
 	$(BIN_DIR)/example_01_basic
 	$(BIN_DIR)/example_01_basic --debug
 	$(BIN_DIR)/example_02_trajopt --iterations 500 --json $(REPORTS)/trajopt.json
+	$(BIN_DIR)/example_03_minimal artifacts/basic 1000 1000
 	$(PRELOAD_VAR)=$(abspath $(GUARD)) \
-	  $(BIN_DIR)/example_03_realtime --iterations 1000 --json $(REPORTS)/realtime.json
+	  $(BIN_DIR)/example_04_realtime --iterations 1000 --json $(REPORTS)/realtime.json
 
 # `bench` builds and runs, because a benchmark that was built but not run tells
 # you nothing. The load average goes with the numbers: a concurrent build does

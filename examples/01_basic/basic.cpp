@@ -6,7 +6,7 @@
  * The whole call path and nothing else: a `pjrt::Runtime`, a `pjrt::Function`,
  * a signature check, the inputs, `call()`, the outputs.  The flags, the
  * `key=value` reporting and the `--debug` demonstration are in `support.hpp`.
- * `02_trajopt` and `03_realtime` add timing and hardening on top of this.
+ * `02_trajopt` and `04_realtime` add timing and hardening on top of this.
  */
 #include <cstddef>
 #include <cstdio>

@@ -158,7 +158,7 @@ guides/debugging
 examples/index
 examples/01-basic
 examples/02-trajopt
-examples/03-realtime
+examples/04-realtime
 ```
 
 ```{toctree}

@@ -31,7 +31,7 @@ jitter.  Only the *results* -- the step actually chosen, ``backtracks_used``,
 
 Presets
 -------
-``--preset default`` is the workload the benchmark, example 03 and the tests
+``--preset default`` is the workload the benchmark, example 04 and the tests
 all describe; changing it invalidates every number recorded against it.
 ``--preset small`` exports the same model at a quarter of the work, for a
 smoke test on a slow machine.  It is not a workload to time.
@@ -86,7 +86,7 @@ class Preset:
 
 
 PRESETS = {
-    "default": Preset(24, 6, 50, 5, "the benchmark, example 03 and the tests"),
+    "default": Preset(24, 6, 50, 5, "the benchmark, example 04 and the tests"),
     "small": Preset(
         8, 6, 20, 3, "a fast export for a smoke test; not a workload to time"
     ),

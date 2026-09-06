@@ -104,7 +104,7 @@ does at run time, so the census interposes the allocator: it preloads
 Nothing links against the guard; `pjrt::AllocGuard` resolves its markers with
 `dlsym` and degrades to no-ops when they are absent.
 
-```{literalinclude} ../../examples/03_realtime/realtime.cpp
+```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
 :start-after: docs: begin alloc-guard
 :end-before: docs: end alloc-guard

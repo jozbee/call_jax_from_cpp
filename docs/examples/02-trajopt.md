@@ -3,7 +3,7 @@
 `examples/02_trajopt` is the workload to time: a trajectory-optimisation step
 in float64, heavy enough that a call takes milliseconds, with reference cases
 frozen from JAX so a fast answer is also checked to be the right one. It is
-also the artifact example 03 runs and the fixture `make bench` defaults to, so
+also the artifact example 04 runs and the fixture `make bench` defaults to, so
 its export script is the one to re-run after a JAX bump or a machine change.
 
 The model is a chain of masses with cubic springs, damping, a sine "gravity"
@@ -21,7 +21,7 @@ motivation; no controller ships here.
 :end-before: docs: end trajopt-presets
 ```
 
-`default` is what the tests, the benchmark and example 03 use. `small` is a
+`default` is what the tests, the benchmark and example 04 use. `small` is a
 fast export for a smoke test, not a workload to time.
 
 ## The model

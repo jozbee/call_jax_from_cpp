@@ -53,7 +53,7 @@ inline double us_since(Clock::time_point t0) {
 // ---------------------------------------------------------------- the flags
 
 const char* const kUsage =
-    "usage: example_03_realtime [options]\n"
+    "usage: example_04_realtime [options]\n"
     "\n"
     "Run the 02_trajopt artifact on a fixed period and report the jitter,\n"
     "the deadline misses and the allocations.  Needs `make export` first.\n"
@@ -410,7 +410,7 @@ inline void print_report(const Options& options, const Results& results,
 inline void print_quiet_line(const Options& options, const Results& results,
                              const pjrt::AllocGuard& guard) {
   std::printf(
-      "03_realtime n=%zu period=%zuus compute p50=%.1f p99.9=%.1f max=%.1f "
+      "04_realtime n=%zu period=%zuus compute p50=%.1f p99.9=%.1f max=%.1f "
       "jitter p99.9=%.1f missed=%zu self_allocs=%lu exit=%d\n",
       results.completed, options.period_us, results.compute.p50_us,
       results.compute.p999_us, results.compute.max_us, results.jitter.p999_us,
@@ -437,7 +437,7 @@ inline void write_report(const Options& options, const cjfc::HostEnv& env,
 
   const cjfc::json report = {
       {"schema", 1},
-      {"example", "03_realtime"},
+      {"example", "04_realtime"},
       {"artifact", options.artifact},
       {"config",
        {{"period_us", options.period_us},

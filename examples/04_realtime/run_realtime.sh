@@ -11,7 +11,7 @@
 # runs, then hands you both together.
 #
 # Usage:
-#   examples/03_realtime/run_realtime.sh [--iterations N] [--period-us N] ...
+#   examples/04_realtime/run_realtime.sh [--iterations N] [--period-us N] ...
 #
 #   Every argument is passed through to the binary; --help lists its flags.
 #
@@ -19,11 +19,11 @@
 #   CPUSET    taskset -c argument, e.g. "3" or "2-3".  Unset: no taskset.
 #   CHRT      chrt -f priority, e.g. 80.  Unset: no chrt.  See the note below.
 #   NO_GUARD  set to anything to skip preloading the allocation counter.
-#   BIN       binary to run (default: build/bin/example_03_realtime)
+#   BIN       binary to run (default: build/bin/example_04_realtime)
 #   PYTHON    interpreter for the export (default: "uv run python", because uv
 #             comes from mise and is not on PATH in a non-interactive shell)
 #
-# CHRT vs --rt-priority: `chrt -f 80 ./example_03_realtime` starts the WHOLE
+# CHRT vs --rt-priority: `chrt -f 80 ./example_04_realtime` starts the WHOLE
 # process under SCHED_FIFO, and every thread XLA creates afterwards inherits
 # that scheduling class -- including its pool threads, which then compete with
 # the control loop at real-time priority instead of yielding to it, and which
@@ -45,7 +45,7 @@ fi
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-BIN="${BIN:-build/bin/example_03_realtime}"
+BIN="${BIN:-build/bin/example_04_realtime}"
 PYTHON="${PYTHON:-uv run python}"
 GUARD="build/lib/malloc_guard.so"
 ARTIFACT="artifacts/trajopt"

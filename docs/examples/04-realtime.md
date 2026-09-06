@@ -1,6 +1,6 @@
-# 03 · Real-time loop
+# 04 · Real-time loop, instrumented
 
-`examples/03_realtime` runs the function example 02 exports on a fixed period
+`examples/04_realtime` runs the function example 02 exports on a fixed period
 with the hardening applied, records every call and every wake-up, and prints
 a report when it stops. It is the shape a control process takes: hardening
 once at startup, then a loop that writes inputs, calls, reads outputs, and
@@ -22,7 +22,7 @@ the allocation census.
 
 ## Hardening
 
-```{literalinclude} ../../examples/03_realtime/realtime.cpp
+```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
 :start-after: docs: begin rt-harden
 :end-before: docs: end rt-harden
@@ -34,7 +34,7 @@ threads (after the `Runtime` exists), C-states, priority last.
 
 ## The loop
 
-```{literalinclude} ../../examples/03_realtime/realtime.cpp
+```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
 :start-after: docs: begin rt-loop
 :end-before: docs: end rt-loop
@@ -46,7 +46,7 @@ compute, cycle, wake-up latency, and signed period jitter.
 
 ## The measured window
 
-```{literalinclude} ../../examples/03_realtime/realtime.cpp
+```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
 :start-after: docs: begin alloc-guard
 :end-before: docs: end alloc-guard
@@ -57,22 +57,22 @@ Warm-up is outside, because its faults are what warm-up exists to pay.
 
 ## The report
 
-```{literalinclude} ../../examples/03_realtime/realtime.cpp
+```{literalinclude} ../../examples/04_realtime/realtime.cpp
 :language: cpp
 :start-after: docs: begin rt-report
 :end-before: docs: end rt-report
 ```
 
 Correctness outranks the allocation gate in the exit code. Flags, the host
-audit and the JSON writer live in `examples/03_realtime/support.hpp`.
+audit and the JSON writer live in `examples/04_realtime/support.hpp`.
 
 ## Build and run
 
 ```console
 $ make plugin && make && make export
-$ ./build/bin/example_03_realtime --iterations 1000
+$ ./build/bin/example_04_realtime --iterations 1000
 $ LD_PRELOAD=$PWD/build/lib/malloc_guard.so \
-    ./build/bin/example_03_realtime --iterations 1000 --json artifacts/reports/realtime.json
+    ./build/bin/example_04_realtime --iterations 1000 --json artifacts/reports/realtime.json
 ```
 
 The flags that matter: `--period-us` (default 10000), `--iterations` (`0`

@@ -19,7 +19,7 @@ uv sync              # Python environment (uv comes from mise)
 make plugin          # the prebuilt PJRT CPU plugin, sha256-verified
                      # (no asset is published for JAX 0.11.1 yet -- until one
                      #  is, use `make plugin-source`, or docker: see below)
-make                 # the library and the three examples
+make                 # the library and the four examples
 make export          # run the export scripts with JAX
 make run-examples    # call and measure
 ```

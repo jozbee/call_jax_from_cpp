@@ -108,7 +108,7 @@ is documented by the Linux Foundation's real-time wiki.
 
 ## The sleep
 
-Example 03 sleeps until an absolute `CLOCK_MONOTONIC` time, not for a
+Example 04 sleeps until an absolute `CLOCK_MONOTONIC` time, not for a
 relative interval, so wake-up latency does not accumulate into the phase and
 a deadline already in the past returns at once:
 

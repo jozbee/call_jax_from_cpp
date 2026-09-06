@@ -2,7 +2,7 @@
 
 Three examples, each buildable from the tree with `make examples` and runnable
 with `make run-examples`. They are ordered by how much of the real-time
-machinery they use, and they share one artifact set: example 03 runs the
+machinery they use, and they share one artifact set: example 04 runs the
 function example 02 exports.
 
 ::::{grid} 1 1 3 3
@@ -29,7 +29,7 @@ JSON report. Numbers you can reproduce on your own machine.
 :::
 
 :::{grid-item-card} 03 · Real-time loop
-:link: 03-realtime
+:link: 04-realtime
 :link-type: doc
 
 The `pjrt::rt` hardening helpers, a fixed period, and a report of jitter,

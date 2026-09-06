@@ -4,7 +4,7 @@
  *        loop.
  *
  * Two examples call the same exported function: `02_trajopt` measures it, and
- * `03_realtime` runs it on a period.  Both need the same three things -- the
+ * `04_realtime` runs it on a period.  Both need the same three things -- the
  * argument order, a starting set of inputs, and the rule for feeding one call's
  * outputs into the next call's inputs -- so all three live here rather than
  * being written twice and drifting apart.

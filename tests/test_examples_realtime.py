@@ -1,4 +1,8 @@
-"""``example_03_realtime``: the periodic loop and its four distributions.
+"""The two periodic loops: ``example_03_minimal`` and ``example_04_realtime``.
+
+03 is the same loop with nothing around it, so the one thing asked of it
+here is that it runs and prints what it measured; everything below it is
+about 04's report.
 
 The structural assertions run everywhere.  The statistical ones are marked
 ``rt`` and run only where the conftest's audit says the host is tuned and
@@ -90,7 +94,7 @@ NOT_A_FAILURE = {
 
 def realtime_argv(build, artifacts, out, iterations, warmup=50):
     return [
-        build.bin("example_03_realtime"),
+        build.bin("example_04_realtime"),
         "--artifact",
         artifacts.trajopt,
         "--iterations",
@@ -148,6 +152,36 @@ def realtime_census(
     return helpers.cached("realtime_census", go)
 
 
+def test_minimal_loop_exits_zero_and_prints_two_summaries(
+    run, build, plugin, artifacts
+):
+    """``example_03_minimal`` runs its period and reports both distributions.
+
+    Structural only.  The minimal loop has no report to parse and no host
+    audit to gate on, so what is checked is that the artifact loaded, the
+    residual was computed, and each recorder printed a summary -- the failure
+    this catches is a copied file that compiles and then measures nothing.
+    """
+    result = run(
+        [
+            build.bin("example_03_minimal"),
+            artifacts.basic,
+            "2000",
+            "100",
+        ]
+    )
+    assert result.returncode == 0
+    for label in ("wake-up latency", "call latency"):
+        section = re.search(
+            rf"^=== {re.escape(label)} .*?^\s*$",
+            result.stdout,
+            re.MULTILINE | re.DOTALL,
+        )
+        assert section is not None, f"no {label} summary in:\n{result.stdout}"
+        assert "p50" in section.group(0)
+    assert "max_residual=" in result.stdout
+
+
 def test_exits_zero(realtime):
     result, report = realtime
     assert result.returncode == 0
@@ -158,7 +192,7 @@ def test_report_has_every_top_level_key(realtime):
     _, report = realtime
     assert TOP_LEVEL_KEYS <= set(report), TOP_LEVEL_KEYS - set(report)
     assert report["schema"] == 1
-    assert report["example"] == "03_realtime"
+    assert report["example"] == "04_realtime"
 
 
 def test_config_records_what_was_asked_for(realtime, iterations):
@@ -376,7 +410,7 @@ def test_run_realtime_script_audits_before_it_measures(run, repo, plugin):
     script is expected to work on any host and to report what it could not
     get, which is precisely what makes it worth having.
     """
-    launcher = repo.root / "examples/03_realtime/run_realtime.sh"
+    launcher = repo.root / "examples/04_realtime/run_realtime.sh"
     if not launcher.is_file():
         pytest.skip(f"{launcher} is not in this checkout")
 
@@ -396,6 +430,6 @@ def test_run_realtime_script_audits_before_it_measures(run, repo, plugin):
     audit = result.stdout.find("=== real-time host audit ===")
     assert audit >= 0, "the script ran without printing tools/rt_check.sh"
 
-    launched = result.stdout.find("example_03_realtime")
+    launched = result.stdout.find("example_04_realtime")
     assert launched > audit, "the audit must come before the run, not after"
-    assert "03_realtime n=60" in result.stdout
+    assert "04_realtime n=60" in result.stdout

@@ -60,7 +60,7 @@ Notable changes to this project. The format follows
   than the 0 that version 1 sidecars encode.
 - `examples/02_trajopt/export.py` takes `--preset default|small` in place of
   the `--time` and `--stats` tuning aids. `default` is the workload the
-  benchmark, example 03 and the tests all describe and is unchanged; `small`
+  benchmark, example 04 and the tests all describe and is unchanged; `small`
   exports the same model at a quarter of the work, for a smoke test rather
   than for a number. The refusal that keeps `cost_history` non-increasing
   stayed; the advice about which constant to halve did not.
@@ -77,7 +77,7 @@ Notable changes to this project. The format follows
   the name it sets, so at the pinned XLA version the threads are called
   `tf_XLAEigen` and the search matched nothing on any host. The step reported
   "no XLA worker threads found (client not created?)", which reads as nothing
-  to do rather than as a helper that had stopped working, so example 03
+  to do rather than as a helper that had stopped working, so example 04
   printed `[skip]` and no test objected. The match is now a substring test for
   `XLA`, which also covers the un-prefixed names older versions used, and the
   calling thread is excluded by thread id so the corral can never undo its own

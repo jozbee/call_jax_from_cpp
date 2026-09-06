@@ -92,7 +92,7 @@ but must name the fixture. `tests/test_docs_sync.py` checks the placement.
 | `include/pjrt_exec/` | The public headers: `runtime.hpp` (Runtime, Function, Error, LoadError), `dtype.hpp`, `rt.hpp`, `latency.hpp`, `alloc_guard.hpp`. |
 | `src/pjrt_exec/` | The implementation: `runtime.cpp`, `rt.cpp`, `isa.cpp`. |
 | `python/jax2exec/` | The exporter, the sidecar writer, the dtype table, ISA detection, and the `check` CLI. |
-| `examples/` | `01_basic`, `02_trajopt` (the workload for the benchmark **and** for example 03), `03_realtime`, and `common/cli.hpp`. |
+| `examples/` | `01_basic`, `02_trajopt` (the workload for the benchmark **and** for example 04), `03_minimal`, `04_realtime`, and `common/cli.hpp`. |
 | `bench/` | The measurement spine. Every runtime change is judged by its output. |
 | `tests/` | `cpp/`, `python/`, and `support/malloc_guard.c` — preloaded, never linked. |
 | `tools/` | `get_plugin.sh`, `build_plugin.sh`, `rt_check.sh`, `run_matrix.sh`, `plugin_probe.cpp`. |
@@ -110,11 +110,11 @@ uv sync                  # Python environment (uv comes from mise, and is not
 make plugin              # download the prebuilt PJRT CPU plugin, sha256-verified
 make plugin-source       # build it from the XLA fork with bazel (30-60 min)
 
-make                     # the library and the three examples
+make                     # the library and the four examples
 make examples            # just the examples
 make bench               # build and run the benchmark
 make export              # run the export scripts with JAX
-make run-examples        # export, then run all three examples
+make run-examples        # export, then run all four examples
 
 make test                # the fast suite
 make test-slow           # including the long campaigns

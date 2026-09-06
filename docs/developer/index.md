@@ -29,7 +29,7 @@ describes how it got that way and what a change to it has to respect.
 include/pjrt_exec/   Public headers. runtime.hpp is the one to read first.
 src/pjrt_exec/       Implementation: runtime.cpp, rt.cpp, isa.cpp.
 python/jax2exec/     The exporter, the reference-case writer, the check command.
-examples/            01_basic, 02_trajopt, 03_realtime, and common/ (shared
+examples/            01_basic, 02_trajopt, 04_realtime, and common/ (shared
                      helpers: the CLI parser, host audit, periodic loop, report).
 bench/               The measurement spine: one configuration, measured once.
 tests/               python/ (pytest), cpp/ (test binaries), support/ (the

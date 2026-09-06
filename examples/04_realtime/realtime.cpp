@@ -10,6 +10,9 @@
  * outputs back, record.  It runs the artifact `examples/02_trajopt/export.py`
  * writes, so there is no export script here; the flags, the host audit and the
  * two reports are in `support.hpp`.
+ *
+ * Example 03 is this loop with nothing else in it; everything here that 03
+ * does not have is measurement and reporting, and optional.
  */
 #include <cerrno>
 #include <cstddef>
@@ -219,6 +222,7 @@ int main(int argc, char** argv) {
             ? cjfc::kExitCorrectness
             : cjfc::alloc_gate_exit_code(guard, options.alloc_gate,
                                          options.require_guard);
+    // docs: end rt-report
 
     if (options.quiet) {
       rt::print_quiet_line(options, results, guard);
@@ -229,7 +233,6 @@ int main(int argc, char** argv) {
       rt::write_report(options, env, steps, runtime, function, timing, results,
                        guard, cpu_chosen);
     }
-    // docs: end rt-report
 
     if (!options.samples_path.empty()) {
       rt::write_samples(options.samples_path, recorders);
