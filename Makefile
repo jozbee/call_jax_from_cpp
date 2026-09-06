@@ -293,8 +293,9 @@ docs-clean:  ## Remove the built documentation
 # --------------------------------------------------------------- maintenance
 
 FORMAT_CXX := $(wildcard include/pjrt_exec/*.hpp src/pjrt_exec/*.cpp \
-                         examples/common/*.hpp examples/*/*.cpp bench/*.cpp \
-                         bench/*.hpp tests/cpp/*.cpp tools/*.cpp \
+                         examples/common/*.hpp examples/*/*.hpp \
+                         examples/*/*.cpp bench/*.cpp bench/*.hpp \
+                         tests/cpp/*.cpp tools/*.cpp \
                          tests/support/malloc_guard.c)
 
 # clang-format has no config file in this tree on purpose; --fallback-style is

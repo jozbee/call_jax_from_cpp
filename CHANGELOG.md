@@ -48,6 +48,12 @@ Notable changes to this project. The format follows
   reports what actually took effect.
 - `input_size(i)` became `input_numel(i)`, and a scalar is now 1 element rather
   than the 0 that version 1 sidecars encode.
+- Each example is now a call path and a `support.hpp` beside it. The `.cpp`
+  holds the sequence a caller performs and nothing else; the flags, the host
+  audit, the summaries and the reports moved into the header.
+  `examples/common/` gained `periodic.hpp` (the absolute sleep and the stop
+  flag a periodic loop needs) and `names.hpp` (the `SyncMode` and `LoadKind`
+  spellings, so a program can name what it loaded without pulling in JSON).
 
 ### Removed
 - The legacy `Client` / `Buffer` / `AOTComputation` wrappers, which rebuilt

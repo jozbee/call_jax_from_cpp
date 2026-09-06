@@ -7,7 +7,8 @@
  * `examples/02_trajopt/export.py` writes, drives it the way a receding-horizon
  * controller would -- reference in, controls out, outputs fed back into the
  * next call's inputs -- and reports the tail of the call latency rather than
- * its average.
+ * its average.  The flags, the finite-output audit and the reports are in
+ * `support.hpp`.
  *
  * The shape of the run is the point:
  *
@@ -19,11 +20,8 @@
  *   - **Warm-up runs the same loop body** the timed section does, including the
  *     feedback, so the pages the loop touches are the pages warm-up touched.
  *   - **The allocation guard is armed around the timed loop only.**  Arming it
- *     over warm-up would fold in the initialization warm-up exists to pay for
- *     and turn a clean path into a few thousand allocations.
- *   - **Nothing in the timed loop allocates, locks, logs or flushes.**  The
- *     reference is written with plain stores into an arena, the outputs are
- *     read out of arenas, and the recorder stores one integer per call.
+ *     over warm-up would fold in the initialization warm-up exists to pay for.
+ *   - **Nothing in the timed loop allocates, locks, logs or flushes.**
  *
  * Two checks run alongside the stopwatch, because a call path that runs is not
  * the same as a call path that is right.  `step_next` must be exactly
@@ -38,183 +36,51 @@
  * @endcode
  */
 
-#include <chrono>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <limits>
 #include <exception>
-#include <stdexcept>
-#include <string>
 #include <vector>
 
 #include "common/cli.hpp"
-#include "common/report.hpp"
 #include "common/rt_env.hpp"
 #include "common/trajopt_signature.hpp"
 #include "pjrt_exec/alloc_guard.hpp"
 #include "pjrt_exec/latency.hpp"
 #include "pjrt_exec/runtime.hpp"
+#include "support.hpp"
 
 namespace {
 
-/// The clock for every measurement here.  Not `high_resolution_clock`, which
-/// is an alias for the wall clock on some standard libraries: an NTP step
-/// during a run would show up as a spectacular outlier that never happened.
-using Clock = std::chrono::steady_clock;
-
-constexpr char kUsage[] =
-    "usage: example_02_trajopt [options]\n"
-    "\n"
-    "  --artifact PATH   artifact base path (default artifacts/trajopt)\n"
-    "  --iterations N    timed calls (default 2000)\n"
-    "  --warmup N        untimed calls before them (default 50)\n"
-    "  --threads N       XLA worker threads; 0 is XLA's default (default 1)\n"
-    "  --async           do not ask for inline execution\n"
-    "  --json PATH       write the report as JSON as well as printing it\n"
-    "  --samples PATH    write every raw sample as index,ns\n"
-    "  --no-check        skip the per-call finite-output audit\n"
-    "  --inject-fault K  corrupt one cycle so a gate can be seen to fire:\n"
-    "                    none (default), step, nonfinite\n"
-    "  --alloc-gate G    off, self or all; exit 3 when it fails (default off)\n"
-    "  --require-guard   exit 4 when malloc_guard.so was not preloaded\n"
-    "  --quiet           print nothing on success\n"
-    "\n"
-    "Exit codes: 0 ok, 1 error, 2 wrong answer, 3 allocation gate, 4 no guard.";
-
-/// Milliseconds between two samples of `Clock`.
-double millis(Clock::time_point start, Clock::time_point end) {
-  return std::chrono::duration<double, std::milli>(end - start).count();
-}
-
-/// Microseconds between two samples of `Clock`.
-double micros(Clock::time_point start, Clock::time_point end) {
-  return std::chrono::duration<double, std::micro>(end - start).count();
-}
-
-/**
- * @brief One floating-point output arena, resolved once for the audit.
- *
- * Resolved before the loop rather than looked up inside it: the arenas live as
- * long as the `Function`, so their addresses and lengths are loop invariants,
- * and the audit then costs a walk over memory that is already hot instead of a
- * walk through the spec vectors.
- */
-struct FloatArena {
-  const void* data;   ///< The arena itself.
-  std::size_t numel;  ///< Elements in it.
-  bool is_double;     ///< float64 when true, float32 when false.
-};
-
-/// @brief Whether every element of every audited arena is finite.
-/// Allocation-free and branch-light: safe to call from the timed loop.
-bool all_finite(const std::vector<FloatArena>& arenas) {
-  for (const FloatArena& arena : arenas) {
-    if (arena.is_double) {
-      const double* values = static_cast<const double*>(arena.data);
-      for (std::size_t i = 0; i < arena.numel; ++i) {
-        if (!std::isfinite(values[i])) {
-          return false;
-        }
-      }
-    } else {
-      const float* values = static_cast<const float*>(arena.data);
-      for (std::size_t i = 0; i < arena.numel; ++i) {
-        if (!std::isfinite(values[i])) {
-          return false;
-        }
-      }
-    }
-  }
-  return true;
-}
-
-/// @brief The floating-point outputs of @p function, in index order.
-std::vector<FloatArena> float_outputs(const pjrt::Function& function) {
-  std::vector<FloatArena> arenas;
-  arenas.reserve(function.num_outputs());
-  for (std::size_t i = 0; i < function.num_outputs(); ++i) {
-    const pjrt::ArraySpec& spec = function.output_spec(i);
-    if (spec.dtype == pjrt::DType::Float64 ||
-        spec.dtype == pjrt::DType::Float32) {
-      arenas.push_back(FloatArena{function.output_raw(i), spec.numel,
-                                  spec.dtype == pjrt::DType::Float64});
-    }
-  }
-  return arenas;
-}
-
 int run(int argc, char** argv) {
-  cjfc::Cli cli(argc, argv,
-                {"artifact", "iterations", "warmup", "threads", "async",
-                 "json", "samples", "no-check", "alloc-gate", "require-guard",
-                 "quiet", "inject-fault"},
-                kUsage);
+  const cjfc::Cli cli = trajopt::make_cli(argc, argv);
   if (cli.help()) {
     return cjfc::kExitOk;
   }
+  const trajopt::Options options = trajopt::parse_options(cli);
 
-  const std::string artifact = cli.get("artifact", "artifacts/trajopt");
-  const std::size_t iterations = cli.get_size("iterations", 2000);
-  const std::size_t warmup = cli.get_size("warmup", 50);
-  const long threads = cli.get_long("threads", 1);
-  const bool synchronous = !cli.flag("async");
-  const std::string json_path = cli.get("json", "");
-  const std::string samples_path = cli.get("samples", "");
-  const bool audit_values = !cli.flag("no-check");
-  const std::string gate = cli.get("alloc-gate", "off");
-  const bool require_guard = cli.flag("require-guard");
-  const bool quiet = cli.flag("quiet");
-  const std::string inject_fault = cli.get("inject-fault", "none");
-  if (inject_fault != "none" && inject_fault != "step" &&
-      inject_fault != "nonfinite") {
-    std::fprintf(stderr,
-                 "unknown --inject-fault '%s' (none, step or nonfinite)\n",
-                 inject_fault.c_str());
-    return cjfc::kExitError;
-  }
-
-  // Refused rather than ignored: a gate nobody spelled correctly is a gate
-  // that passes everything, which is the failure this project takes least
-  // well.
-  if (gate != "off" && gate != "self" && gate != "all") {
-    throw std::runtime_error("'--alloc-gate' expects off, self or all, got '" +
-                             gate + "'");
-  }
-  if (threads < 0 || threads > 4096) {
-    throw std::runtime_error(
-        "'--threads' expects a count between 0 and 4096");
-  }
-
-  // Read before anything is measured, and warned about on stderr even under
-  // --quiet: a latency number from a busy machine is not noisy, it is wrong.
+  // Read before anything is measured: a latency number from a busy machine is
+  // not noisy, it is wrong.
   const cjfc::HostEnv env = cjfc::detect_host_env();
-  if (env.busy) {
-    std::fprintf(stderr,
-                 "WARNING: load average is %.2f; these numbers describe a "
-                 "contended machine and are not comparable with anything. "
-                 "Discard the run rather than correcting it.\n",
-                 env.loadavg1);
-  }
+  trajopt::warn_if_busy(env);
 
   pjrt::RuntimeOptions runtime_options;
-  runtime_options.synchronous = synchronous;
-  runtime_options.worker_threads = static_cast<int>(threads);
+  runtime_options.synchronous = options.synchronous;
+  runtime_options.worker_threads = static_cast<int>(options.threads);
 
-  const auto t_start = Clock::now();
+  trajopt::Outcome outcome;
+  const auto t_start = trajopt::Clock::now();
   pjrt::Runtime runtime(runtime_options);
-  const auto t_runtime = Clock::now();
+  const auto t_runtime = trajopt::Clock::now();
 
-  pjrt::FunctionOptions function_options;
   // The harness warms up, so that the first call below is genuinely the first
   // one and can be reported as such.
+  pjrt::FunctionOptions function_options;
   function_options.warmup_calls = 0;
-  pjrt::Function function(runtime, artifact, function_options);
-  const auto t_loaded = Clock::now();
-
-  const double runtime_ms = millis(t_start, t_runtime);
-  const double load_ms = millis(t_runtime, t_loaded);
+  pjrt::Function function(runtime, options.artifact, function_options);
+  const auto t_loaded = trajopt::Clock::now();
+  outcome.runtime_ms = trajopt::millis(t_start, t_runtime);
+  outcome.load_ms = trajopt::millis(t_runtime, t_loaded);
 
   const cjfc::Dims dims = cjfc::check_signature(function);
   cjfc::init_inputs(function, dims);
@@ -222,12 +88,12 @@ int run(int argc, char** argv) {
   // Resolved once.  Everything the loop touches is a pointer or an integer by
   // the time the stopwatch starts.
   double* const x_ref = function.input<double>(cjfc::kInXRef);
-  const std::vector<FloatArena> audited =
-      audit_values ? float_outputs(function) : std::vector<FloatArena>();
+  const std::vector<trajopt::FloatArena> audited =
+      options.audit_values ? trajopt::float_outputs(function)
+                           : std::vector<trajopt::FloatArena>();
+  const trajopt::FaultInjector injector(options.inject_fault, /*cycle=*/1);
 
   std::int64_t cycle = 0;
-  std::size_t step_errors = 0;
-  bool finite_outputs = true;
 
   // Recirculate one cycle's outputs into the next cycle's inputs, and check
   // what came back.  Run for every call, warm-up included: a step counter that
@@ -235,43 +101,27 @@ int run(int argc, char** argv) {
   // later.  The step check is one integer comparison and always runs;
   // --no-check drops only the value audit, which is the part that walks every
   // element of every float arena.
-  // --inject-fault corrupts exactly one cycle so that a test can watch a gate
-  // fire. A correctness gate nobody has seen fail is not evidence that the
-  // thing it guards is right; it is only evidence that the gate is quiet, and
-  // those two look identical from outside. Both faults are applied after the
-  // call and before the check, which is where a real one would appear.
-  const std::int64_t fault_cycle = 1;
   const auto finish_cycle = [&](std::int64_t k) {
     if (!cjfc::feedback(function, dims, k)) {
-      ++step_errors;
+      ++outcome.step_errors;
     }
-    if (inject_fault == "step" && k == fault_cycle) {
-      // Desynchronise the recirculated counter: the next cycle's check sees a
-      // step that does not follow from the last one.
-      *function.input<std::int32_t>(cjfc::kInStep) += 1;
-    }
-    if (inject_fault == "nonfinite" && k == fault_cycle && !audited.empty()) {
-      // The audit reads the output arenas, which the API hands out const
-      // because a caller has no business writing them. Writing one here is the
-      // whole point of the fault, so the cast is deliberate and confined to
-      // this branch.
-      auto* poisoned =
-          static_cast<double*>(const_cast<void*>(audited.front().data));
-      poisoned[0] = std::numeric_limits<double>::quiet_NaN();
-    }
-    if (audit_values && !all_finite(audited)) {
-      finite_outputs = false;
+    injector.apply(function, audited, k);
+    if (options.audit_values && !trajopt::all_finite(audited)) {
+      outcome.finite_outputs = false;
     }
   };
 
+  // docs: begin trajopt-run
+  // The cold call, timed alone, then the warm-up: the same loop body, on the
+  // same arenas, recording nothing.
   cjfc::write_reference(x_ref, dims, cycle);
-  const auto t_call = Clock::now();
+  const auto t_call = trajopt::Clock::now();
   function.call();
-  const double first_call_us = micros(t_call, Clock::now());
+  outcome.first_call_us = trajopt::micros(t_call, trajopt::Clock::now());
   finish_cycle(cycle);
   ++cycle;
 
-  for (std::size_t i = 0; i < warmup; ++i) {
+  for (std::size_t i = 0; i < options.warmup; ++i) {
     cjfc::write_reference(x_ref, dims, cycle);
     function.call();
     finish_cycle(cycle);
@@ -280,15 +130,15 @@ int run(int argc, char** argv) {
 
   pjrt::AllocGuard guard;
 
-// docs: begin latency-recorder
+  // docs: begin latency-recorder
   // Capacity is reserved once, here: the recorder drops rather than grows,
   // because growing would allocate in the middle of the run being measured.
-  pjrt::LatencyRecorder compute(iterations);
+  pjrt::LatencyRecorder compute(options.iterations);
 
   const cjfc::Rusage before = cjfc::Rusage::now();
   {
     pjrt::AllocGuardScope armed(guard);
-    for (std::size_t i = 0; i < iterations; ++i) {
+    for (std::size_t i = 0; i < options.iterations; ++i) {
       // Fresh reference for this cycle, written straight into the input arena
       // XLA will read.  Between calls, never during one.
       cjfc::write_reference(x_ref, dims, cycle);
@@ -302,107 +152,30 @@ int run(int argc, char** argv) {
   }
   const cjfc::Rusage after = cjfc::Rusage::now();
 
-  const pjrt::LatencySummary summary = compute.summary();
-// docs: end latency-recorder
+  outcome.compute = compute.summary();
+  // docs: end latency-recorder
+  // docs: end trajopt-run
 
-  const cjfc::Rusage faults = after - before;
+  outcome.faults = after - before;
+  trajopt::read_solution(function, outcome);
 
-  const float cost = *function.output<float>(cjfc::kOutCost);
-  const double grad_norm = *function.output<double>(cjfc::kOutGradNorm);
-  const std::int32_t iterations_used =
-      *function.output<std::int32_t>(cjfc::kOutIterationsUsed);
-  const std::int32_t backtracks_used =
-      *function.output<std::int32_t>(cjfc::kOutBacktracksUsed);
+  // A wrong answer outranks an allocation gate: the gate describes how the
+  // answer was produced, and there is no point grading that first.
+  outcome.exit_code =
+      outcome.step_errors != 0 || !outcome.finite_outputs
+          ? cjfc::kExitCorrectness
+          : cjfc::alloc_gate_exit_code(guard, options.alloc_gate,
+                                       options.require_guard);
 
-  int exit_code = cjfc::kExitOk;
-  if (step_errors != 0 || !finite_outputs) {
-    // A wrong answer outranks an allocation gate: the gate describes how the
-    // answer was produced, and there is no point grading that first.
-    exit_code = cjfc::kExitCorrectness;
-  } else {
-    exit_code = cjfc::alloc_gate_exit_code(guard, gate, require_guard);
+  trajopt::print_report(options, runtime, function, outcome, guard);
+  if (!options.samples_path.empty()) {
+    trajopt::write_samples(options, compute);
   }
-
-  if (!quiet) {
-    std::printf("%s\n", runtime.describe().c_str());
-    std::printf("artifact:   %s (%s)\n", artifact.c_str(),
-                function.load_detail().c_str());
-    std::printf("load:       runtime %.1f ms, function %.1f ms\n", runtime_ms,
-                load_ms);
-    std::printf("first call: %.1f us\n", first_call_us);
-
-    cjfc::print_summary("steady state", summary);
-    guard.report(stdout, iterations);
-
-    std::printf("\n=== run ===\n");
-    std::printf("  faults (%s): minflt=%ld majflt=%ld nvcsw=%ld nivcsw=%ld\n",
-                cjfc::Rusage::scope(), faults.minflt, faults.majflt,
-                faults.nvcsw, faults.nivcsw);
-    if (audit_values) {
-      std::printf("  checks: step_counter_ok=%d finite_outputs=%d\n",
-                  step_errors == 0 ? 1 : 0, finite_outputs ? 1 : 0);
-    } else {
-      std::printf(
-          "  checks: step_counter_ok=%d finite_outputs=skipped (--no-check)\n",
-          step_errors == 0 ? 1 : 0);
-    }
-    std::printf(
-        "  result: cost=%.6f grad_norm=%.6e iterations_used=%d "
-        "backtracks_used=%d\n",
-        static_cast<double>(cost), grad_norm,
-        static_cast<int>(iterations_used),
-        static_cast<int>(backtracks_used));
+  if (!options.json_path.empty()) {
+    trajopt::write_report(options, env, runtime, function, compute, outcome,
+                          guard);
   }
-
-  if (!samples_path.empty() && !compute.write_samples(samples_path.c_str())) {
-    throw std::runtime_error("cannot write samples to " + samples_path);
-  }
-
-  if (!json_path.empty()) {
-    pjrt::HistogramBin bins[40];
-    const std::size_t nbins =
-        compute.histogram(bins, sizeof bins / sizeof bins[0]);
-
-    cjfc::json report;
-    report["schema"] = 1;
-    report["example"] = "02_trajopt";
-    report["artifact"] = artifact;
-    report["config"] = cjfc::json{
-        {"iterations", iterations},
-        {"warmup", warmup},
-        {"threads", threads},
-        {"synchronous", synchronous},
-    };
-    report["host"] = cjfc::host_json(env);
-    report["runtime"] = cjfc::runtime_json(runtime, function, runtime_ms,
-                                           load_ms, first_call_us);
-    // The shared block nests these; the schema names them at the top of the
-    // runtime object, so they appear in both places rather than a reader
-    // having to know which example wrote the file.
-    report["runtime"]["load_kind"] =
-        cjfc::load_kind_name(function.load_kind());
-    report["runtime"]["runtime_ms"] = runtime_ms;
-    report["runtime"]["load_ms"] = load_ms;
-    report["runtime"]["first_call_us"] = first_call_us;
-    report["compute_us"] = cjfc::summary_json(summary);
-    report["compute_us"]["histogram"] = cjfc::histogram_json(bins, nbins);
-    report["rusage"] = cjfc::json{
-        {"minflt", faults.minflt},
-        {"majflt", faults.majflt},
-        {"nvcsw", faults.nvcsw},
-        {"nivcsw", faults.nivcsw},
-    };
-    report["allocations"] = cjfc::alloc_json(guard, iterations);
-    report["checks"] = cjfc::json{
-        {"step_counter_ok", step_errors == 0},
-        {"step_errors", step_errors},
-        {"finite_outputs", finite_outputs},
-    };
-    report["exit_code"] = exit_code;
-    cjfc::write_json(json_path, report);
-  }
-
-  return exit_code;
+  return outcome.exit_code;
 }
 
 }  // namespace

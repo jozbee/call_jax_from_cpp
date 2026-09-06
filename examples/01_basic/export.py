@@ -22,7 +22,7 @@ handlers; see ``docs/developer/xla-fork.md``.
 
 Run it directly, or through ``make export``::
 
-    uv run python examples/01_basic/export.py --out artifacts --name basic
+    uv run python examples/01_basic/export.py --out artifacts
 """
 
 from __future__ import annotations
@@ -32,6 +32,38 @@ import argparse
 import jax
 import jax.numpy as jnp
 from jax2exec import export
+
+
+def _out_dir() -> str:
+    """The directory the three files are written to."""
+    parser = argparse.ArgumentParser(
+        description="Export fun(A, b) -> (x, r) for examples/01_basic."
+    )
+    parser.add_argument(
+        "--out",
+        default="artifacts",
+        help="directory for the .binpb, .mlirbc and .json "
+        "(default: %(default)s)",
+    )
+    return parser.parse_args().out
+
+
+def describe(result) -> None:
+    """Print what was written, and the signature the sidecar declares."""
+    print(f"executable {result.executable}")
+    print(f"mlir       {result.mlir}")
+    print(f"sidecar    {result.sidecar}")
+    for role in ("inputs", "outputs"):
+        for entry in result.metadata[role]:
+            print(
+                f"{role[:-1]:7} {entry['index']} {entry['name']}: "
+                f"{entry['dtype']}{entry['shape']} "
+                f"({entry['nbytes']} bytes)"
+            )
+
+
+# docs: begin export
+jax.config.update("jax_enable_x64", True)  # before anything is traced
 
 #: Order of the system.  Small enough that the whole solution fits on one line
 #: of the example's output, which is the only reason it is 4 and not 400.
@@ -44,57 +76,22 @@ def fun(A, b):
     Returning the residual as well as the solution is what lets the C++ side
     check itself twice over: once against a residual it recomputes from its
     own arenas, and once against this number, which XLA produced inside the
-    same executable.  The two disagreeing means the C++ side is not reading
-    the arrays the way the exporter described them.
+    same executable.
     """
     x = jnp.linalg.inv(A) @ b
     r = jnp.linalg.norm(A @ x - b)
     return x, r
 
 
-def main() -> int:
-    """Parse the flags, export, and describe what was written."""
-    parser = argparse.ArgumentParser(
-        description="Export fun(A, b) -> (x, r) for examples/01_basic."
-    )
-    parser.add_argument(
-        "--out",
-        default="artifacts",
-        help="directory for the .binpb, .mlirbc and .json (default: %(default)s)",
-    )
-    parser.add_argument(
-        "--name",
-        default="basic",
-        help="base name of the three artifacts (default: %(default)s)",
-    )
-    args = parser.parse_args()
-
-    # docs: begin export
-    jax.config.update("jax_enable_x64", True)  # before anything is traced
-
+if __name__ == "__main__":
     result = export(
         fun,
         (
             jax.ShapeDtypeStruct((N, N), jnp.float64),  # A
             jax.ShapeDtypeStruct((N,), jnp.float64),  # b
         ),
-        directory=args.out,  # "artifacts"
-        name=args.name,  # "basic"
+        directory=_out_dir(),  # "artifacts"
+        name="basic",
     )
     # docs: end export
-
-    print(f"executable {result.executable}")
-    print(f"mlir       {result.mlir}")
-    print(f"sidecar    {result.sidecar}")
-    for role in ("inputs", "outputs"):
-        for entry in result.metadata[role]:
-            print(
-                f"{role[:-1]:7} {entry['index']} {entry['name']}: "
-                f"{entry['dtype']}{entry['shape']} "
-                f"({entry['nbytes']} bytes)"
-            )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    describe(result)

@@ -39,6 +39,7 @@
 #include <system_error>
 #include <vector>
 
+#include "common/names.hpp"
 #include "common/rt_env.hpp"
 #include "nlohmann/json.hpp"
 #include "pjrt_exec/alloc_guard.hpp"
@@ -194,26 +195,6 @@ inline json spec_json(const pjrt::ArraySpec& spec) {
   };
 }
 
-/// @brief `SyncMode` as the string the reports use.
-inline const char* sync_mode_name(pjrt::SyncMode mode) {
-  switch (mode) {
-    case pjrt::SyncMode::Inline:
-      return "inline";
-    case pjrt::SyncMode::Accepted:
-      return "accepted";
-    case pjrt::SyncMode::Rejected:
-      return "rejected";
-    case pjrt::SyncMode::Async:
-      return "async";
-  }
-  return "unknown";
-}
-
-/// @brief `LoadKind` as the string the reports use.
-inline const char* load_kind_name(pjrt::LoadKind kind) {
-  return kind == pjrt::LoadKind::Deserialized ? "deserialized" : "compiled";
-}
-
 /**
  * @brief Everything about the plugin, the client and the loaded function that a
  *        later reader will wish had been recorded.
@@ -358,7 +339,7 @@ inline void write_json(const std::string& path, const json& report) {
  *
  * @param gate          `"self"` gates on the wrapper's own allocations, which
  *                      is the number that must be zero; `"all"` gates on every
- *                      allocation in the armed window, including the thousands per call
+ *                      allocation in the armed window, including the thousands
  *                      per call inside XLA's thunk runtime, so it only makes
  *                      sense for a run that calls nothing.  Anything else
  *                      (`"none"`) gates on nothing.
