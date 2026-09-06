@@ -65,6 +65,35 @@ MARKER = re.compile(r"docs: begin (\S+)")
 #: nothing about whether the message itself is documented.
 MIN_DISTINCTIVE = 12
 
+#: A fenced block and everything in it.  Code samples quote real numbers --
+#: a command line, a report, an included region -- and none of those is the
+#: page making a claim of its own.
+FENCE = re.compile(
+    r"^([ \t]*)(```+|~~~+).*?^[ \t]*\2[ \t]*$", re.MULTILINE | re.DOTALL
+)
+
+#: The two pages that may carry a measured figure: the Developer guide, where
+#: the provenance is written down beside it, and the benchmarks page.
+FIGURE_HOMES = ("docs/developer/", "docs/benchmarks.md")
+
+#: A duration: ``2027 us``, ``1.5 ms``, ``950,000 µs``.
+DURATION = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?\s*(?:µs|us|ms)\b")
+
+#: A ratio: ``2.4x``, ``4x``.  The trailing ``\b`` already excludes a size
+#: like ``1024x768``, where the ``x`` is followed by a digit.
+RATIO = re.compile(r"(?<![\dx.])\d+(?:\.\d+)?x\b")
+
+#: Numbers these patterns match that are not measurements of this project,
+#: and why each one is not.  Keyed by the text rather than by a line number,
+#: because a line number goes stale the next time a paragraph moves.
+NOT_A_MEASUREMENT = {
+    "950000 µs": "a kernel constant: the idle /dev/cpu_dma_latency value",
+    "1000000 µs": "a kernel constant: the value that means no constraint",
+    "50 ms": "a kernel constant: the default sched_rt_period",
+    ">2x": "the threshold in the rule, not a result",
+    "\u22652x": "the threshold in the rule, not a result",
+}
+
 
 def unescape(literal):
     return re.sub(
@@ -223,6 +252,51 @@ def test_unused_markers_are_only_reported(repo):
     if unused:
         warnings.warn(
             "docs markers no page includes:\n  " + "\n  ".join(sorted(unused)),
+            UserWarning,
+            stacklevel=1,
+        )
+
+
+def prose(text):
+    """@p text with its fenced blocks blanked out, line numbers preserved."""
+    return FENCE.sub(lambda m: "\n" * m.group(0).count("\n"), text)
+
+
+def test_measured_figures_stay_under_developer_and_benchmarks(repo):
+    """A latency or a ratio outside its home is a figure without a host.
+
+    The rule the site follows: a guide, an example page, a reference page or
+    the landing page states the *shape* of a result and links to the page
+    that holds the figure, because a number reprinted away from the machine
+    it was measured on cannot be checked, compared or refuted later.
+
+    Reported rather than asserted for now: the pages are still being moved,
+    and a warning names the drift without blocking the move.
+    """
+    hits = []
+    for page in pages(repo.root):
+        where = page.relative_to(repo.root).as_posix()
+        if where.startswith(FIGURE_HOMES):
+            continue
+        lines = prose(page.read_text()).splitlines()
+        for number, line in enumerate(lines, 1):
+            for pattern in (DURATION, RATIO):
+                for match in pattern.finditer(line):
+                    found = match.group(0)
+                    # The match itself has to be part of the allowlisted
+                    # text, so a real figure sharing a line with a kernel
+                    # constant is still reported.
+                    excused = any(
+                        text in line and found in text
+                        for text in NOT_A_MEASUREMENT
+                    )
+                    if not excused:
+                        hits.append(f"{where}:{number}: {found!r}")
+
+    if hits:
+        warnings.warn(
+            "measured figures outside docs/developer/ and docs/benchmarks.md:"
+            "\n  " + "\n  ".join(hits),
             UserWarning,
             stacklevel=1,
         )
