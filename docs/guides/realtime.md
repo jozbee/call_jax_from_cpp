@@ -14,7 +14,7 @@ target, and says which it got. The host's half of the bargain is audited by
 | `rt::harden_malloc()` | `mallopt`: never trim the heap, no mmap, one arena | the heap is never handed back and faulted in again mid-call | glibc | a routine call becomes an outlier after a trim |
 | `rt::lock_memory()` | `mlockall`, plus a prefault of heap and stack | no page fault or swap-in inside a call | `RLIMIT_MEMLOCK` unlimited | a fault lands inside `call()` |
 | `rt::pin_current_thread(cpu)` | thread affinity | no migration; warm caches | the CPU in this thread's mask | migrations show up as spread |
-| `rt::corral_xla_threads({cpus})` | moves `XLAEigen*` / `XLAPjRtCpuClient*` off the loop's core | XLA's pool wake-ups land elsewhere | the `Runtime` to exist already | pools wake on the loop's core |
+| `rt::corral_xla_threads({cpus})` | moves XLA's named pool threads (`tf_XLAEigen…`) off the loop's core | XLA's pool wake-ups land elsewhere | the `Runtime` to exist already | pools wake on the loop's core |
 | `rt::set_realtime_priority(p)` | `SCHED_FIFO` | nothing at normal priority preempts the loop | `CAP_SYS_NICE` or `RLIMIT_RTPRIO`; **last**; a loop that blocks | anything can preempt the loop |
 | `rt::describe_environment()` | one paragraph for the log | a number that can be interpreted later | — | hardened and unhardened runs look alike |
 | `cjfc::detect_host_env()` | reads isolcpus, nohz_full, governor, THP, SMT, rlimits, throttling, C-state access, loadavg | the audit inside the report | Linux | a number with no provenance |
@@ -49,17 +49,12 @@ how a machine stops responding.
 
 ## The loop
 
-```cpp
-// sketch, not from the tree: the shape of example 03's loop
-std::int64_t target = now_ns();
-for (;;) {
-  target += period_ns;
-  sleep_until(target);        // absolute, never relative
-  write_inputs(f);            // between calls, never during one
-  f.call();
-  read_outputs(f);            // this cycle's outputs feed the next
-  compute.record(/* call end - call start */);
-}
+Example 03's cycle, as it runs:
+
+```{literalinclude} ../../examples/03_realtime/realtime.cpp
+:language: cpp
+:start-after: docs: begin rt-loop
+:end-before: docs: end rt-loop
 ```
 
 Four rules. Sleep until an **absolute** deadline (`clock_nanosleep` with

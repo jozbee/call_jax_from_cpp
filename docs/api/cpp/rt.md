@@ -85,8 +85,8 @@ in from the kernel, which turns a routine call into an outlier.
 ```
 
 XLA starts its pools when the client is created and names those threads
-(`XLAEigen`, `XLAPjRtCpuClient`), which is what makes them findable afterwards
-by walking `/proc/self/task`. With inline execution the pools should be idle;
+(`tf_XLAEigen…` at the pinned XLA version — the prefix is TSL's), which is
+what makes them findable afterwards by walking `/proc/self/task`. With inline execution the pools should be idle;
 corralling them keeps them from waking up on the core the control loop is
 using. Neither call needs a privilege beyond permission to change the calling
 process's own affinity.

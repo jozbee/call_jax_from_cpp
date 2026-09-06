@@ -58,11 +58,6 @@ of them fails the program.
 
 ```{literalinclude} ../examples/01_basic/export.py
 :language: python
-:pyobject: fun
-```
-
-```{literalinclude} ../examples/01_basic/export.py
-:language: python
 :start-after: docs: begin export
 :end-before: docs: end export
 ```
