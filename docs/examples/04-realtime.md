@@ -35,7 +35,7 @@ library's `pjrt::rt`.
 | {cpp:struct}`~cjfc::Rusage` before and after | page faults and context switches in the window — proof that `mlockall` and pinning held | measurement |
 | the {term}`allocation census` | `self` must be zero; XLA's own count is reported | measurement; needs the preload |
 | the JSON report and `--samples` | every number, with the host and the plugin it came from | reporting |
-| the flags | mirror {cpp:struct}`~cjfc::HardeningOptions`: `--cpu`, `--rt-priority`, `--dma-latency`, `--no-mlock`, `--no-malloc-tune`, `--no-corral` | reporting |
+| the flags | mirror {cpp:struct}`~cjfc::HardeningOptions`: `--cpu`, `--rt-priority`, `--dma-latency`, `--no-mlock`, `--no-malloc-tune`, `--no-corral` | configuration |
 
 None of it changes the loop.
 
@@ -103,7 +103,7 @@ call and the warm-up; the measured window; the report.
 |---|---|
 | {cpp:func}`~cjfc::Rusage::now`, `after - before` | `getrusage(RUSAGE_THREAD)`: minor and major faults, voluntary and involuntary context switches, for this thread, over exactly the recorded cycles |
 | `guard.arm()` / `disarm()` | {cpp:class}`~pjrt::AllocGuard`: the census a preloaded `malloc_guard.so` keeps; without the preload both are no-ops and the report says so |
-| `rt::Results` | the four summaries, the counters and the rusage delta, computed once the loop is over — the first code allowed to allocate |
+| `rt::Results` | the four summaries, the counters and the rusage delta, computed once the loop is over — the first code allowed to allocate; `step_counter_ok()` is whether every cycle's `feedback` check passed |
 | {cpp:var}`~cjfc::kExitCorrectness`, {cpp:func}`~cjfc::alloc_gate_exit_code` | the shared exit codes: correctness (2) outranks the allocation gate (3, or 4 when the guard was required but absent) |
 
 The printing and the JSON writer follow, in `support.hpp`.
