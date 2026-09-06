@@ -563,7 +563,7 @@ struct HardeningOptions {
   bool dma_latency = false;  ///< Hold `/dev/cpu_dma_latency` at 0 (needs root).
 };
 
-// docs: begin rt-harden
+// docs: begin rt-harden-impl
 /**
  * @brief Apply the hardening steps, in the one order that is safe, and report
  *        each.
@@ -643,6 +643,6 @@ inline std::vector<Step> apply_hardening(const HostEnv& env,
 
   return steps;
 }
-// docs: end rt-harden
+// docs: end rt-harden-impl
 
 }  // namespace cjfc

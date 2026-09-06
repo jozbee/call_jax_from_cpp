@@ -264,8 +264,8 @@ copying rather than re-deriving:
 :::{dropdown} The full sequence, as the examples apply it
 ```{literalinclude} ../../examples/common/rt_env.hpp
 :language: cpp
-:start-after: docs: begin rt-harden
-:end-before: docs: end rt-harden
+:start-after: docs: begin rt-harden-impl
+:end-before: docs: end rt-harden-impl
 ```
 :::
 

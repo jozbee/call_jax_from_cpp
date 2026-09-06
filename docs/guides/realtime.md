@@ -128,8 +128,8 @@ In the order the real-time example applies them:
 
 ```{literalinclude} ../../examples/common/rt_env.hpp
 :language: cpp
-:start-after: docs: begin rt-harden
-:end-before: docs: end rt-harden
+:start-after: docs: begin rt-harden-impl
+:end-before: docs: end rt-harden-impl
 ```
 
 | Step | Syscall | Needs | Failure mode |
