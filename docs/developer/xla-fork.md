@@ -120,7 +120,7 @@ core, and a number measured next to it is invalid rather than noisy — see
 
 The plugin originally shipped from a bazel `fastbuild` (`-O0`) build, and
 rebuilding it `-c opt` was expected to be a large win. It moved p50 by **0.2%**:
-4718.7 µs versus 4728.4 µs.
+4718.7 µs versus 4728.4 µs (host not recorded).
 
 The reason is worth remembering, because it generalises. The compute kernels are
 LLVM-compiled at *export* time and embedded in the `.binpb`. The plugin only

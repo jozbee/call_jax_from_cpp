@@ -65,7 +65,7 @@ reads all three from it.
 | `<name>.mlirbc` | StableHLO bytecode for the same function. | `PJRT_Client_Compile`, when the `.binpb` will not run on this host. |
 | `<name>.json` | The sidecar: every input and output by name, dtype, shape, element count and byte count, plus the versions and the host that produced it. | The loader, on every startup. |
 
-With `--out artifacts --name basic`, those are `artifacts/basic.binpb`,
+With `--out artifacts`, those are `artifacts/basic.binpb`,
 `artifacts/basic.mlirbc` and `artifacts/basic.json`. Look at any of them
 without JAX installed:
 
@@ -129,6 +129,14 @@ the multi-millisecond outliers.
 
 How to produce a latency number that means something, and the five ways to
 produce one that does not.
+:::
+
+:::{grid-item-card} {octicon}`plug;1em` Integrate
+:link: ../guides/integration
+:link-type: doc
+
+A ROS 2 package, a CMake submodule, FetchContent, or plain Make — one recipe
+each.
 :::
 
 ::::

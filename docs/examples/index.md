@@ -62,20 +62,9 @@ one in `build/plugin`.
 
 ## Which plugin features each one needs
 
-Example 01 lowers `jnp.linalg.inv` to a LAPACK custom call, and **a bare PJRT
-CPU plugin does not register LAPACK FFI handlers** — jaxlib registers those
-from Python on import, which is not happening here. Without the fork's first
-patch the load fails with:
-
-```text
-No FFI handler registered for lapack_dgetrf_ffi on a platform Host
-```
-
-`make plugin` downloads a plugin built from the fork, so this is only a problem
-for someone substituting their own. Examples 02 and 03 do not lower to LAPACK
-and run against any CPU plugin.
-
-Inline synchronous execution is a different matter: it is advertised by the
-fork's second patch, and a plugin without it still runs everything correctly,
-just with the dispatch hand-off left in the call path.
-`Runtime::synchronous_mode()` says which you have, and every example prints it.
+Example 01 lowers `jnp.linalg.inv` to a LAPACK custom call, which only the
+fork's plugin can load; a stock plugin fails with `No FFI handler registered
+for lapack_dgetrf_ffi`. Examples 02 and 03 run against any CPU plugin. Inline
+execution needs the fork's second patch; without it everything is still
+correct, only slower in the tail, and `Runtime::synchronous_mode()` says which
+you have.

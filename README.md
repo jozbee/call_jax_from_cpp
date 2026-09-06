@@ -60,25 +60,13 @@ for (;;) {
 
 ## Measured
 
-One step of a nonlinear MPC controller (16 in / 14 out, all rank-1 float64) on
-an idle aarch64 devcontainer; 28 interleaved runs × 4000 calls per API.
-
-| | legacy, per-call buffers | `Runtime`/`Function` |
-|---|---|---|
-| median p50 | 4842 µs | **3979 µs** |
-| median p99.9 | 5417 µs | **4417 µs** |
-| worst single call | 20169 µs | **6832 µs** |
-| worst max/p50 | 4.198 | **1.719** |
-| runs with a >2x outlier | 2 of 28 | **0 of 28** |
-| wrapper allocations per call | ~520 | **0** |
-
-The **magnitude** difference is solid; the **frequency** claim is soft — two
-outlier runs against zero at n=28 is not a significant difference and must not
-be quoted as one. This is a container on aarch64, so it is a relative signal,
-and it predates the shipped examples: [`examples/02_trajopt`](examples/02_trajopt)
-is what you can reproduce today, and the
+On an idle aarch64 devcontainer, over 112,000 calls per call path, the worst
+call this path produced was 1.7x its median where the per-call-buffer path it
+replaced reached 4.2x, and the wrapper's own allocations per call went from
+~520 to 0. That is a relative signal from a container; the
 [benchmarks page](https://jozbee.github.io/call_jax_from_cpp/benchmarks.html)
-carries the method, the caveats and the sign-off targets.
+has the full table, which parts are solid, and a campaign on bare metal that
+[`examples/02_trajopt`](examples/02_trajopt) reproduces.
 
 ## What you get
 

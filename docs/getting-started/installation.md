@@ -7,9 +7,8 @@ unusual, and it has a section of its own below.
 
 ## Supported platforms
 
-Linux is the deployment target. macOS builds and runs, and is useful for
-writing and checking an exporter or a caller, but it provides none of the
-real-time hardening and is not a machine to take latency numbers from.
+Linux is the deployment target. macOS builds and runs and is useful for
+development, but provides none of the real-time hardening.
 
 | Platform | Status | Plugin | `pjrt::rt` helpers |
 |---|---|---|---|
@@ -17,10 +16,6 @@ real-time hardening and is not a machine to take latency numbers from.
 | Linux aarch64 | Supported target | prebuilt or from source | all |
 | macOS (arm64, x86-64) | Development and correctness only | from source only | none: each returns `Status{false, "not supported on this platform"}` |
 | Windows | Unsupported | — | — |
-
-The helpers are no-ops rather than errors on macOS, so the same program runs
-there; it simply reports that nothing took effect. `pjrt::rt::describe_environment()`
-says so in one line.
 
 ## Requirements
 
@@ -33,9 +28,8 @@ says so in one line.
 | For `make plugin-source` | bazel or bazelisk, `liblapack-dev`, `libblas-dev`, and 30–60 minutes. |
 | For `make docs` | doxygen and graphviz; the C++ pages are generated from the headers. |
 
-Nothing links against the plugin, so a plain `make` needs neither bazel nor the
-network. The plugin is `dlopen`-ed at run time and only the *run* targets care
-whether it is there.
+Nothing links against the plugin, so a plain `make` needs neither bazel nor
+the network; only the *run* targets care whether it is there.
 
 ## Getting the code
 
@@ -128,13 +122,10 @@ If bazel is not on this machine, the container has it:
 $ docker compose -f docker/compose.yml run --rm plugin-builder tools/build_plugin.sh
 ```
 
-:::{note}
-**Build mode does not matter for latency.** `-c opt` against bazel's default
-`fastbuild` moved p50 by 0.2% (4718.7 µs versus 4728.4 µs) — the compute
-kernels are LLVM-compiled at export time and embedded in the artifact, and the
-plugin only orchestrates. `opt` is still the default because it is what gets
-published.
-:::
+Build mode does not change latency — the compute kernels are compiled at
+export time and the plugin only orchestrates — so `opt` is the default only
+because it is what gets published. {doc}`../developer/xla-fork` has the
+measurement.
 
 ### C. A plugin you already have
 
@@ -209,14 +200,10 @@ privileges. Container timings are relative signals only — see
 
 ## Vendoring into your own project
 
-| Route | What it looks like | |
-|---|---|---|
-| CMake submodule | `add_subdirectory()` on this tree, link `pjrt_exec` | {doc}`../guides/integration` |
-| Plain Makefile | four flags: `-Iinclude`, the static library, `-ldl -lpthread` | {doc}`../guides/integration` |
-| Artifacts | exported per deployment machine, or shipped with the `.mlirbc` fallback | {doc}`../guides/exporting` |
-
-The plugin is never a link-time dependency. It has to be findable at run time,
-which is one path and one environment variable, and nothing else.
+The library is vendored per project — a ROS 2 package, a CMake submodule,
+`FetchContent`, or copied sources with a Make fragment — and never installed
+system-wide. {doc}`../guides/integration` has one recipe per route, ROS 2
+first.
 
 ## Verify the install
 
@@ -239,8 +226,9 @@ residual_from_jax=...
 ```
 
 Example 01 solves a 4x4 dense linear system and checks the answer twice: once
-against a residual it recomputes from its own arenas, and once against the
-residual XLA computed inside the same executable. Four lines are worth reading:
+against a residual it recomputes from its own arenas, once against the
+residual XLA computed inside the same executable. Four lines are worth
+reading:
 
 | Line | Should say | If it does not |
 |---|---|---|
@@ -249,12 +237,10 @@ residual XLA computed inside the same executable. Four lines are worth reading:
 | `input[0]` | `dtype=float64` | `float32` means the export ran without `jax_enable_x64`. |
 | the two residuals | both near zero | A correctness failure, not a setup one — worth a bug report. |
 
-The example is also a deliberate test of the plugin: it uses `jnp.linalg.inv`,
-which lowers to a LAPACK FFI custom call. Against a stock plugin it fails at
-`pjrt::Function` construction with *"No FFI handler registered for
-lapack_dgetrf_ffi on a platform Host"*, which is the point — a function without
-a custom call would load happily against the wrong plugin and leave that
-discovery for a control loop to make later, in the field.
+The example is also a deliberate test of the plugin: `jnp.linalg.inv` lowers
+to a LAPACK custom call, so against a stock plugin it fails at `pjrt::Function`
+construction with *"No FFI handler registered for lapack_dgetrf_ffi"* — here,
+rather than in the field.
 
 Add `--debug` to see the debug-mode checks fire on purpose:
 

@@ -12,15 +12,18 @@ changing anything.
 | `docs/developer/runtime-internals.md` | Verified PJRT/XLA:CPU behaviour, and why the hot path is shaped the way it is. |
 | `docs/developer/xla-fork.md` | The two patches the fork carries, and what a rebase must preserve. |
 | `docs/developer/open-threads.md` | Unfinished work and environment caveats. |
+| `docs/guides/integration.md` | To integrate into a build: ROS 2 first, then CMake submodule, FetchContent, Make. |
+| `docs/guides/realtime.md` | The menu of real-time helpers, and what each one buys. |
 | `versions.env` | Every pinned version. Never hand-type one anywhere else. |
 
 ## The two rules that override normal instincts
 
 **1. Never report a latency number measured on a busy machine.** A concurrent
 build does not add noise to the result, it invalidates it: the same
-configuration measured during a bazel build reported a p50 **2.4x high** and a
-max/p50 of **4.4 instead of 1.1**. Check `/proc/loadavg` first, and discard a
-contaminated run rather than correcting it. When you are asked for latency
+configuration measured during a bazel build reported a p50 more than twice too
+high and a tail ratio four times too large (`docs/developer/measurement.md`).
+Check `/proc/loadavg` first, and discard a contaminated run rather than
+correcting it. When you are asked for latency
 numbers, run `tools/rt_check.sh`, read `/proc/loadavg`, and include both in the
 answer.
 
@@ -72,6 +75,15 @@ reports a confident negative.
 documentation comes from marked regions (`docs: begin <name>` /
 `docs: end <name>`) via `literalinclude`, never pasted. A pasted snippet is a
 copy that rots silently.
+
+**Measured figures live only under `docs/developer/` and on
+`docs/benchmarks.md`.** A guide, an example page, a reference page or the
+landing page states the *shape* of a result and links to the page that holds
+the figure. Every latency, ratio or timing that does appear names the machine
+model, the architecture, and bare metal or container — plus governor and
+kernel for a tail figure — or says "host not recorded". Allocation and op
+counts are properties of the program, not the host; they may appear anywhere
+but must name the fixture. `tests/test_docs_sync.py` checks the placement.
 
 ## Where things are
 

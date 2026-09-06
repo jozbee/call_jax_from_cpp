@@ -83,9 +83,9 @@ before producing a number. Two rules override normal instincts:
 
 1. **Never report a latency number measured on a busy machine.** A concurrent
    build does not add noise to the result, it invalidates it: the same
-   configuration measured during a bazel build reported a p50 2.4x high and a
-   max/p50 of 4.4 instead of 1.1. Check `/proc/loadavg` first, and discard a
-   contaminated run rather than correcting it.
+   configuration measured during a bazel build reported a p50 more than twice
+   too high and a tail ratio four times too large. Check `/proc/loadavg`
+   first, and discard a contaminated run rather than correcting it.
 2. **The goal is the tail, not the mean.** p99.9/p50, max/p50, and the worst
    call in a long campaign. An average-latency improvement is not the objective
    and should not be offered as one. A claim about how *often* spikes happen
@@ -114,6 +114,15 @@ On the C++ reference pages, name every member explicitly: an undocumented
 public member does not reach the Doxygen XML at all, so a directive that names
 one is a build failure rather than an empty box.
 
+**Measured figures live only under the Developer guide and on the Benchmarks
+page.** A guide, an example page, a reference page or the landing page states
+the *shape* of a result and links to the page that holds the figure. Every
+latency, ratio or timing that does appear sits in a sentence or caption naming
+the machine model, the architecture, and bare metal or container — plus
+governor and kernel for a tail figure. A figure whose host was not recorded
+says so. Allocation and op counts are properties of the program, not the host;
+they may appear anywhere but must name the fixture.
+
 ## Submitting
 
 Open an issue first for anything large. For a pull request: one idea per
@@ -123,6 +132,8 @@ commit, and a message that explains *why*.
 - [ ] `make format` has been run.
 - [ ] `make docs` builds clean under `-W`.
 - [ ] Any snippet added to the docs comes from a marked region, not a paste.
+- [ ] Any measured figure sits under `docs/developer/` or on
+      `docs/benchmarks.md`, and names the machine it came from.
 - [ ] No version was hand-typed; `versions.env` is still the only place.
 - [ ] If the change is meant to move a number: the before and the after, taken
       on an idle machine, with the `tools/rt_check.sh` output and the
