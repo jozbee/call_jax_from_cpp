@@ -7,6 +7,47 @@ works is to write a probe and run it — `tools/plugin_probe.cpp` is where those
 live, and `build/bin/plugin_probe` prints what the loaded plugin actually
 supports.
 
+## The PJRT C API in one page
+
+PJRT's C API is a single struct of function pointers, obtained from a shared
+object. Four conventions matter here.
+
+**`struct_size` is the versioning mechanism.** Every call takes exactly one
+`*_Args` struct, and every one of those begins with `struct_size` and
+`extension_start`. The caller sets `struct_size` to the size of the struct it
+compiled against; the plugin reads only as far as it understands. The same
+applies to `PJRT_Api` itself: a plugin compiled against an older header
+publishes a shorter table, and a field past its `struct_size` is memory that
+belongs to somebody else. This project therefore treats a function pointer
+beyond the end as absent rather than as whatever byte pattern happens to be
+there, and refuses at load with the name of the first missing function.
+
+**Errors are objects, and they must be destroyed.** Every function returns a
+`PJRT_Error*`; null means success. The message and the status code are read
+through two further calls, and the error is then freed with
+`PJRT_Error_Destroy`. `pjrt::Error` consumes an error — copying out the
+message and code, then destroying it — so a `PJRT_Error*` never needs freeing
+at the call site. Where a failure is a fallback rather than a fault, an
+internal holder frees it instead.
+
+**The entry point is one symbol.** `dlopen` the plugin, resolve `GetPjrtApi`,
+call it for the `const PJRT_Api*`, then call `PJRT_Plugin_Initialize`. The
+library is opened `RTLD_NOW | RTLD_LOCAL` — `NOW` so an unresolved symbol is a
+startup failure instead of a crash on the first call that reaches it, `LOCAL`
+so the plugin's own copy of LLVM does not join the process's global symbol
+namespace. It is never closed: XLA leaves statics behind that boundary which
+live as long as the process, and unmapping the code they point into ends the
+process in an `atexit` handler rather than anywhere diagnosable.
+
+**Configuration is a list of named values.** `PJRT_Client_Create` takes an
+array of `PJRT_NamedValue`, and that is the only way to reach settings the C
+API has no field for — inline execution among them, since
+`PJRT_ExecuteOptions` has no execution-mode field. `PJRT_Plugin_Attributes`
+returns the plugin's own self-description and needs no client, which is
+exactly what makes it usable for deciding which options are safe to send.
+That ordering became load-bearing at this XLA version, where the CPU plugin
+started rejecting unknown option names instead of ignoring them.
+
 ## Verified behaviour
 
 ### Zero-copy input buffers genuinely alias the caller's pointer
@@ -15,7 +56,9 @@ supports.
 `kMutableZeroCopy` aliases the memory it is given on CPU, and **writes made
 between executions are seen by the next one**. That is the property the whole
 design rests on: an input arena is wrapped once at load time and never
-re-wrapped, so a call transfers nothing.
+re-wrapped, so a call transfers nothing. Zero copy still produces a "done
+with host buffer" event, which fires when the buffer is destroyed; nothing
+waits on it, so it is released immediately.
 
 Both host-buffer semantics documents forbid mutating the memory while the
 buffer is alive. Doing it *between* calls is a deliberate, verified bend of
@@ -32,9 +75,12 @@ no attribute to query; the only symptom is that the win you thought you had
 does not appear.
 
 This is why `Function` owns 64-byte-aligned arenas (`posix_memalign`, 64 =
-`xla::cpu::Align()`) instead of accepting an arbitrary caller pointer. If the
-API is ever changed to take caller memory, it must enforce the alignment, or
-the entire benefit disappears without a diagnostic.
+`xla::cpu::Align()`) instead of accepting an arbitrary caller pointer. The
+arenas are also rounded up to a whole multiple of 64, so the tail of the last
+cache line belongs to us: XLA's vectorized epilogues read whole vectors, and a
+read past the end of an exactly-sized allocation is a valgrind report at best.
+If the API is ever changed to take caller memory, it must enforce the
+alignment, or the entire benefit disappears without a diagnostic.
 
 ### Outputs are read straight out of device memory
 
@@ -79,14 +125,39 @@ seconds at load rather than milliseconds. `Function::load_kind()` reports which
 route ran, and a deployment that cannot afford a surprise multi-second load
 should ask for `LoadPolicy::BinaryOnly` and get a `LoadError` instead.
 
-### thousands of allocations per call happen inside XLA
+### Thousands of allocations per call happen inside XLA
 
-That is about one per StableHLO op, in XLA's thunk runtime, entirely inside the
-plugin. Only ~520 allocations per call were ever attributable to this wrapper,
-and those are gone: the steady-state path is now zero.
+About one and a half per StableHLO op, in XLA's thunk runtime, entirely inside
+the plugin: 9,750 per call for the `02_trajopt` example this tree ships. Only
+~520 per call were ever attributable to this wrapper, and those are gone; the
+steady-state path is now zero.
 
-This is the remaining structural jitter surface, and it is not reachable from
-here. Reaching it means installing a pooling allocator behind
+That is why the allocation census classifies rather than counts. Grepping the
+source for `malloc` proves nothing about what the linked binary does at run
+time — OpenBLAS, libm and the C++ runtime all allocate behind the caller's
+back, and an inlined `std::vector` growth is invisible to any static check —
+so `tests/support/malloc_guard.c` interposes the allocator in the real
+process and attributes every armed allocation to the module containing its
+return address:
+
+| Class | Covers | Gate |
+|---|---|---|
+| `allocs_self()` | The main executable and `libpjrt_exec` | **must be zero** |
+| `allocs_plugin()` | Inside `libpjrt_c_api_cpu_plugin` | reported: 9,750/call for `02_trajopt` |
+| `allocs_runtime()` | libc, libstdc++, LAPACK, the thread pool | reported |
+
+The C++ `operator new` family is interposed too, under its Itanium-mangled
+names — without that, an inlined `std::vector` growth would be charged to
+libstdc++ rather than to the module that grew the vector, which is exactly the
+attribution the gate depends on. `total()` counts allocations for the whole
+process whether armed or not, and is what makes a zero armed count
+believable: thousands in total with zero while armed means the path is clean,
+while zero in total means the preload never took effect, which is what
+`--require-guard` checks. Classification is ELF-only; on macOS the totals are
+still correct and `classified()` reports false.
+
+The plugin's share is the remaining structural jitter surface, and it is not
+reachable from here. Reaching it means installing a pooling allocator behind
 `CpuClientOptions::allocator`, which the PJRT C API does not expose — a third
 fork patch, justified only if real hardware still shows a tail. See
 [the XLA fork](xla-fork.md) and [open threads](open-threads.md).
@@ -194,7 +265,8 @@ evidence is what would have to change to reopen the question.
 **A hand-written scalar-C++ backend.** Emitting per-architecture SIMD from a
 custom compiler was considered as a replacement for XLA:CPU. That project's own
 benchmarks put its scalar-C++ backend **2.2–4.3x slower than XLA:CPU** on this
-workload, and a loop-fusion experiment on top of it moved 0.6%. The gap is
+workload (host not recorded), and a loop-fusion experiment on top of it moved
+0.6%. The gap is
 vectorisation and tiling — a months-scale compiler project. Its hoped-for
 jitter advantage never materialised either: max/avg of 1.22–1.24x, against
 PJRT's 1.14–1.25x. It would have been slower and no steadier.
@@ -218,7 +290,8 @@ object code, so this adds a second toolchain and risk without new benefit.
 ## The evidence that chose the current path
 
 In-process **blocking** PJRT called from Python, on the same module, shows
-max/avg of only **1.14–1.25x**. The runtime underneath was never producing
+max/avg of only **1.14–1.25x** (host not recorded; an early measurement, before
+the campaign on the benchmarks page). The runtime underneath was never producing
 multi-millisecond spikes; the wrapper around it was. That single measurement is
 why the work went into the call path rather than into replacing XLA:CPU, and it
 is also where the sign-off target of max/p50 ≤ 2.0 comes from: the intrinsic

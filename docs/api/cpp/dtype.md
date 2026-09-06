@@ -92,6 +92,31 @@ header adds an element type, its exhaustive `switch` is where `-Wswitch` says
 so and forces a decision, while `from_pjrt`'s `default` keeps returning the
 conservative answer in the meantime.
 
+## Generic code
+
+A program that loads whatever artifact it is configured with cannot name `T`
+at compile time. It goes through the untyped accessors and switches on the
+dtype the sidecar declared:
+
+```cpp
+switch (f.input_dtype(i)) {                       // sketch, not from the tree
+  case pjrt::DType::Float64:
+    std::memcpy(f.input_raw(i), src, f.input_nbytes(i));
+    break;
+  case pjrt::DType::Int32:
+    /* ... */
+    break;
+  default:
+    throw std::runtime_error(std::string("unhandled dtype ") +
+                             pjrt::dtype_name(f.input_dtype(i)));
+}
+```
+
+`input_raw(i)` and `output_raw(i)` hand back `void*` and `const void*` and
+are bounds-checked on the same terms as the typed accessors. `dtype_name()`
+returns exactly the strings the sidecar carries, so an error message built
+from them matches what `python -m jax2exec check` prints.
+
 ## Mapping a C++ type back
 
 `pjrt::dtype_of<T>` is the trait the typed accessors use, and

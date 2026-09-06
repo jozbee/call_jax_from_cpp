@@ -117,14 +117,9 @@ PJRT C API <major>.<minor>; execution is inline on the calling thread (the
 plugin advertises supports_synchronous_execution); 1 CPU device, PJRT_NPROC=1.
 ```
 
-Read it in four parts: which plugin was actually opened (after the
-option/environment/default search); the platform and API version, with a
-warning appended when the plugin's minor version differs from the vendored
-header's, because then the two may disagree about the trailing fields of the
-`Args` structs; the execution mode, in the four flavours
-{doc}`calling` describes; and the device and thread configuration. A
-`max_inflight_computations` that was withheld because the plugin does not
-advertise it is named too.
+Four parts: which plugin was actually opened; the platform and API version,
+with a warning when the plugin's minor version differs from the vendored
+header's; the execution mode; and the device and thread configuration.
 
 **`Function::load_detail()`** — which artifact, and why:
 
@@ -141,10 +136,9 @@ successful loads that cost seconds instead of milliseconds, which is exactly
 the kind of thing that should never be a surprise in a deployment — hence
 `LoadPolicy::BinaryOnly`.
 
-**`Function::fingerprint()`** — `PJRT_Executable_Fingerprint`, empty when the
-plugin does not implement it. Two processes reporting the same fingerprint are
-running the same compiled program. It is the cheap way to confirm that a
-benchmark and a deployment are measuring the same thing.
+**`Function::fingerprint()`** — two processes reporting the same fingerprint
+are running the same compiled program; the cheap way to confirm a benchmark
+and a deployment agree.
 
 And from the shell, before any of that:
 

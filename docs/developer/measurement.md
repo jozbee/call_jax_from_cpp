@@ -21,7 +21,8 @@ The new runtime first measured *worse* than the path it replaced: p50 9168 µs
 and max/p50 4.36. A bazel XLA build was saturating all 16 cores at the time
 (load average 16.69). The same configuration on an idle machine gave p50 ~4000
 µs and max/p50 ~1.1 — the p50 was 2.4x high and the tail ratio was four times
-too large.
+too large. (Host not recorded beyond "16 cores"; it was not the machine the
+benchmarks page names.)
 
 Check `/proc/loadavg` before every run. `make bench` prints it above the
 numbers for exactly this reason, and `tools/run_matrix.sh` prints it before it
@@ -85,6 +86,16 @@ Execution supplied 16 buffers but compiled program expected 4
 Any synthetic benchmark kernel must make every input feed an output, or the
 thing you built to measure a 16-argument signature is measuring a 4-argument
 one.
+
+## Trap 6 — a periodic loop and a back-to-back benchmark measure different things
+
+A benchmark that calls as fast as it can keeps the core busy and therefore
+boosted, and reports the compute cost. A control loop at its real period lets
+the core idle between calls, and on an untuned host the same work then takes a
+multiple of that time — the median moves, not just the tail. Both numbers are
+honest; quote the one that matches how the code will run, and say which it
+is. The experiment is on the [benchmarks page](../benchmarks.md) and the
+mechanism on [real-time notes](realtime-notes.md).
 
 ## The tools
 
