@@ -2,6 +2,10 @@
 
 #include <cstddef>
 
+#if defined(__x86_64__) || defined(_M_X64)
+#include <cpuid.h>
+#endif
+
 #if defined(__aarch64__)
 #include <sys/auxv.h>
 
@@ -37,6 +41,35 @@ int rung(const char* const (&ladder)[N], const std::string& level) {
   return -1;
 }
 
+#if defined(__x86_64__) || defined(_M_X64)
+
+// __builtin_cpu_supports knows a fixed set of feature names that has grown
+// over compiler releases, and an unknown name is a compile error rather than
+// a false answer: clang 18, which is what Ubuntu 24.04 and therefore the CI
+// container ship, rejects "lzcnt" and "movbe" outright.  Both bits are one
+// CPUID leaf away, so read them directly and keep the v3 test faithful to the
+// psABI instead of dropping the two features the older compiler cannot name.
+
+/// ABM/LZCNT: CPUID leaf 0x80000001, ECX bit 5.
+bool has_lzcnt() {
+  unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+  if (__get_cpuid(0x80000001u, &eax, &ebx, &ecx, &edx) == 0) {
+    return false;
+  }
+  return (ecx & (1u << 5)) != 0;
+}
+
+/// MOVBE: CPUID leaf 1, ECX bit 22.
+bool has_movbe() {
+  unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
+  if (__get_cpuid(1u, &eax, &ebx, &ecx, &edx) == 0) {
+    return false;
+  }
+  return (ecx & (1u << 22)) != 0;
+}
+
+#endif
+
 }  // namespace
 
 std::string host_isa_level() {
@@ -59,7 +92,7 @@ std::string host_isa_level() {
   if (__builtin_cpu_supports("avx") && __builtin_cpu_supports("avx2") &&
       __builtin_cpu_supports("bmi") && __builtin_cpu_supports("bmi2") &&
       __builtin_cpu_supports("fma") && __builtin_cpu_supports("f16c") &&
-      __builtin_cpu_supports("lzcnt") && __builtin_cpu_supports("movbe")) {
+      has_lzcnt() && has_movbe()) {
     return "x86-64-v3";
   }
   if (__builtin_cpu_supports("sse4.2") && __builtin_cpu_supports("ssse3") &&

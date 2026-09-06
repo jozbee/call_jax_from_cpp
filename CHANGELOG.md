@@ -99,6 +99,13 @@ Notable changes to this project. The format follows
   owned by root, and bazelisk -- which writes `~/.cache/bazelisk` beside it --
   died with "permission denied" before compiling anything. The release path
   had never been exercised, because no plugin release existed to exercise it.
+- The library compiles again under the clang the CI container ships.
+  `host_isa_level()` asked `__builtin_cpu_supports` for `"lzcnt"` and
+  `"movbe"`, and the set of names that builtin accepts has grown over compiler
+  releases: clang 18 rejects both at compile time rather than answering false,
+  so every x86_64 CI job failed while the newer clang on the developer machine
+  built the same file cleanly. Both bits are read from CPUID directly now, so
+  the x86-64-v3 test still checks the full psABI feature set.
 
 ### Removed
 - The legacy `Client` / `Buffer` / `AOTComputation` wrappers, which rebuilt
