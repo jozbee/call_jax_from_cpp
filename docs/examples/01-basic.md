@@ -1,10 +1,18 @@
 # 01 · Basic
 
+*Assumes the {doc}`Quickstart </getting-started/quickstart>`, which is this
+example end to end; this page shows the parts the Quickstart skipped.*
+
 `examples/01_basic` exports one small function and calls it once from C++:
 export, three artifact files, load, call, check. Nothing else is in the way.
 The function is `fun(A, b) -> (x, r)`: `x` solves `A x = b`, and `r` is the
 residual JAX computed for it, so the C++ side can check itself twice — once
 against a residual it recomputes from its own arenas, once against `r`.
+
+:::{note}
+Two namespaces appear. `pjrt::` is the library ({doc}`/api/index`);
+`basic::` is this example's own flags, printing and checks in `support.hpp`.
+:::
 
 ## The export
 
@@ -14,8 +22,8 @@ against a residual it recomputes from its own arenas, once against `r`.
 :end-before: docs: end export
 ```
 
-`export` writes `basic.binpb`, `basic.mlirbc` and `basic.json` into
-`artifacts/`. `jnp.linalg.inv` is there on purpose: it lowers to a LAPACK
+{py:func}`~jax2exec.export` writes `basic.binpb`, `basic.mlirbc` and
+`basic.json` — an {term}`artifact` — into `artifacts/`. `jnp.linalg.inv` is there on purpose: it lowers to a LAPACK
 custom call that only the fork's plugin can load, so a wrong plugin fails
 here, at the first example, rather than in the field.
 
@@ -27,9 +35,13 @@ here, at the first example, rather than in the field.
 :end-before: docs: end load
 ```
 
+One {cpp:class}`~pjrt::Runtime` per process, one {cpp:class}`~pjrt::Function`
+per artifact; {doc}`/guides/calling` has the rules that follow.
+
 ## Read the signature
 
-Names resolve to indices once, at startup, and the order of the system comes
+Names resolve to indices once, at startup, with
+{cpp:func}`~pjrt::Function::find_input`, and the order of the system comes
 from the artifact rather than from a constant.
 
 ```{literalinclude} ../../examples/01_basic/basic.cpp
@@ -46,8 +58,11 @@ from the artifact rather than from a constant.
 :end-before: docs: end call
 ```
 
-The residual is then recomputed from the same arenas: a layout mistake on the
-C++ side produces a believable `x` and a residual that is not small. Flags,
+{cpp:func}`~pjrt::Function::input` and {cpp:func}`~pjrt::Function::output`
+are pointers into the {term}`arenas <arena>` the `Function` owns;
+{cpp:func}`~pjrt::Function::call` runs the executable over them. The residual
+is then recomputed from the same arenas: a layout mistake on the C++ side
+produces a believable `x` and a residual that is not small. Flags,
 the `key=value` printing and the `--debug` demonstration live in
 `examples/01_basic/support.hpp`.
 
