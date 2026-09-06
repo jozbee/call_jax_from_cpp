@@ -229,6 +229,12 @@ wrong.
 executable, and that is the part of this project most likely to break on a bump.
 Export the smallest example and let the checker read it back.
 
+**Verify.** `build/bin/plugin_probe --view` -> expected: `view_supported=1`,
+`view_created=1`, `view_aliases=1`, `view_sees_later_write=1`. This one is
+checked because it has already changed: the CPU plugin was once documented as
+not implementing it at all. A change here does not break anything, but it
+invalidates a paragraph in {doc}`runtime-internals`.
+
 **Verify.** `make export && uv run python -m jax2exec check artifacts/basic`
 → expected: the sidecar's signature is printed and the artifact is reported as
 runnable on this host.

@@ -43,9 +43,24 @@ both implemented for CPU, so an output needs no `PJRT_Buffer_ToHostBuffer`
 round trip and no event to wait on. Device memory on CPU is ordinary memory,
 and one `memcpy` per output is the whole of it.
 
-`PJRT_Client_CreateViewOfDeviceBuffer` is **not** implemented for CPU. That is
-why persistent inputs go through `BufferFromHostBuffer` rather than a view —
-the obvious-looking API for "wrap this memory" is the one that is missing.
+`PJRT_Client_CreateViewOfDeviceBuffer` **is** implemented for CPU at this XLA
+revision, and it works: it aliases the caller's pointer and sees writes made
+after the view exists. An earlier note here said it was missing, and that was
+either wrong or has stopped being true; `tools/plugin_probe --view` now checks
+it on every plugin so the answer cannot rot again unnoticed.
+
+Persistent inputs still go through `BufferFromHostBuffer`, for a reason that
+survives the correction: a view is explicitly *non-owned*, so its lifetime
+contract is the caller's problem, while `kImmutableZeroCopy` gives the same
+aliasing with ownership semantics the runtime already handles. Two things
+measured while checking this are worth carrying:
+
+- The header calls `on_delete_callback` optional and nullable. The CPU
+  implementation throws `std::bad_function_call` when it is null, which
+  surfaces as a crash rather than a `PJRT_Error`. Pass a callback, even an
+  empty one.
+- The alias is genuine in both directions: a write through the caller's pointer
+  after the view is created is visible through the buffer.
 
 ### Serialized executables embed target machine code
 

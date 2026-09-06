@@ -173,8 +173,10 @@ pointer. An arbitrary pointer would have to be checked, and an unchecked one
 would silently lose the entire benefit.
 
 **Why persistent inputs go through `BufferFromHostBuffer`.**
-`PJRT_Client_CreateViewOfDeviceBuffer` is the call that sounds right, and it is
-**not implemented for CPU**. `BufferFromHostBuffer` with
+`PJRT_Client_CreateViewOfDeviceBuffer` is the call that sounds right, and it
+does work on CPU — but it creates an explicitly *non-owned* view, which makes
+the buffer's lifetime the caller's problem for no gain here.
+`BufferFromHostBuffer` with
 `kImmutableZeroCopy` genuinely aliases the caller's pointer on CPU — verified,
 not assumed — and writes made between executions are seen by the next one. Zero
 copy still produces a "done with host buffer" event, which fires when the buffer
