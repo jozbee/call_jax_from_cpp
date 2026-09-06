@@ -91,6 +91,12 @@ RUN git clone --depth 1 --branch "${XLA_REF}" "${XLA_REPO}" /home/dev/xla \
     || git clone --filter=blob:none "${XLA_REPO}" /home/dev/xla \
        && git -C /home/dev/xla checkout --detach "${XLA_REF}"
 COPY --chown=dev:dev tools/build_plugin.sh /home/dev/build_plugin.sh
+# BuildKit creates a cache mount's missing parent directories as root, and
+# bazelisk writes ~/.cache/bazelisk beside the mount, so without this the very
+# first bazel invocation dies with "permission denied" before it compiles
+# anything. Creating the parent as dev leaves the mount to land inside a
+# directory dev already owns.
+RUN mkdir -p /home/dev/.cache
 RUN --mount=type=cache,id=bazel-${TARGETARCH},target=/home/dev/.cache/bazel,uid=1000,gid=1000,sharing=locked \
     XLA_DIR=/home/dev/xla OUT_DIR=/opt/pjrt BUILD_MODE="${BUILD_MODE}" \
     /home/dev/build_plugin.sh

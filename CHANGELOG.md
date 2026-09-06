@@ -93,6 +93,12 @@ Notable changes to this project. The format follows
   calling thread is excluded by thread id so the corral can never undo its own
   pinning. `tests/test_examples_realtime.py` now asserts that a two-worker run
   moves two threads.
+- `make plugin-source` and `tools/release_plugin.sh` can build the plugin
+  again. BuildKit creates a cache mount's missing parent directories as root,
+  so mounting the bazel cache at `/home/dev/.cache/bazel` left `/home/dev/.cache`
+  owned by root, and bazelisk -- which writes `~/.cache/bazelisk` beside it --
+  died with "permission denied" before compiling anything. The release path
+  had never been exercised, because no plugin release existed to exercise it.
 
 ### Removed
 - The legacy `Client` / `Buffer` / `AOTComputation` wrappers, which rebuilt
