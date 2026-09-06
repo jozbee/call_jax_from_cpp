@@ -211,8 +211,8 @@ privileges. Container timings are relative signals only — see
 
 | Route | What it looks like | |
 |---|---|---|
-| CMake submodule | `add_subdirectory()` on this tree, link `pjrt_exec` | {doc}`../developer/integration-recipes` |
-| Plain Makefile | four flags: `-Iinclude`, the static library, `-ldl -lpthread` | {doc}`../developer/integration-recipes` |
+| CMake submodule | `add_subdirectory()` on this tree, link `pjrt_exec` | {doc}`../guides/integration` |
+| Plain Makefile | four flags: `-Iinclude`, the static library, `-ldl -lpthread` | {doc}`../guides/integration` |
 | Artifacts | exported per deployment machine, or shipped with the `.mlirbc` fallback | {doc}`../guides/exporting` |
 
 The plugin is never a link-time dependency. It has to be findable at run time,

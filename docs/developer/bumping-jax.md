@@ -223,6 +223,7 @@ is a state to commit.
 `pyproject.toml` and `versions.env` agree; run it before wondering which file is
 wrong.
 
+(ifrt-envelope)=
 ## Step 12 — Verify the exporter's private-API path
 
 **Do.** The exporter reaches into JAX internals to serialize a compiled

@@ -172,8 +172,33 @@ to pin it down for any of them. These are tail
 
 The absolute numbers belong to this host and this workload. On a machine with
 `isolcpus` and a `performance` governor, expect the hardened row to improve and
-the gaps to widen; {doc}`guides/realtime` has the checklist, and the 2.6x that
-idling between calls costs on this host.
+the gaps to widen; {doc}`guides/realtime` has the checklist, and the next
+section shows what idling between calls costs on this host.
+
+## Idling between calls
+
+The same `02_trajopt` artifact on the same i9-14900HX (bare metal, this
+project's development host), pinned to one core with `SCHED_FIFO` and
+`mlockall` in effect, `scaling_governor` on `powersave` throughout and
+`/dev/cpu_dma_latency` not held. The only variable is the loop's period:
+
+```{table}
+:class: results
+
+| Period | Duty cycle | min | p50 |
+|---|---|---|---|
+| 3 ms | ~65% | 1866 µs | **2027 µs** |
+| 10 ms | ~20% | 1854 µs | **5196 µs** |
+```
+
+The same work, on the same core, takes 2.6 times longer at 100 Hz than at
+333 Hz. Nothing is contended and nothing is preempted; the core idles for 8 ms
+of every 10 and arrives at the next period in a worse state to do the work.
+Which idle-state mechanism is responsible — the governor clocking down, or
+C-state exit latency — was not isolated: the experiment varied only the
+period, with both fixed. {doc}`developer/realtime-notes` says what would
+separate them, and why a back-to-back benchmark and a periodic loop answer
+different questions.
 
 ## How these were measured
 

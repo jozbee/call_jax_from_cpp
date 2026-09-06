@@ -21,16 +21,10 @@ GitHub
 
 :::
 
-A JAX function is exported ahead of time to a serialized PJRT executable, a
-JSON sidecar describing its inputs and outputs, and StableHLO bytecode to fall
-back on. A C++ program loads that artifact through the PJRT C API on CPU and
-calls it in a loop. Nothing on the steady-state path allocates, locks, logs or
-flushes.
-
-The motivating application is nonlinear model-predictive control alongside
-[ros2_control](https://github.com/ros-controls/ros2_control), where a late
-answer is a wrong answer. No control code ships here; the shape of the problem
-is what set the priorities.
+A JAX function is exported once to a serialized PJRT executable, StableHLO
+bytecode to fall back on, and a JSON sidecar describing its signature. A C++
+program loads all three through the PJRT C API on CPU and calls the function
+in a loop. Nothing on the steady-state path allocates, locks, logs or flushes.
 
 ## What it is for
 
@@ -39,33 +33,33 @@ is what set the priorities.
 :class-container: feature-grid
 
 :::{grid-item-card} {octicon}`package;1.1em` Load once, call many
-Every input and output gets a 64-byte-aligned arena the runtime owns. Input
-arenas are wrapped once in zero-copy PJRT buffers, so a call transfers
-nothing: XLA reads the arena where it lies, and outputs are read straight out
-of device memory.
+Every input and output gets a 64-byte-aligned arena the runtime owns. Inputs
+are wrapped once in zero-copy PJRT buffers and outputs are read straight out
+of device memory, so a call transfers nothing.
 :::
 
 :::{grid-item-card} {octicon}`pulse;1.1em` Built for the tail
-The figure of merit is the worst call, not the average one. Across 112,000
-calls per API, the worst call the new path produced was 1.72x its median; the
-older per-call-buffer path reached 4.20x. Runs containing a >2x outlier: 0 of
-28, against 2 of 28.
+The figure of merit is the worst call, not the average one: p99.9 relative to
+p50, and the worst call in a long campaign. The numbers, and the machines they
+came from, are on the {doc}`benchmarks page <benchmarks>`.
 :::
 
 :::{grid-item-card} {octicon}`clock;1.1em` Real-time ready
-Optional, independently-failing helpers lock memory, stop the allocator
-trimming the heap, pin the calling thread, move XLA's pools off that core, and
-raise scheduling priority. Each reports whether it took effect.
+Optional helpers lock memory, pin the thread, move XLA's pools off its core
+and raise scheduling priority. Each reports whether it took effect, and none
+of them fails the program.
 :::
 
 ::::
 
 ## Both halves of the loop
 
-::::{grid} 1 1 2 2
-:gutter: 3
+### Python: define and export
 
-:::{grid-item-card} {octicon}`code;1em` Python: export
+```{literalinclude} ../examples/01_basic/export.py
+:language: python
+:pyobject: fun
+```
 
 ```{literalinclude} ../examples/01_basic/export.py
 :language: python
@@ -73,9 +67,13 @@ raise scheduling priority. Each reports whether it took effect.
 :end-before: docs: end export
 ```
 
-:::
+### C++: load and call
 
-:::{grid-item-card} {octicon}`cpu;1em` C++: call
+```{literalinclude} ../examples/01_basic/basic.cpp
+:language: cpp
+:start-after: docs: begin load
+:end-before: docs: end load
+```
 
 ```{literalinclude} ../examples/01_basic/basic.cpp
 :language: cpp
@@ -83,27 +81,15 @@ raise scheduling priority. Each reports whether it took effect.
 :end-before: docs: end call
 ```
 
-:::
-
-::::
-
-The export writes `<name>.binpb`, `<name>.mlirbc` and `<name>.json` into a
-directory; the C++ side is given the base path and reads all three. The sidecar
-is not a convenience: the PJRT C API cannot be asked what parameters an
-executable takes, so the sidecar is the only description of the signature that
-exists.
+The export writes `<name>.binpb`, `<name>.mlirbc` and `<name>.json`; the C++
+side is given the base path and reads all three. The sidecar is the only
+description of the inputs that exists — the PJRT C API cannot be asked what
+parameters an executable takes.
 
 ## Where next
 
 ::::{grid} 1 2 3 3
 :gutter: 3
-
-:::{grid-item-card} {octicon}`download;1em` Installation
-:link: getting-started/installation
-:link-type: doc
-
-The Python environment, the prebuilt PJRT CPU plugin, and the C++ build.
-:::
 
 :::{grid-item-card} {octicon}`rocket;1em` Quickstart
 :link: getting-started/quickstart
@@ -112,12 +98,25 @@ The Python environment, the prebuilt PJRT CPU plugin, and the C++ build.
 Export a function and call it from C++, end to end.
 :::
 
+:::{grid-item-card} {octicon}`download;1em` Installation
+:link: getting-started/installation
+:link-type: doc
+
+The Python environment, the PJRT CPU plugin, and the C++ build.
+:::
+
 :::{grid-item-card} {octicon}`book;1em` Guides
 :link: guides/how-it-works
 :link-type: doc
 
-Exporting, calling, real-time hardening, measuring, debugging, and how the
-pieces fit.
+How it works, exporting, calling, real-time hardening, measuring, debugging.
+:::
+
+:::{grid-item-card} {octicon}`plug;1em` Integrate
+:link: guides/integration
+:link-type: doc
+
+A ROS 2 `ament_cmake` package, a CMake submodule, FetchContent, or plain Make.
 :::
 
 :::{grid-item-card} {octicon}`list-unordered;1em` API reference
@@ -127,18 +126,11 @@ pieces fit.
 The C++ classes, the Python exporter, and the artifact format.
 :::
 
-:::{grid-item-card} {octicon}`graph;1em` Benchmarks
-:link: benchmarks
-:link-type: doc
-
-The measured numbers, how they were taken, and which parts are solid.
-:::
-
 :::{grid-item-card} {octicon}`tools;1em` Developer guide
 :link: developer/index
 :link-type: doc
 
-Measurement method, runtime internals, the XLA fork, and open threads.
+Measurement, runtime internals, the benchmarks, the XLA fork.
 :::
 
 ::::
@@ -155,12 +147,13 @@ getting-started/quickstart
 :hidden:
 :caption: Guides
 
+guides/how-it-works
 guides/exporting
 guides/calling
+guides/integration
 guides/realtime
 guides/measuring
 guides/debugging
-guides/how-it-works
 ```
 
 ```{toctree}
@@ -191,23 +184,24 @@ api/artifact-format
 
 ```{toctree}
 :hidden:
-:caption: Project
-
-benchmarks
-changelog
-contributing
-```
-
-```{toctree}
-:hidden:
 :caption: Developer guide
 
 developer/index
 developer/measurement
 developer/runtime-internals
+developer/exporter-internals
+developer/realtime-notes
+benchmarks
 developer/xla-fork
 developer/bumping-jax
-developer/integration-recipes
 developer/release-process
 developer/open-threads
+```
+
+```{toctree}
+:hidden:
+:caption: Project
+
+changelog
+contributing
 ```
