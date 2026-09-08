@@ -242,10 +242,17 @@ stamp_plugin_info() {
       warn "PLUGIN_INFO.txt said $key = unknown; set to $value from versions.env"
     fi
   done
-  if ! grep -q '^release_tag' "$info"; then
-    printf '\nrelease_tag      = %s\nfork_repo        = %s\nfork_ref         = %s\n' \
-      "$TAG" "$FORK_REPO" "$XLA_REF" >> "$info"
+  # Rewrite the trailer rather than skip it when it is already there. A
+  # --dry-run followed by a real run stamps twice, and the first pass may have
+  # resolved XLA_REF from a submodule pointer that has since been committed --
+  # which shipped an asset whose fork_ref contradicted its own fork_commit.
+  # Skipping is the bug; a stale trailer is worse than none.
+  if grep -q '^release_tag' "$info"; then
+    sed -i '/^release_tag/,$d' "$info"
+    sed -i -e :a -e '/^$/{$d;N;ba' -e '}' "$info"
   fi
+  printf '\nrelease_tag      = %s\nfork_repo        = %s\nfork_ref         = %s\n' \
+    "$TAG" "$FORK_REPO" "$XLA_REF" >> "$info"
 }
 
 info_field() {  # PLUGIN_INFO.txt, key
