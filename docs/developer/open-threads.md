@@ -1,6 +1,6 @@
 # Open threads
 
-**Status as of 2026-09-05.** This page ages faster than the rest of the
+**Status as of 2026-09-07.** This page ages faster than the rest of the
 directory; verify against the tree before acting on any of it.
 
 ## Deferred deliberately
@@ -77,6 +77,120 @@ Everything needed is wired: `tools/rt_check.sh` to audit the host, `make export`
 **on that box** because serialized executables embed target machine code, then
 `tools/run_matrix.sh` and a campaign of the shape described in
 [measurement](measurement.md), with `SCHED_FIFO` and core pinning enabled.
+
+### The JAX pin is held one release behind on purpose
+
+`versions.env` pins JAX {{ jax_version }}, and the newer 0.11.1 exists. That is
+not staleness. [jax-ml/jax#40101](https://github.com/jax-ml/jax/issues/40101)
+is an XLA:CPU code-generation regression, present from 0.11.1 onward, in which
+a `dynamic-update-slice` writing a small slice into a large buffer inside a
+loop body costs time proportional to the whole destination buffer rather than
+to the slice written. The HLO is identical across the two releases, so nothing
+upstream of code generation shows the problem.
+
+**The threshold is in bytes, and where it falls depends on the machine.** The
+body of the issue reports a cliff at 256 bytes of update size, measured on
+native aarch64 and on emulated amd64. The reporter's own re-measurement on a
+native x86-64 runner with AVX-512
+([comment](https://github.com/jax-ml/jax/issues/40101#issuecomment-5352919579))
+puts it between 448 and 480 bytes instead, and retracts the "batch writes to at
+least 256 bytes" workaround as unsafe on x86 — 512 is the safe number there.
+Below the threshold, slow; the cliff is sharp on both. This project targets
+x86-64, so 448 is the figure to reason with here and 256 would wrongly clear a
+workload writing 300 bytes an iteration.
+
+It matters here because of *where* the defect lives. jaxlib compiles the
+machine code that a `.binpb` embeds, at export time; the plugin relinks that
+code and never recompiles it. So the cost is baked into the artifact, and no
+patch carried in the XLA fork can remove it. Pinning jaxlib is the fix.
+
+**This host reproduces the regression, and it does not touch this workload.**
+Both halves were measured, and the second is only trustworthy because of the
+first.
+
+The reporter's own case, in-process, second-call timing, on an Intel i9-9880H,
+x86-64, bare metal, kernel 7.1.8-arch1, `powersave` governor:
+
+| case | jaxlib 0.11.0 | jaxlib 0.11.1 |
+|---|---|---|
+| `fori_loop`, n = 100,000 | 0.0006 s | 2.1821 s |
+| `lax.scan` stacked, n = 200,000 | 0.0009 s | 14.4420 s |
+
+Three to four orders of magnitude, so the probe is sensitive to what it
+perturbs and a negative from it means something.
+
+`examples/02_trajopt` at the default preset shows no difference at all. Six
+interleaved rounds of 2000 calls per arm, 12,000 calls in total, the *same*
+plugin throughout and the only variable the jaxlib that compiled the artifact,
+on the host above with the load average at 0.48 before and 0.95 after
+(`tools/rt_check.sh`: 0 ok, 9 worth fixing, so untuned):
+
+| median across rounds | 0.11.1 artifact | 0.11.0 artifact |
+|---|---|---|
+| p50 | 3929 µs | 3931 µs |
+| p99.9 / p50 | 1.5 | 1.7 |
+| max / p50 | 1.8 | 1.9 |
+
+The p50 difference is 2 µs against a round-to-round spread of 90 µs, so it is
+nil. The tail columns move the wrong way and are dominated by one outlier round
+in each arm; nothing there is a signal either.
+
+Why the workload escapes is worth writing down, because it is the thing to
+re-check rather than a conclusion to reuse. The cost is proportional to the
+destination buffer *times the trip count*, and these loops are short: a horizon
+of 50 against the reporter's 200,000. The per-iteration writes do sit under the
+byte threshold, so the slow path is presumably taken; there is just almost no
+work behind it. A fixture with a long `lax.scan` would not be so lucky.
+
+**So the pin is held for insurance, not for a measured win here.** Before moving
+it forward, do not simply take the next release. A fix was reported in flight on
+2026-08-20, so the wait may be short; the regression was still present on
+`0.11.2.dev20260819`. Check whether the issue is closed, and whether the XLA
+revision that release pins still contains
+`e9204c9ce05359855a42dae3ad5e69ad9e532d82` — the commit the reporter's bisect
+points at, a tentative attribution rather than a confirmed root cause. Then
+re-run the two-line reproducer above, which costs seconds and answers the
+question directly.
+
+The workload comparison is cheap to repeat because the two plugins are
+interchangeable: a plugin built from either XLA revision loads and runs an
+artifact exported against the other, verified in both directions here with
+`load_kind=deserialized` and all four reference cases agreeing to 1e-15. Export
+`examples/02_trajopt` under both candidate releases, run both artifacts against
+the *same* plugin, and the difference is attributable to export-time code
+generation alone. Interleave them, per [measurement](measurement.md); do not run
+them back to back.
+
+### The fork cannot find LAPACK on a non-Debian host
+
+Patch 1 adds the Debian and Ubuntu multiarch LAPACK directories to the plugin's
+link path, and nothing else, because a general library directory on that list
+relinks the whole C runtime against the build host's glibc — measured, and
+described on [the fork page](xla-fork.md). So a build on Arch, Fedora or
+anything else that keeps LAPACK in `/usr/lib` fails at the final link unless the
+builder passes `--arch-flags "--linkopt=-L/usr/lib"`, and that build is then not
+publishable.
+
+There is no safe generic path, because every candidate directory also holds
+`libc`. A real fix would link the two libraries by absolute file path rather
+than by search: resolve them once at configure time and pass the resolved paths
+to the rule. That is a bazel change to a patch this project has to rebase every
+bump, so it is worth doing only if someone actually needs to build releases off
+Debian. Until then the cost is one flag and a note.
+
+### A run report does not record which JAX produced the artifact
+
+`bench --json` writes the host audit, the plugin path and the PJRT API version,
+and `report.hpp` adds the plugin's advertised attributes. None of it says which
+jaxlib compiled the executable being timed. The sidecar beside every artifact
+does record `jax_version` and `jaxlib_version`, so the information exists two
+files away and simply is not copied into the report.
+
+That is why the matrix figures below lost their pin: nothing in the recorded
+output would have contradicted a reader who assumed they were current. Copying
+the sidecar's `jax_version`, `jaxlib_version` and `generator` into the report,
+next to the host block, would make the omission impossible rather than
+merely discouraged. Small, and not done.
 
 ### The headline campaign is not reproducible from this tree
 

@@ -15,12 +15,12 @@
 #          pjrt_cpu_plugin-jax-v<jax version>-linux-<arch>.tar.gz.sha256
 #
 # Usage:
-#   tools/release_plugin.sh --version jax-v0.11.1 [--arch x86_64,aarch64]
+#   tools/release_plugin.sh --version jax-v0.11.0 [--arch x86_64,aarch64]
 #                           [--tag TAG] [--xla-ref REF] [--dry-run]
 #                           [--update-manifest] [--skip-build] [--force]
 #
-#   --version V        the JAX version being released; "jax-v0.11.1",
-#                      "v0.11.1" and "0.11.1" all mean the same thing.
+#   --version V        the JAX version being released; "jax-v0.11.0",
+#                      "v0.11.0" and "0.11.0" all mean the same thing.
 #                      Default: JAX_VERSION from versions.env.
 #   --arch LIST        comma separated, from x86_64 and aarch64. Default: both.
 #   --tag TAG          release tag. Default: plugin-<version>.

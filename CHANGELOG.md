@@ -27,8 +27,9 @@ Notable changes to this project. The format follows
 - Machinery for prebuilt plugin binaries as GitHub Release assets per JAX
   version: `make plugin` downloads and checksums one, `make plugin-source`
   builds it from the XLA fork. The first release, `plugin-jax-v0.11.1`,
-  publishes a `linux-x86_64` asset; `linux-aarch64` is not published yet, so
-  on that platform `make plugin` prints the remedies and exits non-zero.
+  published a `linux-x86_64` asset. Nothing is published yet for the pinned
+  `plugin-jax-v0.11.0`, so until it is, `make plugin` prints the remedies and
+  exits non-zero on every platform.
 - `pjrt::LatencyRecorder` and `pjrt::AllocGuard` promoted to public headers, so
   a caller can measure their own loop with the same tools this project uses.
 - Four examples: a basic one, a trajectory-optimisation workload heavy enough
@@ -60,8 +61,39 @@ Notable changes to this project. The format follows
 - Measured figures now live only under the developer guide and on the
   benchmarks page, and every one names the machine it came from or says the
   host was not recorded. `tests/test_docs_sync.py` checks the placement.
-- JAX pin moved from 0.9.0.1 to 0.11.1 (jaxlib must match exactly), which moves
-  the XLA base to `dcf304bc`. The fork's two patches were re-applied on top.
+- JAX pin moved from 0.9.0.1 to 0.11.0 (jaxlib must match exactly), which moves
+  the XLA base to `131bf41a`. The fork's two patches were re-applied on top.
+  The pin stops at 0.11.0 rather than the newer 0.11.1 deliberately:
+  [jax-ml/jax#40101](https://github.com/jax-ml/jax/issues/40101) is an XLA:CPU
+  codegen regression, from 0.11.1 onward, that makes a `dynamic-update-slice`
+  inside a loop body cost time proportional to the whole destination buffer
+  rather than to the slice written. jaxlib compiles the machine code an
+  artifact embeds, so the defect is baked in at export and no plugin-side
+  patch removes it; pinning jaxlib is the fix. Measured on the development host,
+  the change makes **no difference to the shipped workload**: this host
+  reproduces the regression at three to four orders of magnitude on the
+  reporter's own case, and `examples/02_trajopt` moved by 2 µs across 12,000
+  interleaved calls, because its loop trip counts are far too short to pay for
+  it. The pin is insurance for future fixtures, not a speed-up. The developer
+  guide's open threads page carries both measurements.
+- `docker compose run --rm plugin-builder tools/build_plugin.sh` works again.
+  The `bazel-cache` volume mounts at `/home/dev/.cache/bazel`, and docker
+  creates a mount point's missing parents as root, so bazelisk could not write
+  `~/.cache/bazelisk` and the build died before it started; `dev` could not
+  sync its venv for the same reason. The image now creates both directories as
+  `dev`. The Dockerfile already guarded against the identical hazard for its
+  build-time cache mount; the runtime volume was not covered.
+- `PLUGIN_INFO.txt` from a container build now names the fork commit and
+  branch. A submodule's `.git` is a file pointing into the superproject, which
+  is not mounted at `/xla`, so git found nothing and the fields read `unknown`
+  — in exactly the artifact whose whole purpose is to be auditable later.
+  `tools/build_plugin.sh` falls back to `versions.env` and says when it does.
+- Building the plugin from source on a distribution other than Debian or
+  Ubuntu now needs `--arch-flags "--linkopt=-L/usr/lib"`, and the fork records
+  why a general library directory must not be added to the patch instead: it is
+  searched ahead of the hermetic sysroot for every implicit library too, and
+  was measured to move the plugin's requirement from `GLIBC_2.27` to
+  `GLIBC_2.44`.
 - The plugin now negotiates create options: at this XLA version the CPU plugin
   validates option names and rejects unknown ones, so the runtime asks
   `PJRT_Plugin_Attributes` what is supported before creating a client, and

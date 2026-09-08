@@ -129,7 +129,7 @@ $ python -m jax2exec check artifacts/trajopt
 
 trajopt  (artifacts/trajopt.json)
   schema 2, written by jax2exec 0.2.0
-  jax 0.11.1 / jaxlib 0.11.1, platform cpu
+  jax 0.11.0 / jaxlib 0.11.0, platform cpu
   exported 2026-09-05T14:02:11Z on linux/x86_64 x86-64-v3, python 3.12.7, x64 on
   cpu 13th Gen Intel(R) Core(TM) i7-13700H
 

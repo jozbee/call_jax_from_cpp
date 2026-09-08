@@ -25,8 +25,8 @@ holding on to while reading the rest of this page.
   "schema": 2,
   "name": "trajopt",
   "generator": { "tool": "jax2exec", "version": "0.2.0" },
-  "jax_version": "0.11.1",
-  "jaxlib_version": "0.11.1",
+  "jax_version": "0.11.0",
+  "jaxlib_version": "0.11.0",
   "platform": "cpu",
   "export": {
     "time_utc": "2026-09-05T14:02:11Z",

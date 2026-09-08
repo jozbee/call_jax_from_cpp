@@ -28,7 +28,7 @@ on:
   workflow_dispatch:
     inputs:
       jax_version:
-        description: "JAX version to build the plugin for, e.g. 0.11.1"
+        description: "JAX version to build the plugin for, e.g. 0.11.0"
         required: true
         type: string
       build_mode:

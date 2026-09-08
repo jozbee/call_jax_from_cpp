@@ -839,7 +839,7 @@ void Runtime::create_client() {
     // asks for inline execution.
     create_options.push_back(bool_option(kOptionAsynchronous, false));
   }
-  // Withheld unless advertised.  As of XLA dcf304bc the CPU plugin returns
+  // Withheld unless advertised.  As of XLA 131bf41a the CPU plugin returns
   // InvalidArgument for a create option it does not recognize, where it used
   // to ignore one silently, so sending this speculatively would cost the whole
   // client rather than just the option.

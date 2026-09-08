@@ -116,6 +116,19 @@ first build takes 30–60 minutes and a few gigabytes of bazel cache; later ones
 are incremental. It needs `liblapack-dev` and `libblas-dev`, which the fork's
 first patch links against.
 
+**On a distribution that is not Debian or Ubuntu**, the link step fails with
+`cannot find -llapack`, because the patch adds only Debian's multiarch
+directories to the link path and adding a general one would relink the C
+runtime against the host's glibc. Give the path for that build alone:
+
+```console
+$ tools/build_plugin.sh --arch-flags "--linkopt=-L/usr/lib"
+```
+
+The flag is recorded in `PLUGIN_INFO.txt`, and a plugin built that way runs
+here but is not portable enough to publish. {doc}`../developer/xla-fork` has the
+measurement behind that.
+
 If bazel is not on this machine, the container has it:
 
 ```console

@@ -74,7 +74,7 @@ __all__ = [
 #: The JAX release this exporter was written against and is tested on.  A
 #: different version is a warning, not a refusal: artifacts are validated by
 #: the C++ loader on the way in, and a bump usually just works.
-SUPPORTED_JAX = "0.11.1"
+SUPPORTED_JAX = "0.11.0"
 
 _NAME_RE = re.compile(r"[A-Za-z0-9_.-]+")
 

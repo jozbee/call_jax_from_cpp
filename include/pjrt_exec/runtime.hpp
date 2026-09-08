@@ -223,7 +223,7 @@ struct PluginInfo {
  *
  * Construction queries `PJRT_Plugin_Attributes` first -- it needs no client --
  * and sends only the create options this plugin admits to understanding.  That
- * ordering matters: as of XLA `dcf304bc` the CPU plugin validates option names
+ * ordering matters: as of XLA `131bf41a` the CPU plugin validates option names
  * and fails creation with `InvalidArgument` on an unknown one, where it used to
  * ignore them silently.
  */

@@ -25,11 +25,49 @@ repository alone.
 ### Patch 1 — jaxlib's LAPACK FFI kernels
 
 Vendors `jaxlib/cpu/{lapack_kernels,cpu_kernels,ffi_helpers}.*` from the
-`jax-ml/jax` repository at the pinned release tag into a new
-`//jaxlib_cpu_kernels` package, and links `pjrt_c_api_cpu_plugin.so` against it
-plus the system `liblapack` and `libblas`. These are the files the JAX team
-ships specifically for calling JAX-generated HLO from outside JAX: their own
-guidance is that a C++ user should link against LAPACK directly.
+`jax-ml/jax` repository into a new `//jaxlib_cpu_kernels` package, and links
+`pjrt_c_api_cpu_plugin.so` against it plus the system `liblapack` and
+`libblas`. These are the files the JAX team ships specifically for calling
+JAX-generated HLO from outside JAX: their own guidance is that a C++ user
+should link against LAPACK directly. Which tag the copies come from is its own
+question, answered below.
+
+**The link path list is load-bearing, easy to lose in a rebase, and dangerous
+to extend.** The `linkopts` on the plugin target add the four Debian and Ubuntu
+multiarch LAPACK and BLAS directories, and nothing else. Step 4 of
+[bumping JAX](bumping-jax.md) checks that the `//jaxlib_cpu_kernels` dependency
+survived a rebase; check the `-L` list with it, because losing it fails at the
+final link, after the whole build, with a message that reads like a missing
+system package rather than a lost patch hunk.
+
+**Do not add a general library directory to that list**, however reasonable it
+looks on a distribution that keeps LAPACK in `/usr/lib`. This was tried here
+and measured. A `-L` applies to every `-l` on the link line — the implicit
+`libc`, `libm`, `libdl`, `libpthread` and `librt` included — and it is searched
+ahead of the toolchain's hermetic sysroot. Adding `/usr/lib` relinked the
+entire C runtime against the build host's glibc: the plugin's symbol-version
+ceiling went from `GLIBC_2.27` to `GLIBC_2.44`, and `librt`, `libdl` and
+`libpthread` vanished from `DT_NEEDED` because a modern glibc folds them into
+`libc`. The result runs on the machine that built it and on almost nothing
+else, which is the opposite of what a baseline release asset is for.
+
+So on a host whose LAPACK is not in a multiarch directory, supply the path for
+that one build and keep it out of the tree:
+
+```console
+tools/build_plugin.sh --arch-flags "--linkopt=-L/usr/lib"
+```
+
+`PLUGIN_INFO.txt` then records the flag under `arch_flags`, which is the signal
+that the binary is a local build and **must not be published**. Release assets
+come from the container or from `.github/workflows/plugin.yml`, where the
+Debian paths resolve and the sysroot supplies the C runtime. That is not a
+convention; it is what keeps `glibc_max` at 2.27, and both halves have been
+measured: the same fork commit built on an Arch host with `-L/usr/lib` needs
+`GLIBC_2.44` and has seven `DT_NEEDED` entries, while built in the container it
+needs `GLIBC_2.27` and has the same ten as the published 0.11.1 asset. The host
+build is not merely theoretically unportable — it fails to `dlopen` inside the
+project's own Ubuntu 24.04 image with ``version `GLIBC_2.43' not found``.
 
 **What breaks without it.** An executable compiled from a JAX function that
 lowers to a LAPACK-backed custom call — `jnp.linalg.inv` needs
@@ -43,14 +81,33 @@ A bare plugin never registers those handlers, because what registers them
 normally is jaxlib's Python extension, on import. Nothing imports it here.
 
 The second commit re-vendors these kernels for the current JAX release. They
-changed substantially between the last pin and this one — `lapack_kernels.cc`
-grew from 1656 to 2644 lines — and the FFI handler signatures have to match
-what the pinned release lowers to, so the copies are refreshed rather than
-carried forward. It also drops the sparse and tridiagonal handler
-registrations, because their kernels are not vendored and registering them
-would not link: an executable that lowers to `cpu_csr_sparse_dense_ffi` or
+changed substantially between the 0.9.0.1 pin and the 0.11 series —
+`lapack_kernels.cc` grew from 1656 to 2644 lines — and the FFI handler
+signatures have to match what the pinned release lowers to, so the copies are
+refreshed rather than carried forward. It also drops the sparse and tridiagonal
+handler registrations, because their kernels are not vendored and registering
+them would not link: an executable that lowers to `cpu_csr_sparse_dense_ffi` or
 `tridiagonal_solve_perturbed_ffi` fails to load with the same clear message
 above.
+
+**The vendored sources are from `jax-v0.11.1`, not from the pinned
+`jax-v{{ jax_version }}`, and that is deliberate.** Step 5 of
+[bumping JAX](bumping-jax.md) says to copy from the pinned tag, and this is the
+one place the tree does not. Of the five vendored sources, `lapack_kernels.h`,
+`cpu_kernels.cc`, `lapack_kernels_using_lapack.cc` and `ffi_helpers.h` are
+byte-identical between the two tags. Only `lapack_kernels.cc` differs, by 18
+lines, and the difference is upstream wrapping the thread-pool fan-out of
+batched LAPACK calls in `PLATFORM_GOOGLE` so that an open-source build runs
+each batch inline. Upstream's stated reason is performance regressions and
+crashes from interactions with external LAPACK/BLAS implementations, which is
+exactly what this plugin links against. Keeping the newer copy therefore keeps
+a cross-thread wait out of the call path, and it keeps every file under
+`jaxlib_cpu_kernels/` byte-identical to the previously published plugin's —
+verified by hashing all six against fork tip `70c8022`. That is not the same as
+saying the plugin is otherwise unchanged: patch 1's link path list gained
+`/usr/lib64` and `/usr/lib` in this move. Nothing in the artifact ABI depends
+on the kernel-source choice, though: the handler signatures are identical
+either way.
 
 ### Patch 2 — CPU plugin create options and their advertisement
 

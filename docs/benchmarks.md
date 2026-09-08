@@ -115,9 +115,25 @@ $ tools/run_matrix.sh trajopt 2000 3 artifacts/reports/matrix.csv
 ```
 
 `examples/02_trajopt`, 2000 calls per run, three interleaved rounds per
-configuration, on an idle x86-64 i9-14900HX. The host is **not** real-time
-tuned: `powersave` governor, transparent hugepages on, no `isolcpus`, no
-`nohz_full`. Medians across the three rounds:
+configuration, on an idle x86-64 i9-14900HX, bare metal. The host is **not**
+real-time tuned: `powersave` governor, transparent hugepages on, no `isolcpus`,
+no `nohz_full`. Kernel version not recorded. Medians across the three rounds:
+
+:::{warning}
+**These figures were taken under JAX 0.11.1, which this tree no longer pins.**
+The move to {{ jax_version }} was made to avoid an XLA:CPU regression described
+in [open threads](developer/open-threads.md). It was reasonable to expect these
+numbers to be inflated by it. **They are not**: the difference was measured,
+and it is nil for this workload. The figures therefore stand as recorded, and
+this note exists so that nobody re-derives the worry from first principles.
+
+The measurement is on [the pin move](developer/open-threads.md); the short
+version is that a 12,000-call interleaved comparison, same plugin, two artifact
+sets differing only in the jaxlib that compiled them, moved the median by
+2 µs against a round-to-round spread of 90 µs. The regression is real and this
+host reproduces it at four orders of magnitude on the reporter's own case; this
+workload's loop trip counts are simply too small to pay for it.
+:::
 
 ```{table}
 :class: results
@@ -180,7 +196,11 @@ section shows what idling between calls costs on this host.
 The same `02_trajopt` artifact on the same i9-14900HX (bare metal, this
 project's development host), pinned to one core with `SCHED_FIFO` and
 `mlockall` in effect, `scaling_governor` on `powersave` throughout and
-`/dev/cpu_dma_latency` not held. The only variable is the loop's period:
+`/dev/cpu_dma_latency` not held. The only variable is the loop's period.
+
+The artifact is the same 0.11.1-era one as the table above, and as recorded
+there the pin move was measured to make no difference to this workload, so
+these numbers are not inflated by it either.
 
 ```{table}
 :class: results

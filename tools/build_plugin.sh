@@ -115,8 +115,23 @@ strip --strip-unneeded "$OUT" || echo "build_plugin: warning: strip failed, keep
 nm -D --defined-only "$OUT" 2>/dev/null | grep -q ' T GetPjrtApi' \
   || die "$OUT does not export GetPjrtApi"
 
-fork_commit="$(git -C "$XLA_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
-fork_branch="$(git -C "$XLA_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+# Prefer what the tree actually is over what versions.env claims it should be.
+# git fails in the container, though: compose mounts third_party/xla at /xla,
+# and a submodule's .git is a file pointing back into the superproject, which
+# is not mounted. Without the fallback every container-built asset records
+# "unknown" here, which defeats the point of PLUGIN_INFO.txt -- and the
+# container is the documented way to build one.
+fork_commit="$(git -C "$XLA_DIR" rev-parse HEAD 2>/dev/null || true)"
+fork_branch="$(git -C "$XLA_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+if [[ -z "$fork_commit" && -f "$REPO_ROOT/versions.env" ]]; then
+  # shellcheck disable=SC1091
+  fork_commit="$(. "$REPO_ROOT/versions.env" && echo "${XLA_FORK_COMMIT:-}")"
+  fork_branch="$(. "$REPO_ROOT/versions.env" && echo "${XLA_FORK_BRANCH:-}")"
+  [[ -n "$fork_commit" ]] && \
+    echo "build_plugin: no git metadata in $XLA_DIR; recording the fork commit from versions.env" >&2
+fi
+fork_commit="${fork_commit:-unknown}"
+fork_branch="${fork_branch:-unknown}"
 api_minor="$(grep -m1 '^#define PJRT_API_MINOR' "$XLA_DIR/xla/pjrt/c/pjrt_c_api.h" 2>/dev/null | awk '{print $3}')"
 glibc_max="$(objdump -T "$OUT" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
 

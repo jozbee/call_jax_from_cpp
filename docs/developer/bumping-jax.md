@@ -84,10 +84,18 @@ pushing the branch to the fork carries the objects along.
 **Do.** Cherry-pick the LAPACK-kernels commit onto the new branch. The one
 conflict to expect is `xla/pjrt/c/BUILD`, which upstream edits often. Re-apply
 by hand what the patch adds to the `pjrt_c_api_cpu_plugin` target: a dependency
-on `//jaxlib_cpu_kernels` and the `-llapack -lblas` link options.
+on `//jaxlib_cpu_kernels`, the four Debian multiarch `-L` paths, and the
+`-llapack -lblas` link options.
 
-**Verify.** `grep -n 'jaxlib_cpu_kernels' third_party/xla/xla/pjrt/c/BUILD`
-→ expected: the dependency line, and no conflict markers anywhere in the file.
+**Verify.**
+`grep -nE 'jaxlib_cpu_kernels|^\s*"-L|-llapack' third_party/xla/xla/pjrt/c/BUILD`
+→ expected: the dependency line, exactly four `-L` entries, all of them
+multiarch LAPACK or BLAS directories, `-llapack` and `-lblas`, and no conflict
+markers anywhere in the file. Check the `-L` list even when the cherry-pick
+reports no conflict: this hunk auto-merges cleanly and losing it fails at the
+final link, after the whole build, with a message that reads like a missing
+system package. Four is also a ceiling, not just a floor — the comment above
+the list says why a fifth, more general path breaks the binary.
 
 **If it fails.** If the plugin target has been renamed or split upstream,
 find the rule that produces `pjrt_c_api_cpu_plugin.so` and add the edge there;
@@ -99,15 +107,24 @@ touched.
 **Do.** Copy from `jax-ml/jax` at `jax-v<version>`:
 `jaxlib/cpu/lapack_kernels.cc`, `jaxlib/cpu/lapack_kernels.h`,
 `jaxlib/cpu/cpu_kernels.cc` and `jaxlib/cpu/ffi_helpers.h`, into
-`jaxlib_cpu_kernels/` in the fork. Rewrite the includes: `jaxlib/cpu/...`
+`jaxlib_cpu_kernels/` in the fork.
+
+**Diff the new copies against the ones already vendored before you take them.**
+The tree currently carries the `jax-v0.11.1` copies against a `jax-v0.11.0`
+pin, deliberately, and re-vendoring from the pinned tag without reading
+[the fork page](xla-fork.md) would silently undo that. The rule is not "always
+take the pinned tag"; it is "take the pinned tag unless a specific, recorded
+reason says otherwise, and record the reason where the next person will look". Rewrite the includes: `jaxlib/cpu/...`
 becomes the local path, while `xla/ffi/api/...` stays as it is. **Drop the
 sparse and tridiagonal handler registrations** — their kernels are not vendored
 here, so registering them does not link. Add whatever new dependencies the
 sources have acquired to the package's BUILD file.
 
 **Verify.**
-`grep -nE 'sparse|tridiagonal' third_party/xla/jaxlib_cpu_kernels/cpu_kernels.cc`
-→ expected: no output.
+`grep -nE '^\s*JAX_CPU_REGISTER_HANDLER.*(sparse|tridiagonal)' third_party/xla/jaxlib_cpu_kernels/cpu_kernels.cc`
+→ expected: no output. Match the registrations, not the word: the file carries
+a comment naming both dropped handlers, so a bare `grep sparse` reports a
+failure on a correct tree.
 
 **If it fails.** A registration whose kernel is missing fails at link with an
 undefined symbol naming the handler. An executable that needs one of the
@@ -310,6 +327,20 @@ the old one with `tools/run_matrix.sh`, interleaved — never sequentially.
 Correctness first: a latency number from a run that computed the wrong answer is
 not a conservative estimate, it is noise.
 
+**Check what you are actually testing against first.** A plugin built from the
+previous pin loads and runs artifacts exported by the new one, correctly and
+without complaint, so `build/plugin/` holding a stale binary is invisible to
+every test in the tree. Nothing detects it. Confirm by hand:
+
+```console
+$ grep -E '^(jax_version|fork_commit)' build/plugin/PLUGIN_INFO.txt
+$ grep -E '^(JAX_VERSION|XLA_FORK_COMMIT)' versions.env
+```
+
+→ expected: the two `jax_version`/`JAX_VERSION` lines agree, and so do the two
+commits. `make plugin` after a `PLUGIN_RELEASE` bump, or `make plugin-source`,
+is what puts the right one there.
+
 **Verify.** `cut -d' ' -f1 /proc/loadavg && make test`
 → expected: a load average below about 0.5 before the run, and pytest exiting 0.
 
@@ -327,7 +358,9 @@ changed shape, the compatibility notes, and `CHANGELOG.md`. Then open **one**
 pull request containing the files that must move together, because a subset of
 them is a broken tree:
 
-- `versions.env`, `.gitmodules`, and the `third_party/xla` submodule pointer;
+- `versions.env`, `.gitmodules`, the `third_party/xla` submodule pointer, and
+  `docker/Dockerfile`'s `XLA_REF`, which is the one place the fork branch is
+  hand-typed and the one nothing tests;
 - `third_party/patches/*.patch` and `third_party/pjrt/*`;
 - `pyproject.toml` and `uv.lock`;
 - the docs and changelog edits.
@@ -364,7 +397,7 @@ architecture can be added to the same tag later. A checksum mismatch means the
 manifest row and the published asset disagree, which is a stop-everything
 condition — re-run with `--update-manifest` and commit the corrected row.
 
-## What this bump actually found
+## What the 0.9.0.1 to 0.11.1 bump found
 
 Recorded because it is the worked example, and because most of it will be true
 again next time.
@@ -396,3 +429,111 @@ option.
 own `.bazelrc` sets `--noenable_bzlmod --enable_workspace`, so nothing here
 passes `--config=bzlmod`. Do not add it on the assumption that a newer bazel
 requires it.
+
+## What the 0.11.1 to 0.11.0 move found
+
+The second worked example, and the first one that ran the procedure *downward*.
+The reason for moving back is recorded in
+[open threads](open-threads.md); what follows is only what the mechanics
+turned up.
+
+**A downward move is every step above, unchanged.** Nothing about the procedure
+assumes the new version is newer. The XLA revision, the fork branch, the
+patches, the lock file and the artifacts all move the same way. Do not
+shortcut it on the theory that the destination is a place the tree has been
+before — it has not been. This repository went 0.9.0.1 to 0.11.1 directly, so
+0.11.0 was a new base with no branch, no release and no patch set to reuse.
+
+**The PJRT C API did not move, and that collapsed step 8 to one line.**
+`xla/pjrt/c/pjrt_c_api.h` is byte-identical between the two XLA revisions, both
+0.114, and `pjrt_c_api_cpu.h` did not change either. Only the `xla_commit=`
+line in `third_party/pjrt/VERSION` needed editing. Check this before budgeting
+for step 8; between adjacent releases it is often free.
+
+**Step 4's expected conflict did not happen, and step 6's did.** `xla/pjrt/c/BUILD`
+auto-merged cleanly, which is the outcome that most deserves distrust — run the
+verify line anyway and confirm both the `//jaxlib_cpu_kernels` dependency and
+the `-llapack -lblas` link options survived, because a clean merge that dropped
+one of them fails much later, at link. The create-options patch conflicted
+instead, and in the direction a downward move creates: the 0.11.1 base already
+parsed upstream's `process_id` option, the patch sat immediately beside it, and
+against a base without `process_id` the cherry-pick offered upstream's code and
+ours as one block.
+
+**Resolve that conflict to the patch's purpose, not to what compiles.**
+`CpuClientOptions` carries a `process_id` field at both revisions, so keeping
+upstream's parsing would have built fine. It was dropped regardless. The patch
+exists to accept `max_inflight_computations` and to advertise what the plugin
+supports; carrying a backport of an unrelated upstream option inside it widens
+the fork's surface for no caller. `cjfc_plugin_patch_level` stayed at 2,
+because the three markers describe what *this patch* adds and all three still
+hold.
+
+The stock surface underneath the patch did move, and it is worth being exact
+about it, because the markers exist to make exactly this discoverable and here
+they cannot. `ValidateCreateOptions` rejects an unlisted option name, so a
+caller that sends `process_id` succeeds against the published 0.11.1 plugin and
+fails `PJRT_Client_Create` against this one, while both report
+`cjfc_plugin_patch_level = 2`. Nothing in this project sends it — `Runtime`
+sends `cpu_device_count`, `asynchronous` and `max_inflight_computations`, and
+`RuntimeOptions` has no escape hatch for an arbitrary option — so the marker
+was left alone rather than spent on a distinction no caller here can observe.
+A third party driving the plugin directly would not be able to tell the two
+builds apart from the attributes, which is a real if narrow gap.
+
+**`format-patch` does not remove the files it replaces.** Patch 2's subject
+changed, so its filename changed, and the old file stayed on disk beside the
+new one. Delete `third_party/patches/000*.patch` before regenerating, or the
+tree carries a stale patch that still applies and no longer matches the branch.
+
+**A plugin loaded an artifact exported against a different XLA revision.** That
+was not known before. Take it as one observation across two adjacent revisions,
+not as a guarantee: there is no version field on the CPU deserialize path at
+either commit, so nothing *enforces* a match, but nothing promises one either,
+and the two revisions pin different LLVM commits. It is cheap to re-check and
+worth re-checking on each bump. The published 0.11.1
+plugin loaded a 0.11.0 export with `executable_source` of `ifrt-unwrapped` and
+a `load_kind` of `deserialized`, and returned correct results, on both example
+fixtures. Two things follow. The step 12 envelope check can be run before the
+new plugin exists, which moves the most bump-fragile step much earlier. And an
+A/B across two JAX releases can hold the plugin fixed and vary only the
+artifact, which isolates export-time code generation exactly — the comparison
+[open threads](open-threads.md) asks for before this pin moves forward again.
+
+**A `-L` that fixes the link can silently ruin the binary.** The build fails on
+a non-Debian host with `cannot find -llapack`, because the patch only knows
+about Debian's multiarch directories. Adding `/usr/lib` to the list in the fork
+makes it link, and produces a plugin that needs `GLIBC_2.44` where the
+published one needs `GLIBC_2.27`, with `librt`, `libdl` and `libpthread` gone
+from `DT_NEEDED`. A `-L` is not scoped to the library you added it for: it is
+searched ahead of the hermetic sysroot for every implicit `-l` too. Nothing in
+the build warns, the plugin loads and runs perfectly on the machine that made
+it, and the damage is visible only in `objdump -T | grep GLIBC`. Pass the path
+with `--arch-flags` for a local build and leave the tree alone; the flag lands
+in `PLUGIN_INFO.txt` where it marks the artifact unpublishable.
+
+**Check `glibc_max` before publishing anything, and compare it with the asset
+you are replacing.** `PLUGIN_INFO.txt` records it, which is what made the
+regression above findable at all. Equal or lower than the previous release is
+the only acceptable answer.
+
+**The `--out` path is resolved against the XLA tree, not the repository.**
+`tools/build_plugin.sh` `cd`s into `$XLA_DIR`, so `--out build/plugin` writes
+`third_party/xla/build/plugin` and leaves the submodule dirty, which then fails
+step 10's verify for a reason that has nothing to do with the patches. Pass an
+absolute path.
+
+**The lock file moved two packages and no others.** `uv lock` re-resolved
+`jax` and `jaxlib` — versions and wheel digests, 21 lines added and 28 removed
+— and left every transitive dependency alone: `ml_dtypes`, `numpy` and `scipy`
+are untouched. A bump that churns the transitive set is telling you something;
+this one did not, which is part of why it was cheap.
+
+**Going backward can cost you an interpreter, though.** jaxlib 0.11.1 publishes
+cp312, cp313, cp314 and cp315 wheels; 0.11.0 publishes the first three and no
+cp315. `requires-python` in `pyproject.toml` is `>=3.12` with no ceiling, so a
+contributor on Python 3.15 who could resolve this tree yesterday cannot today,
+and `uv` reports it as an unsatisfiable resolution rather than as a pin
+problem. `mise.toml` pins 3.12.14, so nothing here noticed. A downward bump
+should check the wheel matrix of the release it is moving to before assuming
+the environment is the easy part.

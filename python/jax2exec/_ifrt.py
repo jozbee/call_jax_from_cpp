@@ -20,7 +20,7 @@ The envelope is a length-delimited header followed by the payload::
 where the header names the serialization format and carries device and
 sharding information, and the payload is byte-for-byte the
 ``ExecutableAndOptionsProto`` the PJRT C API wants. Verified at
-jaxlib 0.11.1: stripping the header makes the payload deserialize, and the
+jaxlib 0.11.0: stripping the header makes the payload deserialize, and the
 resulting executable runs and returns correct results.
 
 This is an internal format, so everything here is defensive: the envelope is

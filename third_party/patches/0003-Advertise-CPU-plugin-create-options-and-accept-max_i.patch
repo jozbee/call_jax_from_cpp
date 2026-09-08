@@ -1,4 +1,4 @@
-From 70c8022380970734e4a67934116eb2f0f8d0839a Mon Sep 17 00:00:00 2001
+From d367671377d0392c2f32b78be25c9129033207f0 Mon Sep 17 00:00:00 2001
 From: Brent Koogler <brkhnc@umsystem.edu>
 Date: Sat, 5 Sep 2026 16:02:22 -0500
 Subject: [PATCH 3/3] Advertise CPU plugin create options and accept
@@ -21,12 +21,32 @@ thread rather than dispatching them to its pool, which is the largest
 structural cut to tail latency available to a real-time caller. The PJRT
 C API offers no other route: PJRT_ExecuteOptions has no execution-mode
 field.
+
+Rebased from the jax-v0.11.1 base onto jax-v0.11.0's. Upstream parses a
+'process_id' create option at dcf304bc and does not at 131bf41a, so the
+cherry-pick offered upstream's parsing and this patch's together. Only
+max_inflight_computations is kept. Backporting process_id would widen
+this patch beyond what it exists for, and nothing in call_jax_from_cpp
+sends that option -- Runtime sends cpu_device_count, asynchronous and
+max_inflight_computations, and RuntimeOptions has no escape hatch for an
+arbitrary one. CpuClientOptions does carry a process_id field at both
+revisions, so keeping it would have compiled; that it compiles is not a
+reason to carry it.
+
+One consequence is worth stating because the markers exist precisely to
+make it discoverable, and here they do not. ValidateCreateOptions rejects
+an unlisted name, so a caller that sends process_id succeeds against the
+previously published plugin (fork tip 70c8022, on dcf304bc) and fails
+client creation against this one, while both report
+cjfc_plugin_patch_level = 2. The marker describes this patch's own
+surface, which is unchanged: the same one option and the same three
+markers. The stock surface underneath it moved with the base.
 ---
  xla/pjrt/c/pjrt_c_api_cpu_internal.cc | 61 ++++++++++++++++++++++++++-
  1 file changed, 60 insertions(+), 1 deletion(-)
 
 diff --git a/xla/pjrt/c/pjrt_c_api_cpu_internal.cc b/xla/pjrt/c/pjrt_c_api_cpu_internal.cc
-index 72bac82c8a..263400d201 100644
+index 10eafcd..c38e9f4 100644
 --- a/xla/pjrt/c/pjrt_c_api_cpu_internal.cc
 +++ b/xla/pjrt/c/pjrt_c_api_cpu_internal.cc
 @@ -16,9 +16,11 @@ limitations under the License.
@@ -41,18 +61,18 @@ index 72bac82c8a..263400d201 100644
  
  #include "absl/container/flat_hash_map.h"
  #include "absl/log/log.h"
-@@ -63,6 +65,8 @@ PJRT_Error* PJRT_Client_Create(PJRT_Client_Create_Args* args) {
+@@ -62,6 +64,8 @@ PJRT_Error* PJRT_Client_Create(PJRT_Client_Create_Args* args) {
+         absl::flat_hash_map<std::string, PJRT_NamedValue_Type>({
              {"cpu_device_count", PJRT_NamedValue_Type::PJRT_NamedValue_kInt64},
              {"asynchronous", PJRT_NamedValue_Type::PJRT_NamedValue_kBool},
-             {"process_id", PJRT_NamedValue_Type::PJRT_NamedValue_kInt64},
 +            {"max_inflight_computations",
 +             PJRT_NamedValue_Type::PJRT_NamedValue_kInt64},
          });
      PJRT_RETURN_IF_ERROR(
          ValidateCreateOptions(create_options, kExpectedOptionNameAndTypes));
-@@ -87,6 +91,14 @@ PJRT_Error* PJRT_Client_Create(PJRT_Client_Create_Args* args) {
-       options.process_id = process_id_option;
-       LOG(INFO) << "process_id set via create_options: " << process_id_option;
+@@ -80,6 +84,14 @@ PJRT_Error* PJRT_Client_Create(PJRT_Client_Create_Args* args) {
+       LOG(INFO) << "asynchronous set via create_options: "
+                 << asynchronous_option;
      }
 +    if (auto it = create_options.find("max_inflight_computations");
 +        it != create_options.end()) {
@@ -65,7 +85,7 @@ index 72bac82c8a..263400d201 100644
    }
  
    PJRT_ASSIGN_OR_RETURN(std::unique_ptr<xla::PjRtClient> client,
-@@ -110,6 +122,53 @@ PJRT_Error* PJRT_CpuDeviceTopology_Create(
+@@ -103,6 +115,53 @@ PJRT_Error* PJRT_CpuDeviceTopology_Create(
        absl::UnimplementedError("Topology not supported for CPU compilation."));
  }
  
@@ -119,7 +139,7 @@ index 72bac82c8a..263400d201 100644
  const PJRT_Api* GetCpuPjrtApi() {
    static PJRT_Layouts_Extension layouts_extension =
        pjrt::CreateLayoutsExtension(nullptr);
-@@ -136,7 +195,7 @@ const PJRT_Api* GetCpuPjrtApi() {
+@@ -129,7 +188,7 @@ const PJRT_Api* GetCpuPjrtApi() {
        pjrt::cpu_plugin::PJRT_ExecuteContext_Create,
        pjrt::cpu_plugin::PJRT_CpuDeviceTopology_Create,
        pjrt::PJRT_Plugin_Initialize_NoOp, &xla_transform_extension.base,

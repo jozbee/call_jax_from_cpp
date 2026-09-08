@@ -1,17 +1,34 @@
-From ef16510f2cc9b2a6ad6fbb8e1ae64e533a5a87c5 Mon Sep 17 00:00:00 2001
+From 01db1039d03ec826d017977bcbb1e65ecf8c11da Mon Sep 17 00:00:00 2001
 From: Brent Koogler <brkhnc@umsystem.edu>
 Date: Sat, 5 Sep 2026 16:01:42 -0500
-Subject: [PATCH 2/3] Re-vendor jaxlib's LAPACK FFI kernels from jax-v0.11.1
+Subject: [PATCH 2/3] Re-vendor jaxlib's LAPACK FFI kernels (jax-v0.11.0 ABI,
+ jax-v0.11.1 sources)
 
-The kernels changed substantially between jax 0.9.0.1 and 0.11.1
+The kernels changed substantially between jax 0.9.0.1 and the 0.11 series
 (lapack_kernels.cc grew from 1656 to 2644 lines), and the FFI handler
 signatures have to match what the pinned JAX release lowers to, so the
 vendored copies are refreshed rather than carried forward.
 
-Drops the sparse and tridiagonal handler registrations: their kernels are
-not vendored here, so registering them would not link. An executable that
-lowers to cpu_csr_sparse_dense_ffi or tridiagonal_solve_perturbed_ffi
-fails to load with a clear 'No FFI handler registered' message.
+The sources are jaxlib/cpu at jax-v0.11.1, not at the pinned jax-v0.11.0,
+and that is deliberate rather than an oversight. Of the four vendored files,
+lapack_kernels.h, cpu_kernels.cc, lapack_kernels_using_lapack.cc and
+ffi_helpers.h are byte-identical between the two tags; only lapack_kernels.cc
+differs, by 18 lines. That difference is upstream wrapping the thread-pool
+fan-out of batched LAPACK calls in PLATFORM_GOOGLE, so an open-source build
+runs each batch inline. Upstream's stated reason is performance regressions
+and crashes from interactions with external LAPACK/BLAS implementations --
+which is exactly what this plugin links against. Keeping the 0.11.1 copy
+therefore keeps a cross-thread wait out of the call path, and keeps this
+plugin's only difference from the previously published one its XLA base.
+The handler signatures the artifact ABI depends on are identical either way.
+
+This is a deliberate deviation from step 5 of docs/developer/bumping-jax.md,
+which says to re-vendor from the pinned tag; see docs/developer/xla-fork.md.
+
+Drops the sparse and tridiagonal handler registrations: their kernels are not
+vendored here, so registering them would not link. An executable that lowers
+to cpu_csr_sparse_dense_ffi or tridiagonal_solve_perturbed_ffi fails to load
+with a clear 'No FFI handler registered' message.
 
 New dependencies at this version: absl/functional:function_ref,
 absl/synchronization, absl/status and @tsl//tsl/platform.
@@ -24,7 +41,7 @@ absl/synchronization, absl/status and @tsl//tsl/platform.
  5 files changed, 2232 insertions(+), 1003 deletions(-)
 
 diff --git a/jaxlib_cpu_kernels/BUILD b/jaxlib_cpu_kernels/BUILD
-index a87072cc04..245d228a78 100644
+index a87072c..245d228 100644
 --- a/jaxlib_cpu_kernels/BUILD
 +++ b/jaxlib_cpu_kernels/BUILD
 @@ -29,16 +29,30 @@ cc_library(
@@ -60,7 +77,7 @@ index a87072cc04..245d228a78 100644
  )
  
 diff --git a/jaxlib_cpu_kernels/cpu_kernels.cc b/jaxlib_cpu_kernels/cpu_kernels.cc
-index 2d6431d1f4..a1d5f14971 100644
+index 2d6431d..a1d5f14 100644
 --- a/jaxlib_cpu_kernels/cpu_kernels.cc
 +++ b/jaxlib_cpu_kernels/cpu_kernels.cc
 @@ -13,11 +13,16 @@ See the License for the specific language governing permissions and
@@ -95,7 +112,7 @@ index 2d6431d1f4..a1d5f14971 100644
  
  }  // namespace
 diff --git a/jaxlib_cpu_kernels/lapack_kernels.cc b/jaxlib_cpu_kernels/lapack_kernels.cc
-index e2c6e72116..e4b0b4d5c9 100644
+index e2c6e72..e4b0b4d 100644
 --- a/jaxlib_cpu_kernels/lapack_kernels.cc
 +++ b/jaxlib_cpu_kernels/lapack_kernels.cc
 @@ -23,17 +23,18 @@ limitations under the License.
@@ -3196,7 +3213,7 @@ index e2c6e72116..e4b0b4d5c9 100644
  #undef JAX_CPU_DEFINE_GESDD
  #undef JAX_CPU_DEFINE_GESDD_COMPLEX
 diff --git a/jaxlib_cpu_kernels/lapack_kernels.h b/jaxlib_cpu_kernels/lapack_kernels.h
-index fe285347ac..fd76ffb032 100644
+index fe28534..fd76ffb 100644
 --- a/jaxlib_cpu_kernels/lapack_kernels.h
 +++ b/jaxlib_cpu_kernels/lapack_kernels.h
 @@ -94,244 +94,349 @@ void AssignKernelFn(typename KernelType::FnType* func) {
@@ -4059,7 +4076,7 @@ index fe285347ac..fd76ffb032 100644
  }  // namespace jax
  
 diff --git a/jaxlib_cpu_kernels/lapack_kernels_using_lapack.cc b/jaxlib_cpu_kernels/lapack_kernels_using_lapack.cc
-index 24e70d411e..bd2774f80f 100644
+index 24e70d4..bd2774f 100644
 --- a/jaxlib_cpu_kernels/lapack_kernels_using_lapack.cc
 +++ b/jaxlib_cpu_kernels/lapack_kernels_using_lapack.cc
 @@ -13,6 +13,8 @@ See the License for the specific language governing permissions and

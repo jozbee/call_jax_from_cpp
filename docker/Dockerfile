@@ -85,7 +85,7 @@ RUN /tmp/tools/get_plugin.sh --dest /opt/pjrt --versions-file /tmp/versions.env 
 FROM base AS plugin-source
 USER dev
 ARG XLA_REPO=https://github.com/jozbee/xla.git
-ARG XLA_REF=cjfc/jax-v0.11.1
+ARG XLA_REF=cjfc/jax-v0.11.0
 ARG BUILD_MODE=opt
 RUN git clone --depth 1 --branch "${XLA_REF}" "${XLA_REPO}" /home/dev/xla \
     || git clone --filter=blob:none "${XLA_REPO}" /home/dev/xla \
@@ -113,6 +113,14 @@ FROM base AS dev
 COPY --from=python /opt/venv /opt/venv
 COPY --from=plugin /opt/pjrt /opt/pjrt
 RUN chown -R dev:dev /opt/venv /opt/pjrt
+# The same hazard as the cache mount in plugin-source, one layer out: compose
+# mounts the bazel-cache volume at /home/dev/.cache/bazel, and docker creates a
+# mount point's missing parents as root. That leaves dev unable to write
+# ~/.cache/bazelisk or ~/.cache/uv, so `run --rm plugin-builder` dies with
+# "permission denied" before bazel starts and `run --rm dev` cannot even sync
+# the venv. Creating both as dev here means the volume lands inside a directory
+# dev already owns.
+RUN install -d -o dev -g dev /home/dev/.cache /home/dev/.cache/bazel
 ENV PJRT_CPU_PLUGIN=/opt/pjrt/libpjrt_c_api_cpu_plugin.so \
     CJFC_IN_CONTAINER=1
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
