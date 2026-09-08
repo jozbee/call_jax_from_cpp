@@ -124,9 +124,12 @@ nm -D --defined-only "$OUT" 2>/dev/null | grep -q ' T GetPjrtApi' \
 fork_commit="$(git -C "$XLA_DIR" rev-parse HEAD 2>/dev/null || true)"
 fork_branch="$(git -C "$XLA_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
 if [[ -z "$fork_commit" && -f "$REPO_ROOT/versions.env" ]]; then
+  # One subshell for both values: sourcing twice needs the directive twice,
+  # and a missed one is a CI failure rather than a warning.
   # shellcheck disable=SC1091
-  fork_commit="$(. "$REPO_ROOT/versions.env" && echo "${XLA_FORK_COMMIT:-}")"
-  fork_branch="$(. "$REPO_ROOT/versions.env" && echo "${XLA_FORK_BRANCH:-}")"
+  read -r fork_commit fork_branch <<<"$(
+    . "$REPO_ROOT/versions.env" && echo "${XLA_FORK_COMMIT:-} ${XLA_FORK_BRANCH:-}"
+  )"
   [[ -n "$fork_commit" ]] && \
     echo "build_plugin: no git metadata in $XLA_DIR; recording the fork commit from versions.env" >&2
 fi
