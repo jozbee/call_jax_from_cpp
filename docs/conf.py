@@ -176,7 +176,15 @@ myst_enable_extensions = [
 myst_heading_anchors = 3
 
 # Every pinned version, spelled once. Use as {{ jax_version }} in any page.
+#
+# MyST does not substitute inside inline code, so `{{ xla_commit }}` renders as
+# those eight literal characters on the built page -- silently, because it is
+# valid markdown. Commit hashes and branch names want code formatting, so every
+# value also gets a <key>_code variant that carries its own backticks:
+# {{ xla_commit_code }}. tests/test_docs_sync.py fails a backtick-wrapped
+# substitution so the quiet version cannot come back.
 myst_substitutions = dict(_versions)
+myst_substitutions.update({f"{k}_code": f"`{v}`" for k, v in _versions.items()})
 
 # CHANGELOG.md and CONTRIBUTING.md are included from the repository root, where
 # their heading levels are the levels of a standalone document rather than of a

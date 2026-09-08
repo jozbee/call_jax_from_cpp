@@ -10,8 +10,8 @@ step has the same three parts: what to do, one command that says whether it
 worked, and where to look when it did not. Skipping a verify line is how a bump
 gets to step 14 before anyone finds out that step 5 was wrong.
 
-The current pin is JAX {{ jax_version }} on XLA `{{ xla_commit }}`, fork branch
-`{{ xla_fork_branch }}` at `{{ xla_fork_commit }}`, PJRT C API
+The current pin is JAX {{ jax_version }} on XLA {{ xla_commit_code }}, fork
+branch {{ xla_fork_branch_code }} at {{ xla_fork_commit_code }}, PJRT C API
 {{ pjrt_api_major }}.{{ pjrt_api_minor }}. What that bump actually found is
 recorded at the bottom as a worked example.
 

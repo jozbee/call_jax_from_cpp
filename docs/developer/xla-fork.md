@@ -1,9 +1,10 @@
 # The XLA fork
 
 `third_party/xla` is a submodule of a fork of OpenXLA — {{ xla_fork_repo }},
-branch `{{ xla_fork_branch }}`, currently at `{{ xla_fork_commit }}`. It sits on
-top of `{{ xla_commit }}`, the XLA revision that JAX {{ jax_version }} pins
-(`third_party/xla/revision.bzl` at the `jax-v{{ jax_version }}` tag).
+branch {{ xla_fork_branch_code }}, currently at {{ xla_fork_commit_code }}. It
+sits on top of {{ xla_commit_code }}, the XLA revision that JAX
+{{ jax_version }} pins (`third_party/xla/revision.bzl` at the
+{{ "`jax-v" ~ jax_version ~ "`" }} tag).
 
 The fork exists for one reason: there is no official prebuilt CPU PJRT C-API
 plugin. jaxlib links its CPU client statically and never exports `GetPjrtApi`,

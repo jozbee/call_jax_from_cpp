@@ -419,6 +419,30 @@ def test_glossary_terms_are_used(repo):
         )
 
 
+def test_no_substitution_is_wrapped_in_inline_code(repo):
+    """``{{ x }}`` inside backticks renders as those literal characters.
+
+    MyST does not substitute within inline code, and the result is valid
+    markdown, so the build stays green while the page tells a reader the
+    fork branch is ``{{ xla_fork_branch }}``. It shipped that way to the
+    live site once. ``docs/conf.py`` publishes a ``<key>_code`` variant of
+    every value that carries its own backticks; use that instead.
+    """
+    wrapped = re.compile(r"`\{\{\s*[a-z_]+\s*\}\}`")
+    offenders = [
+        f"{path.relative_to(repo.root)}:{number}: {line.strip()}"
+        for path in pages(repo.root)
+        for number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if wrapped.search(line)
+    ]
+    assert not offenders, (
+        "substitutions inside inline code render literally; use the _code "
+        "variant, e.g. {{ xla_commit_code }}:\n  " + "\n  ".join(offenders)
+    )
+
+
 def test_the_pinned_jax_version_agrees_everywhere(repo, jax2exec):
     """``versions.env`` is the single source of truth; the others follow it.
 
