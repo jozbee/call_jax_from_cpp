@@ -1,0 +1,26 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 500          # Hz; the period the controller is called on
+
+    # The update thread belongs to the manager, so the two hardening steps the
+    # controller cannot take are taken here instead: SCHED_FIFO for the thread,
+    # and mlockall for the process.  Both report failure and carry on when the
+    # host withholds the privilege.
+    thread_priority: 50
+    lock_memory: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    jax_arm_controller:
+      type: jax_arm_controller/JaxArmController
+
+jax_arm_controller:
+  ros__parameters:
+    joints:
+      - joint1
+      - joint2
+    # Base path, no extension: arm.json, arm.binpb and arm.mlirbc live beside
+    # it.  /workspace is where the `ros2` compose service mounts the checkout.
+    artifact: /workspace/artifacts/arm
+    # xla_cpus: [2, 3]        # move XLA's pools off the update thread's core

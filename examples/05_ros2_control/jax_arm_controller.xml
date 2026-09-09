@@ -1,0 +1,9 @@
+<library path="jax_arm_controller">
+  <class name="jax_arm_controller/JaxArmController"
+         type="jax_arm_controller::JaxArmController"
+         base_class_type="controller_interface::ControllerInterface">
+    <description>
+      Position controller whose step function is an exported JAX program.
+    </description>
+  </class>
+</library>

@@ -4,6 +4,8 @@
 #   docker compose -f docker/compose.yml run --rm ci make test    the CI path
 #   docker compose -f docker/compose.yml run --rm plugin-builder \
 #       tools/build_plugin.sh                                     build the plugin
+#   docker compose -f docker/compose.yml run --rm ros2 \
+#       examples/05_ros2_control/run.sh --seconds 8               example 05
 #
 # The real-time helpers in include/pjrt_exec/rt.hpp need privileges a default
 # container does not have: SCHED_FIFO needs CAP_SYS_NICE plus an rtprio limit,
@@ -45,6 +47,21 @@ services:
       - ..:/workspace
     working_dir: /workspace
     command: ["make", "test"]
+    <<: *rt-privileges
+
+  # ROS 2 Jazzy, for examples/05_ros2_control only: no JAX, no bazel, no
+  # plugin baked in. The controller is built with colcon against the bind
+  # mount, and loads the plugin and the artifacts from there.
+  ros2:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ros2
+    image: call_jax_from_cpp:ros2
+    volumes:
+      - ..:/workspace
+    working_dir: /workspace
+    tty: true
+    stdin_open: true
     <<: *rt-privileges
 
   # No real-time privileges: this one only runs bazel. XLA_SRC lets a local

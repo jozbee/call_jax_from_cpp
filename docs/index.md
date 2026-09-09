@@ -120,8 +120,8 @@ How it works, exporting, calling, real-time hardening, measuring, debugging.
 :link: examples/index
 :link-type: doc
 
-Four programs, one artifact set. Each page names what it borrows from the
-others, so read them in any order.
+Five programs, from one call to a `ros2_control` controller. Each page names
+what it borrows from the others, so read them in any order.
 :::
 
 :::{grid-item-card} {octicon}`light-bulb;1em` Background
@@ -192,6 +192,7 @@ examples/01-basic
 examples/02-trajopt
 examples/03-minimal
 examples/04-realtime
+examples/05-ros2-control
 ```
 
 ```{toctree}

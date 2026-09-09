@@ -37,6 +37,16 @@ Notable changes to this project. The format follows
   to time, a minimal hardened periodic loop in one self-contained file, and the
   same loop instrumented to report jitter, wake-up latency, deadline misses,
   page faults, context switches and allocations.
+- A fifth example, `examples/05_ros2_control`: a `ros2_control` position
+  controller for a two-link arm whose step function is an exported JAX program
+  (resolved-rate control, the Jacobian from `jax.jacfwd`). It is the executable
+  form of the integration guide's ROS 2 recipe, which used to describe a
+  package that shipped nowhere: one `pjrt::Runtime` for the process, one
+  `pjrt::Function` per controller loaded in `on_configure` with the memory
+  hardening, and an `update()` that only copies, calls and writes back.
+  Affinity and `SCHED_FIFO` are left to `controller_manager`, which owns the
+  update thread. It builds with colcon, not with `make`; a `ros2` compose
+  service and `docker/Dockerfile.ros2` provide the workspace.
 - A Background section — real-time on Linux, XLA and PJRT, latency and tails,
   a glossary — one paragraph per mechanism, linking out; every guide and
   example page opens with what it assumes and links every foreign name.

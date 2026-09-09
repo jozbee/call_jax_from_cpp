@@ -245,6 +245,9 @@ if(PROJECT_IS_TOP_LEVEL)
     COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python"
             ${PJRT_EXEC_PYTHON} examples/02_trajopt/export.py
             --out "${PJRT_EXEC_ARTIFACTS_DIR}" --cases 4
+    COMMAND ${CMAKE_COMMAND} -E env "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/python"
+            ${PJRT_EXEC_PYTHON} examples/05_ros2_control/export.py
+            --out "${PJRT_EXEC_ARTIFACTS_DIR}"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
     COMMENT "Exporting the example artifacts with JAX"
     USES_TERMINAL

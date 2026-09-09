@@ -77,7 +77,8 @@ jobs:
             sudo apt-get install -y --no-install-recommends shellcheck
           }
           shellcheck --version
-          shellcheck tools/*.sh examples/04_realtime/run_realtime.sh
+          shellcheck tools/*.sh examples/04_realtime/run_realtime.sh \
+            examples/05_ros2_control/run.sh
 
   docs:
     name: docs (build only)
@@ -260,6 +261,31 @@ jobs:
           docker compose -f docker/compose.yml run --rm --user root \
             -e PJRT_CPU_PLUGIN=/workspace/build/plugin/libpjrt_c_api_cpu_plugin.so \
             ci make test
+
+      # Example 05 only, and only where there is a plugin to load: the
+      # controller is a ros2_control package, so it needs a ROS 2 image rather
+      # than the dev one, and it needs artifacts/arm, which `make test` above
+      # exported into the bind mount. x86_64 only -- the arm64 runner has no
+      # published plugin, so there would be nothing for the controller to load.
+      - name: Build the ros2 image
+        if: ${{ matrix.arch == 'x86_64' && steps.plugin.outputs.present == 'true' }}
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/Dockerfile.ros2
+          tags: call_jax_from_cpp:ros2
+          load: true
+          cache-from: type=gha,scope=ros2-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=ros2-${{ matrix.arch }}
+
+      # --user root for the same reason the steps above use it: the runner user
+      # is uid 1001 and the image user is 1000, and colcon writes into the bind
+      # mount.
+      - name: Run example 05 under ros2_control
+        if: ${{ matrix.arch == 'x86_64' && steps.plugin.outputs.present == 'true' }}
+        run: |
+          docker compose -f docker/compose.yml run --rm --user root \
+            ros2 examples/05_ros2_control/run.sh --seconds 10
 
       - name: Note how much was skipped for want of a plugin
         if: ${{ always() && steps.plugin.outputs.present != 'true' }}

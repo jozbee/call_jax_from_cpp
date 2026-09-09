@@ -10,7 +10,7 @@ it is `examples/01_basic` end to end. The Python side needs JAX
 ```console
 $ uv sync                       # the Python environment: JAX and the exporter
 $ make plugin                   # the PJRT CPU plugin, sha256-verified
-$ make                          # libpjrt_exec.a and the four examples
+$ make                          # libpjrt_exec.a and the four C++ examples
 $ make export                   # run the exporters; writes artifacts/
 $ build/bin/example_01_basic    # load the artifact and call it
 ```

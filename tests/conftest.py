@@ -771,6 +771,11 @@ class Artifacts:
         return self.base("trajopt")
 
     @property
+    def arm(self) -> Path:
+        """Base path of the ``examples/05_ros2_control`` artifacts."""
+        return self.base("arm")
+
+    @property
     def trajopt_cases(self) -> Path:
         """The reference-case manifest the C++ comparison reads."""
         return self.dir / "trajopt_cases.json"
@@ -816,7 +821,7 @@ def _require_jax(python: Sequence[str]) -> None:
 
 @pytest.fixture(scope="session")
 def artifacts(repo: Repo) -> Artifacts:
-    """Export ``basic`` and ``trajopt``, and return where they landed.
+    """Export ``basic``, ``trajopt`` and ``arm``, and return where they landed.
 
     A serialized executable embeds machine code for the host that produced it,
     so artifacts are exported rather than committed, and re-exported by default
@@ -825,7 +830,7 @@ def artifacts(repo: Repo) -> Artifacts:
     whole set is there: a partial set reused silently is how a test ends up
     asserting against a sidecar from a different function.
     """
-    names = ("basic", "trajopt")
+    names = ("basic", "trajopt", "arm")
     wanted = [
         repo.artifact(f"{name}{suffix}")
         for name in names
@@ -862,6 +867,12 @@ def artifacts(repo: Repo) -> Artifacts:
             "--cases",
             "4",
         ],
+        cwd=repo.root,
+        env=env,
+        timeout=900,
+    )
+    run(
+        [*python, "examples/05_ros2_control/export.py", "--out", out],
         cwd=repo.root,
         env=env,
         timeout=900,

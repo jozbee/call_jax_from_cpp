@@ -34,9 +34,8 @@ its three objects), finds a plugin at run time, and loads artifacts written by
 ## Recipe 1 — ROS 2
 
 The motivating application is a controller under `ros2_control`, so this
-recipe comes first. **No ROS code ships in this repository.** What follows is
-the build integration and the three design constraints a controller has to
-respect, stated once.
+recipe comes first. It is what {doc}`/examples/05-ros2-control` does, and the
+CMake below is that package's, included rather than retyped.
 
 **Package layout.**
 
@@ -59,29 +58,27 @@ $ git submodule add https://github.com/jozbee/call_jax_from_cpp.git \
 
 ```xml
 <buildtool_depend>ament_cmake</buildtool_depend>
+<depend>controller_interface</depend>
 <depend>ament_index_cpp</depend>   <!-- get_package_share_directory -->
 ```
 
-**`CMakeLists.txt`.**
+**`CMakeLists.txt`.** The example's, whose `add_subdirectory` reaches two
+directories up into this checkout instead of into a submodule:
+
+```{literalinclude} ../../examples/05_ros2_control/CMakeLists.txt
+:language: cmake
+:start-after: docs: begin cmake-ros2
+:end-before: docs: end cmake-ros2
+```
+
+The plugin and the artifacts are runtime data, not build outputs, so a package
+of your own installs its own copies:
 
 ```cmake
-find_package(ament_cmake REQUIRED)
-find_package(ament_index_cpp REQUIRED)
-
-# Vendored, not found: three translation units pinned to one JAX version.
-set(PJRT_EXEC_FETCH_PLUGIN OFF CACHE BOOL "" FORCE)   # colcon builds offline
-add_subdirectory(third_party/call_jax_from_cpp)
-
-add_library(my_controller SHARED src/my_controller.cpp)
-target_link_libraries(my_controller PRIVATE pjrt_exec::pjrt_exec
-                                            ament_index_cpp::ament_index_cpp)
-
-# The plugin and the artifacts are runtime data, not build outputs.
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/plugin/libpjrt_c_api_cpu_plugin.so
         DESTINATION lib/${PROJECT_NAME})
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/artifacts/
         DESTINATION share/${PROJECT_NAME}/artifacts)
-ament_package()
 ```
 
 Resolve both paths at run time from
@@ -94,8 +91,7 @@ process, and a {cpp:class}`~pjrt::Runtime` is one per process — creating a cli
 thread pools, and creating a second one mid-run is a latency spike. So:
 
 - **One `Runtime` for the process**, behind an accessor — a function-local
-  `static std::shared_ptr<pjrt::Runtime>` is enough — shared by every
-  controller.
+  `static` is enough — shared by every controller.
 - **One {cpp:class}`~pjrt::Function` per controller**, created in
   `on_configure` with {cpp:enumerator}`~pjrt::LoadPolicy::BinaryOnly`, never
   in `update()`. Loading takes milliseconds
@@ -111,7 +107,7 @@ documentation.
 `controller_manager`. Call the memory helpers —
 {cpp:func}`~pjrt::rt::harden_malloc`, {cpp:func}`~pjrt::rt::lock_memory` —
 from `on_configure`, and leave affinity and {term}`SCHED_FIFO` to the
-manager's configuration rather than calling
+manager's `thread_priority` and `lock_memory` parameters rather than calling
 {cpp:func}`~pjrt::rt::pin_current_thread` or
 {cpp:func}`~pjrt::rt::set_realtime_priority` on a thread you do not own.
 {doc}`realtime` says what each one buys.

@@ -214,14 +214,16 @@ plugin-hint:
 # on the machine that will run them; that is why artifacts/ is gitignored and
 # why every run target depends on the export rather than on a committed file.
 #
-# The two names below are what the export scripts write. They are variables so
-# that a rename is a one-line fix here instead of a rule that re-exports on
+# The three names below are what the export scripts write. They are variables
+# so that a rename is a one-line fix here instead of a rule that re-exports on
 # every invocation.
 EXPORT_BASIC   ?= basic
 EXPORT_TRAJOPT ?= trajopt
+EXPORT_ARM     ?= arm
 
 BASIC_ARTIFACT   := $(ARTIFACTS_DIR)/$(EXPORT_BASIC).binpb
 TRAJOPT_ARTIFACT := $(ARTIFACTS_DIR)/$(EXPORT_TRAJOPT).binpb
+ARM_ARTIFACT     := $(ARTIFACTS_DIR)/$(EXPORT_ARM).binpb
 EXPORTER_SRCS    := $(wildcard python/jax2exec/*.py)
 
 # PYTHONPATH so an interpreter that has jax but not this package installed
@@ -234,7 +236,10 @@ $(BASIC_ARTIFACT): examples/01_basic/export.py $(EXPORTER_SRCS) | $(ARTIFACTS_DI
 $(TRAJOPT_ARTIFACT): examples/02_trajopt/export.py $(EXPORTER_SRCS) | $(ARTIFACTS_DIR)
 	$(export_env) $(PYTHON) examples/02_trajopt/export.py --out $(ARTIFACTS_DIR) --cases 4
 
-export: $(BASIC_ARTIFACT) $(TRAJOPT_ARTIFACT)  ## Export the example artifacts with JAX
+$(ARM_ARTIFACT): examples/05_ros2_control/export.py $(EXPORTER_SRCS) | $(ARTIFACTS_DIR)
+	$(export_env) $(PYTHON) examples/05_ros2_control/export.py --out $(ARTIFACTS_DIR)
+
+export: $(BASIC_ARTIFACT) $(TRAJOPT_ARTIFACT) $(ARM_ARTIFACT)  ## Export the example artifacts with JAX
 
 # ---------------------------------------------------------------------- runs
 

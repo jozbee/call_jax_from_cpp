@@ -19,7 +19,7 @@ uv sync              # Python environment (uv comes from mise)
 make plugin          # the prebuilt PJRT CPU plugin, sha256-verified
                      # (linux-x86_64 only; on aarch64 use `make plugin-source`,
                      #  or docker: see below)
-make                 # the library and the four examples
+make                 # the library and the four C++ examples (05 builds with colcon)
 make export          # run the export scripts with JAX
 make run-examples    # call and measure
 ```
@@ -119,7 +119,9 @@ automatic differentiation, which optimization problems want; JAX fixes both. The
 other half is robotics control: for real-time performance and integration with
 [ros2_control](https://github.com/ros-controls/ros2_control) the algorithms have
 to live in a C++ program, and rewriting a JAX program in boutique C++ is exactly
-the work this avoids. Nonlinear model-predictive control is the motivating
+the work this avoids. `examples/05_ros2_control` is that shape end to end: a
+`ros2_control` position controller whose step function is an exported JAX
+program, built with colcon and hosted by `controller_manager`. Nonlinear model-predictive control is the motivating
 application, and the reason a late answer counts as a wrong one — but **no MPC
 code ships here**.
 

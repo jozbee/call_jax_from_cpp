@@ -1,0 +1,47 @@
+<?xml version="1.0"?>
+<!-- A two-link planar arm, links 1.0 m and 0.8 m, matching the L1 and L2 of
+     export.py.  The links carry no geometry: nothing renders this arm, and the
+     only thing ros2_control reads from the file is the <ros2_control> block
+     and the joint limits. -->
+<robot name="arm">
+  <link name="base_link"/>
+  <link name="link1"/>
+  <link name="link2"/>
+
+  <joint name="joint1" type="revolute">
+    <parent link="base_link"/>
+    <child link="link1"/>
+    <origin xyz="0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="10"/>
+  </joint>
+
+  <joint name="joint2" type="revolute">
+    <parent link="link1"/>
+    <child link="link2"/>
+    <origin xyz="1.0 0 0"/>
+    <axis xyz="0 0 1"/>
+    <limit lower="-3.14159" upper="3.14159" effort="100" velocity="10"/>
+  </joint>
+
+  <ros2_control name="arm" type="system">
+    <hardware>
+      <plugin>mock_components/GenericSystem</plugin>
+    </hardware>
+    <!-- The initial state is away from the fully extended configuration, where
+         the Jacobian is singular and only the damping term keeps the step
+         finite. -->
+    <joint name="joint1">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">0.5</param>
+      </state_interface>
+    </joint>
+    <joint name="joint2">
+      <command_interface name="position"/>
+      <state_interface name="position">
+        <param name="initial_value">1.0</param>
+      </state_interface>
+    </joint>
+  </ros2_control>
+</robot>
