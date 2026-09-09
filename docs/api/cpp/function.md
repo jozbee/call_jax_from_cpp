@@ -39,6 +39,12 @@ relative to its executable is otherwise a buffer-overrun class of bug,
 discovered later as corrupted output. Never answer a load failure by turning it
 off; answer it with the `.mlirbc` fallback or a re-export.
 
+The warm-up runs with `check_values` off whatever the option says, and
+checking starts with the first call after it. An all-zero input can
+legitimately produce a non-finite result — a solve against a zero matrix, a
+division by a zero parameter — and the warm-up's job is to fault in pages and
+lazy state, not to judge values.
+
 ## Where the executable came from
 
 ```{doxygenenum} pjrt::LoadPolicy

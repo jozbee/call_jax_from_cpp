@@ -137,7 +137,11 @@ passes over a `.binpb` built for a wider instruction set. Without it the
 failure is an illegal instruction somewhere inside the executable, with no hint
 that the artifact came from a newer machine. Note what the guard cannot do: a
 level it does not recognize, or a different architecture family, is not
-"probably fine" — an aarch64 host cannot run an x86-64 `.binpb` at all.
+"probably fine" — an aarch64 host cannot run an x86-64 `.binpb` at all. The
+x86 levels are the psABI's microarchitecture levels, cut down to the flags
+that gate XLA's code generation; `src/pjrt_exec/isa.cpp` and
+`python/jax2exec/_isa.py` must agree on them, because one writes the level and
+the other compares against it.
 
 **The `.mlirbc` fallback** compiles the StableHLO in-process instead. It is
 portable and costs seconds rather than milliseconds at load, and

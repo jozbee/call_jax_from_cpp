@@ -124,6 +124,17 @@ Notable changes to this project. The format follows
   `examples/common/` gained `periodic.hpp` (the absolute sleep and the stop
   flag a periodic loop needs) and `names.hpp` (the `SyncMode` and `LoadKind`
   spellings, so a program can name what it loaded without pulling in JSON).
+- Comments across the library, the examples, the benchmark, the C++ tests and
+  the exporter were trimmed to the one thing the code cannot say. History,
+  narration and reasoning the documentation already carries came out of the
+  source, and the developer pages are the reference for them. Dead code went
+  with it: `cjfc::Cli::get_double`, `program()` and `usage()` (every getter
+  now routes through one `value_of`), `jax2exec._dtypes.is_supported`,
+  `build_sidecar`'s `platform_name` parameter, and the bench fixture's unused
+  accessors. Example 04's README is now a pointer at its page, and the two
+  measured rows it carried moved to the benchmarks page.
+  `test_guard_selftest`'s sample line reads `self=13` rather than `self=12`:
+  the count is the standard library's business, and the test asserts a floor.
 
 ### Fixed
 - `pjrt::rt::corral_xla_threads()` finds XLA's pool threads again. It matched

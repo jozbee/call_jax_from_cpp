@@ -1,6 +1,6 @@
 # Open threads
 
-**Status as of 2026-09-07.** This page ages faster than the rest of the
+**Status as of 2026-09-08.** This page ages faster than the rest of the
 directory; verify against the tree before acting on any of it.
 
 ## Deferred deliberately
@@ -191,6 +191,21 @@ output would have contradicted a reader who assumed they were current. Copying
 the sidecar's `jax_version`, `jaxlib_version` and `generator` into the report,
 next to the host block, would make the omission impossible rather than
 merely discouraged. Small, and not done.
+
+### The exporter under-claims the ISA level when `/proc/cpuinfo` is unreadable
+
+On x86, `jax2exec._isa.host_isa_level` reads the flag list from
+`/proc/cpuinfo` and tests the levels strongest first, so when the file cannot
+be read — a sandbox that hides `/proc`, for one — every test fails and it
+reports the weakest level of the family, `x86-64-v1`, rather than `unknown`.
+The sidecar then under-claims, and the loader's ISA guard cannot catch it: a
+`.binpb` carrying AVX-512 code is passed onto a host without it, where it
+fails as the illegal instruction the guard exists to convert into a
+`LoadError`. The C++ side reads CPUID and has no such case. The fix is to
+return `unknown` when the flags cannot be read, which the guard refuses rather
+than trusts; it is not done, and until it is, an `isa_level` of `x86-64-v1` in
+a sidecar written on a machine that is not one is the thing to be suspicious
+of.
 
 ### The headline campaign is not reproducible from this tree
 

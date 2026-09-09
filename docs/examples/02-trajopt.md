@@ -52,6 +52,11 @@ fast export for a smoke test, not a workload to time.
 :end-before: docs: end trajopt-solve
 ```
 
+The line search is one `lax.scan` over the candidate steps rather than four
+unrolled copies of the rollout, so the op count describes the workload and
+not the unroller; the per-call allocation figures on {doc}`/benchmarks` are
+recorded against that count.
+
 Alongside the three artifact files, {py:func}`~jax2exec.write_reference_cases`
 writes reference cases —
 `trajopt_cases.json` plus one `.bin` per case holding every input and output
@@ -75,7 +80,11 @@ size from the artifact and {cpp:func}`~cjfc::workload::init_inputs` gives the
 arenas a sane start. Each cycle, {cpp:func}`~cjfc::workload::write_reference`
 writes the reference trajectory and {cpp:func}`~cjfc::workload::feedback`
 copies this cycle's outputs into the next cycle's inputs — the
-{term}`feedback` step. The seven inputs and eight outputs are on
+{term}`feedback` step. It also reports whether `step_next` came back as
+exactly `step + 1`: an integer identity that a stale or unread input arena
+breaks and a float tolerance would not catch. That check runs during warm-up
+as well, since a counter that goes wrong there is as broken as one that goes
+wrong later. The seven inputs and eight outputs are on
 {ref}`the workload reference <cjfc-workload>`. Flags, the finite-output
 audit, fault injection and the JSON report live in
 `examples/02_trajopt/support.hpp`.

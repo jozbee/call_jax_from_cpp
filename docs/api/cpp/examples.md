@@ -15,8 +15,9 @@ example that is missing here is a build failure, not an omission.
 ## `cli.hpp`
 
 Flag parsing for the example programs: known flags, typed getters, `--help`,
-and a refusal on anything unknown. Example 03 takes positional arguments and
-needs none of it.
+and a refusal on anything unknown. `--help` skips validating the rest of the
+command line, because a user asking for help has probably just mistyped
+something. Example 03 takes positional arguments and needs none of it.
 
 ```{doxygenfile} cli.hpp
 :sections: briefdescription detaileddescription

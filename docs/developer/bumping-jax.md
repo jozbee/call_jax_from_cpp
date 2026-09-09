@@ -245,7 +245,11 @@ wrong.
 
 **Do.** The exporter reaches into JAX internals to serialize a compiled
 executable, and that is the part of this project most likely to break on a bump.
-Export the smallest example and let the checker read it back.
+The route is `Compiled.runtime_executable()` and then
+`client.serialize_executable`, which is the one
+`jax.experimental.serialize_executable` takes internally — what makes it the
+least fragile of the routes available, not a guarantee. Export the smallest
+example and let the checker read it back.
 
 **Verify.** `build/bin/plugin_probe --view` -> expected: `view_supported=1`,
 `view_created=1`, `view_aliases=1`, `view_sees_later_write=1`. This one is
@@ -304,6 +308,29 @@ envelope changed shape and the unwrap no longer recognises it.
 format above. A payload begins with tag `0x0a`, field 1 of
 `ExecutableAndOptionsProto`. Teach `_ifrt.py` the new shape; do not disable the
 check, and do not accept the compile fallback as normal — it is the symptom.
+
+The same proto family is the compile options the loader passes when it does
+compile the `.mlirbc`. It takes the caller's, then the ones recovered from the
+`.binpb`'s own envelope, and last `kDefaultCompileOptions` in
+`src/pjrt_exec/runtime.cpp`, a hand-serialized `CompileOptionsProto` that
+decodes as:
+
+```
+1a 12                              field 3, executable_build_options:
+                                   wire type 2, 18 bytes
+  08 ff ff ff ff ff ff ff ff ff 01 field 1, device_ordinal: varint, -1
+                                   sign-extended to 64 bits
+  20 01                            field 4, num_replicas = 1
+  28 01                            field 5, num_partitions = 1
+  98 01 01                         field 19, use_shardy_partitioner = true
+                                   (key 152 = (19 << 3) | 0)
+```
+
+To regenerate it, build the proto in Python and print `SerializeToString()`;
+the field numbers are in `xla/pjrt/proto/compile_options.proto`. Never pass
+empty options instead: `ExecutableBuildOptionsFromProto` copies `num_replicas`
+and `num_partitions` out of the proto, zero when absent, and a build with zero
+replicas fails deep inside the compiler.
 
 ## Step 13 — Re-export every artifact on the target machine
 

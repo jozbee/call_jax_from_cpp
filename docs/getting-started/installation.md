@@ -176,7 +176,7 @@ whatever the file is called. `api_version` must agree with `PJRT_API_MAJOR` and
 ## Building
 
 ```console
-$ make            # the library and the four examples
+$ make            # the library and the four C++ examples; 05 builds with colcon
 $ make examples   # just the examples
 $ make bench      # build and run the benchmark
 $ make test       # build everything, then run the suite

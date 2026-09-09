@@ -49,8 +49,8 @@ difference. The change in spike *magnitude* is the solid part.
 
 XLA dispatch is asynchronous unless inline execution was negotiated. A warm-up
 that does not wait on *every* output leaves a backlog that lands on the first
-timed call, which turns a 1.2x max/p50 into a wildly larger one and puts the
-whole distribution's worst sample in the first bucket.
+timed call, which turned a 1.2x max/p50 into a 27x one (host not recorded)
+and puts the whole distribution's worst sample in the first bucket.
 
 Every call the benchmark makes, warm-up included, waits on all outputs. It
 times the first call separately — the first call after a load is always the

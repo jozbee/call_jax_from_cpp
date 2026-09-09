@@ -81,8 +81,9 @@ which is what makes a histogram checkable against the run it came from.
 Three of these write files, and each answers a different question.
 
 `report` prints the summary and an ASCII histogram, trimmed to the range
-between the first and last non-empty bucket. It is what a run prints when it
-ends.
+between the first and last non-empty bucket: a run spanning three orders of
+magnitude would otherwise bury them in empty rows. It is what a run prints
+when it ends.
 
 `write_csv_row` **appends** one summary row, writing the header only when the
 file did not already exist. Appending is what makes an interleaved A/B sweep

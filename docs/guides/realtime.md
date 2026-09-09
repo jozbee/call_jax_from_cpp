@@ -46,6 +46,11 @@ from then on, nothing the process frees is handed back to the kernel.
 the client. Priority last, and only if the loop blocks: `SCHED_FIFO` does not
 time-slice against lower priorities, so unbounded work — loading, compiling a
 `.mlirbc`, warm-up — at priority 80 is how a machine stops responding.
+{cpp:func}`~pjrt::rt::set_realtime_priority` promotes only the calling
+thread, after the `Runtime` exists; `chrt -f` on the launcher puts the whole
+process under `SCHED_FIFO` before anything is loaded, so every thread XLA
+starts inherits it and the load and warm-up run at real-time priority. That
+is why the examples prefer the in-process call.
 
 ## The loop
 

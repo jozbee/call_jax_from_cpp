@@ -193,10 +193,12 @@ section shows what idling between calls costs on this host.
 
 ## Idling between calls
 
-The same `02_trajopt` artifact on the same i9-14900HX (bare metal, this
-project's development host), pinned to one core with `SCHED_FIFO` and
+The same `02_trajopt` artifact on the same i9-14900HX (x86_64, bare metal,
+this project's development host; kernel not recorded), with `SCHED_FIFO` and
 `mlockall` in effect, `scaling_governor` on `powersave` throughout and
-`/dev/cpu_dma_latency` not held. The only variable is the loop's period.
+`/dev/cpu_dma_latency` not held. In the first two rows the loop is pinned to
+one core and the only variable is its period; the last two hold the period at
+10 ms and vary only the pinning.
 
 The artifact is the same 0.11.1-era one as the table above, and as recorded
 there the pin move was measured to make no difference to this workload, so
@@ -209,6 +211,8 @@ these numbers are not inflated by it either.
 |---|---|---|---|
 | 3 ms | ~65% | 1866 µs | **2027 µs** |
 | 10 ms | ~20% | 1854 µs | **5196 µs** |
+| 10 ms, unpinned | ~20% | 1932 µs | 5201 µs |
+| 10 ms, pinned | ~20% | 1878 µs | 5228 µs |
 ```
 
 The same work, on the same core, takes 2.6 times longer at 100 Hz than at
@@ -219,6 +223,11 @@ C-state exit latency — was not isolated: the experiment varied only the
 period, with both fixed. {doc}`developer/realtime-notes` says what would
 separate them, and why a back-to-back benchmark and a periodic loop answer
 different questions.
+
+The last two rows are the other effect, and worth keeping apart from the
+first. Pinning does not move the median at all; it cuts the *tail*, from a
+max/p50 of 2.14 unpinned to 1.40 pinned, because the loop stops migrating
+between cores.
 
 ## How these were measured
 

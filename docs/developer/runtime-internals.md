@@ -36,8 +36,9 @@ library is opened `RTLD_NOW | RTLD_LOCAL` — `NOW` so an unresolved symbol is a
 startup failure instead of a crash on the first call that reaches it, `LOCAL`
 so the plugin's own copy of LLVM does not join the process's global symbol
 namespace. It is never closed: XLA leaves statics behind that boundary which
-live as long as the process, and unmapping the code they point into ends the
-process in an `atexit` handler rather than anywhere diagnosable.
+live as long as the process — LLVM's target registry, the CPU feature tables,
+thread-local allocator state — and unmapping the code they point into ends
+the process in an `atexit` handler rather than anywhere diagnosable.
 
 **Configuration is a list of named values.** `PJRT_Client_Create` takes an
 array of `PJRT_NamedValue`, and that is the only way to reach settings the C
@@ -125,6 +126,12 @@ seconds at load rather than milliseconds. `Function::load_kind()` reports which
 route ran, and a deployment that cannot afford a surprise multi-second load
 should ask for `LoadPolicy::BinaryOnly` and get a `LoadError` instead.
 
+On x86 the host's level comes from CPUID through `__builtin_cpu_supports`,
+after an explicit `__builtin_cpu_init()`. The call is idempotent and costs one
+CPUID at load; it is made because that translation unit may run ahead of the
+compiler's own constructor for the feature table, and the first
+`__builtin_cpu_supports` before it would read an empty one.
+
 ### Thousands of allocations per call happen inside XLA
 
 About one and a half per StableHLO op, in XLA's thunk runtime, entirely inside
@@ -172,6 +179,12 @@ threads carry TSL's `tf_XLAEigen…` names at the pinned version — are sized
 client is created, and no patch is involved. It is a process environment
 variable, so it is visible to any client created afterwards.
 
+The sizing was verified rather than read from the source: `--threads N` on
+example 04 yields exactly N `tf_XLAEigen` threads, under inline and
+asynchronous dispatch alike, counted from `/proc/<pid>/task/*/comm` while it
+ran. That name is also what the substring test in
+`pjrt::rt::corral_xla_threads` relies on.
+
 ### Create options are validated at this XLA version
 
 This is new, and it invalidates a rule that used to be true. The CPU plugin now
@@ -194,6 +207,12 @@ actually took effect: `Inline` when the plugin advertises
 `supports_synchronous_execution` and accepted the option, `Accepted` when it was
 accepted by a plugin that does not advertise the marker, `Rejected` when the
 plugin refused it, and `Async` when it was never asked for.
+
+Creation can also fail after the client exists — a device count of zero, for
+one — and the constructor destroys the client on that path, since a
+constructor that throws gets no destructor. Without that, a caller probing
+plugin paths or option combinations and catching each failure would
+accumulate a client, and a set of thread pools, per attempt.
 
 ### PJRT cannot cancel a running CPU computation
 
