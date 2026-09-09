@@ -3,11 +3,8 @@
 # Build the prebuilt PJRT CPU plugin and publish it to this repository's GitHub
 # Releases.
 #
-# There is no official prebuilt PJRT CPU plugin anywhere: jaxlib links its CPU
-# client statically and never exports GetPjrtApi, so a C++ caller has nothing to
-# dlopen. This project therefore ships its own, built from the XLA fork. The
-# other producer of the same assets is .github/workflows/plugin.yml, and the two
-# must agree exactly on names, because tools/plugin_versions.txt,
+# The other producer of these assets is .github/workflows/plugin.yml, and the
+# two must agree exactly on names, because tools/plugin_versions.txt,
 # cmake/GetPjrtPlugin.cmake and `make plugin` all resolve assets by name:
 #
 #   tag    plugin-jax-v<jax version>
@@ -55,8 +52,7 @@ die()  { echo "release_plugin: $*" >&2; exit 1; }
 warn() { echo "release_plugin: warning: $*" >&2; WARNINGS=$((WARNINGS + 1)); }
 say()  { echo "release_plugin: $*"; }
 
-# The header comment is the help text, and stopping at the first non-comment
-# line means there is no line range to keep in step with edits.
+# The header comment is the help text; it ends at the first non-comment line.
 usage() { awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; }
 
 # Print $2 or explain which flag was left dangling; callers pass "$@".
@@ -93,9 +89,8 @@ VERSION="${VERSION#plugin-}"
 JAX_VER="${VERSION#jax-v}"
 TAG="${TAG:-plugin-$VERSION}"
 
-# build_plugin.sh names the tarball from versions.env and the loader checks the
-# sidecar against the plugin it finds, so a release that disagrees with the tree
-# ships assets whose names contradict what they contain.
+# build_plugin.sh names the tarball from versions.env, so a release that
+# disagrees with the tree ships assets whose names contradict their contents.
 if [[ -n "${JAX_VERSION:-}" && "$JAX_VER" != "$JAX_VERSION" ]]; then
   if [[ "$FORCE" == 1 ]]; then
     warn "releasing JAX $JAX_VER from a tree pinned to $JAX_VERSION (--force)"
@@ -141,8 +136,8 @@ if [[ -n "$(git -C "$REPO_ROOT" status --porcelain 2>/dev/null)" ]]; then
 fi
 
 if [[ -z "$XLA_REF" ]]; then
-  # A gitlink entry is "160000 commit <sha>\t<path>".
-  # No commits yet, or no submodule in HEAD: fall back to versions.env.
+  # The submodule pointer, read from its gitlink ("160000 commit <sha>"); with
+  # no commit or no submodule in HEAD the line below falls back to versions.env.
   XLA_REF="$(git -C "$REPO_ROOT" ls-tree HEAD third_party/xla 2>/dev/null \
              | awk '$2 == "commit" { print $3 }' || true)"
 fi
@@ -151,8 +146,7 @@ XLA_REF="${XLA_REF:-${XLA_FORK_COMMIT:-}}"
 FORK_REPO="${XLA_FORK_REPO:-}"
 [[ -n "$FORK_REPO" ]] || die "versions.env sets no XLA_FORK_REPO"
 
-# https://github.com/owner/repo.git and git@github.com:owner/repo.git both
-# reduce to owner/repo; anything that is not GitHub yields nothing.
+# owner/repo from an https or ssh GitHub URL; anything else yields nothing.
 github_slug() {
   local url="${1%.git}"
   case "$url" in
@@ -162,9 +156,8 @@ github_slug() {
   esac
 }
 
-# Is $2 fetchable by someone who is not us? This whole check exists because a
-# previous release named a fork commit that had never been pushed: the assets
-# could not be rebuilt by anyone, including their author.
+# Is $2 fetchable by someone who is not us? Assets built from a local-only
+# commit cannot be rebuilt by anyone, their author included.
 ref_is_published() {
   local repo="$1" ref="$2" slug
   # A branch or tag name resolves directly.
@@ -191,7 +184,7 @@ say "release $TAG, JAX $JAX_VER, arches ${ARCHES[*]}"
 say "fork $FORK_REPO @ $XLA_REF"
 if ! ref_is_published "$FORK_REPO" "$XLA_REF"; then
   die "$XLA_REF is not reachable on $FORK_REPO:
-  push the fork branch first (docs/developer/bumping-jax.md step 8)
+  push the fork branch first (docs/developer/bumping-jax.md step 9)
   Building from a local-only commit produces assets nobody can reproduce."
 fi
 
@@ -205,9 +198,11 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 # -------------------------------------------------------------------- packaging
-# GetPjrtApi is the plugin's only entry point, and the object has to be for the
-# architecture it is being packaged as: with no binfmt handler installed, a
-# cross build can quietly produce host-architecture objects instead.
+# Spelled in exactly one place: three other places resolve assets by name.
+asset_name() { printf 'pjrt_cpu_plugin-%s-linux-%s.tar.gz' "$VERSION" "$1"; }
+
+# The object has to be for the architecture it is packaged as: without a
+# binfmt handler a cross build can quietly produce host-architecture objects.
 verify_so() {
   local so="$1" arch="$2" syms="" machine=""
   if syms="$(nm -D --defined-only "$so" 2>/dev/null)"; then
@@ -226,27 +221,25 @@ verify_so() {
   esac
 }
 
-# The container runs build_plugin.sh from /home/dev, outside any checkout, so it
-# cannot read versions.env and records "unknown" where it would otherwise name
-# the JAX and XLA versions. A tarball whose own metadata cannot say what it was
-# built for is not worth publishing, so fill those in from versions.env.
+# Fill in one "<key> = unknown" line; a real value is left alone.
+stamp_field() {  # PLUGIN_INFO.txt, key, value
+  local info="$1" key="$2" value="$3"
+  [[ "$value" != unknown ]] || return 0
+  grep -qE "^$key *= *unknown *\$" "$info" || return 0
+  sed -i "s|^$key\\( *\\)= *unknown *\$|$key\\1= $value|" "$info"
+  warn "PLUGIN_INFO.txt said $key = unknown; set to $value from versions.env"
+}
+
+# In the container build_plugin.sh runs outside any checkout and records
+# "unknown" for the JAX and XLA versions; fill them in from versions.env.
 stamp_plugin_info() {
-  local info="$1" key value
-  for key in jax_version xla_commit; do
-    case "$key" in
-      jax_version) value="$JAX_VER" ;;
-      xla_commit)  value="${XLA_COMMIT:-unknown}" ;;
-    esac
-    if [[ "$value" != unknown ]] && grep -qE "^$key *= *unknown *\$" "$info"; then
-      sed -i "s|^$key\\( *\\)= *unknown *\$|$key\\1= $value|" "$info"
-      warn "PLUGIN_INFO.txt said $key = unknown; set to $value from versions.env"
-    fi
-  done
-  # Rewrite the trailer rather than skip it when it is already there. A
-  # --dry-run followed by a real run stamps twice, and the first pass may have
-  # resolved XLA_REF from a submodule pointer that has since been committed --
-  # which shipped an asset whose fork_ref contradicted its own fork_commit.
-  # Skipping is the bug; a stale trailer is worse than none.
+  local info="$1"
+  stamp_field "$info" jax_version "$JAX_VER"
+  stamp_field "$info" xla_commit "${XLA_COMMIT:-unknown}"
+  # Rewrite an existing trailer rather than skip it: a --dry-run followed by a
+  # real run stamps twice, and the first pass may have resolved XLA_REF from a
+  # submodule pointer that was committed in between, which once shipped an
+  # asset whose fork_ref contradicted its own fork_commit.
   if grep -q '^release_tag' "$info"; then
     sed -i '/^release_tag/,$d' "$info"
     sed -i -e :a -e '/^$/{$d;N;ba' -e '}' "$info"
@@ -264,8 +257,7 @@ package_arch() {
   so="$dir/libpjrt_c_api_cpu_plugin.so"
   [[ -f "$so" ]] || die "$so is missing (the buildx export produced nothing)"
   [[ -f "$dir/PLUGIN_INFO.txt" ]] || die "$dir/PLUGIN_INFO.txt is missing"
-  # The repository is Unlicense but this binary is XLA, so Apache-2.0 requires
-  # its licence to travel with it.
+  # The binary is Apache-2.0 XLA, so its licence travels with it.
   if [[ ! -f "$dir/LICENSE-xla" ]]; then
     if [[ -f "$REPO_ROOT/third_party/xla/LICENSE" ]]; then
       cp -f "$REPO_ROOT/third_party/xla/LICENSE" "$dir/LICENSE-xla"
@@ -283,7 +275,7 @@ package_arch() {
     warn "$arch plugin is PJRT API 0.$minor but third_party/pjrt is 0.$PJRT_API_MINOR"
   fi
 
-  base="pjrt_cpu_plugin-$VERSION-linux-$arch.tar.gz"
+  base="$(asset_name "$arch")"
   tar czf "$RELEASE_DIR/$base" -C "$dir" \
     libpjrt_c_api_cpu_plugin.so PLUGIN_INFO.txt LICENSE-xla
   ( cd "$RELEASE_DIR" && sha256sum "$base" > "$base.sha256" )
@@ -356,7 +348,7 @@ NOTES="$RELEASE_DIR/NOTES.md"
   echo "serialized executable is the ISA-locked half, not this."
   echo
   for arch in "${ARCHES[@]}"; do
-    base="pjrt_cpu_plugin-$VERSION-linux-$arch.tar.gz"
+    base="$(asset_name "$arch")"
     info="$RELEASE_DIR/$arch/PLUGIN_INFO.txt"
     echo "## linux-$arch"
     echo
@@ -402,7 +394,7 @@ gh_run() {
 
 assets=()
 for arch in "${ARCHES[@]}"; do
-  base="pjrt_cpu_plugin-$VERSION-linux-$arch.tar.gz"
+  base="$(asset_name "$arch")"
   assets+=("$RELEASE_DIR/$base" "$RELEASE_DIR/$base.sha256")
 done
 
@@ -413,8 +405,7 @@ if gh release view "$TAG" >/dev/null 2>&1; then
   existing="$(gh release view "$TAG" --json assets --jq '.assets[].name' 2>/dev/null || true)"
 else
   say "creating release $TAG"
-  # --latest=false: these are per-JAX-version toolchain assets, and "latest"
-  # must keep meaning the latest source release.
+  # --latest=false: "latest" must keep meaning the latest source release.
   gh_run release create "$TAG" \
     --title "PJRT CPU plugin for JAX $JAX_VER" \
     --notes-file "$NOTES" \
@@ -444,7 +435,7 @@ gh_run release upload "${upload[@]}"
 manifest_rows() {
   local arch base sha url
   for arch in "${ARCHES[@]}"; do
-    base="pjrt_cpu_plugin-$VERSION-linux-$arch.tar.gz"
+    base="$(asset_name "$arch")"
     sha="$(awk '{ print $1; exit }' "$RELEASE_DIR/$base.sha256")"
     url="https://github.com/$SLUG/releases/download/$TAG/$base"
     printf '%-22s %-14s %s  %s\n' "$TAG" "linux-$arch" "$url" "$sha"
@@ -488,9 +479,8 @@ if [[ "$UPDATE_MANIFEST" == 1 ]]; then
 fi
 
 # ------------------------------------------------------------------ post-check
-# Download what was actually published and check it the way a user will. The
-# freshly computed manifest is passed explicitly because the committed one does
-# not carry these rows yet (and never will without --update-manifest).
+# Check the published asset the way a user will, against the fresh manifest:
+# the committed one does not carry these rows yet.
 if [[ "$DRY_RUN" == 1 ]]; then
   say "[dry-run] skipping the post-check; after publishing, run"
   say "    tools/get_plugin.sh --release $TAG --dest build/release/verify"

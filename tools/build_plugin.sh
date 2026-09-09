@@ -2,17 +2,13 @@
 #
 # Build the PJRT CPU plugin from the XLA fork.
 #
-# The fork carries two patches on top of the XLA commit that the pinned JAX
-# release uses (see versions.env and docs/developer/xla-fork.md):
-#   1. jaxlib's LAPACK FFI kernels, so executables that lower to lapack_*_ffi
-#      custom calls (jnp.linalg.*) load at all;
-#   2. CPU plugin create options, so `asynchronous=false` (inline execution)
-#      is reachable through the PJRT C API, plus the plugin attributes that
-#      advertise it.
+# The fork adds jaxlib's LAPACK FFI kernels (so jnp.linalg.* executables load
+# at all) and the CPU plugin create options that make inline execution
+# reachable through the C API; docs/developer/xla-fork.md has the patches.
 #
-# Build mode does not measurably change latency: the compute kernels are
-# LLVM-compiled at export time and embedded in the .binpb, and the plugin only
-# orchestrates. `-c opt` is still the default because it is what gets shipped.
+# `-c opt` is the default because it is what ships. Build mode does not
+# measurably change call latency: the compute kernels are compiled at export
+# time into the artifact, and the plugin only orchestrates.
 #
 # Environment:
 #   XLA_DIR       XLA source tree (default: third_party/xla)
@@ -36,6 +32,11 @@ ARCH_FLAGS="${ARCH_FLAGS:-}"
 HERMETIC_PYTHON_VERSION="${HERMETIC_PYTHON_VERSION:-3.12}"
 PACKAGE=0
 
+die() { echo "build_plugin: $*" >&2; exit 1; }
+
+# The header comment is the help text; it ends at the first non-comment line.
+usage() { awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; }
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --package)    PACKAGE=1; shift ;;
@@ -43,12 +44,14 @@ while [[ $# -gt 0 ]]; do
     --xla-dir)    XLA_DIR="$2"; shift 2 ;;
     --out)        OUT_DIR="$2"; shift 2 ;;
     --arch-flags) ARCH_FLAGS="$2"; shift 2 ;;
-    -h|--help)    sed -n '2,30p' "$0"; exit 0 ;;
+    -h|--help)    usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-die() { echo "build_plugin: $*" >&2; exit 1; }
+# Sourced before anything reads JAX_VERSION or the fork metadata.
+# shellcheck disable=SC1091
+[[ -f "$REPO_ROOT/versions.env" ]] && . "$REPO_ROOT/versions.env"
 
 # ---------------------------------------------------------------- preconditions
 [[ -d "$XLA_DIR" ]] || die "no XLA tree at $XLA_DIR
@@ -60,7 +63,7 @@ command -v bazel >/dev/null || die "bazel/bazelisk not on PATH (the docker image
   docker compose -f docker/compose.yml run --rm plugin-builder tools/build_plugin.sh)"
 command -v xxd >/dev/null || die "xxd not found (apt-get install xxd)"
 
-# Patch 1 links the plugin against the system LAPACK and BLAS.
+# The LAPACK patch links the plugin against the system LAPACK and BLAS.
 have_lapack=0
 for pat in /usr/lib/*/liblapack.so* /usr/lib/liblapack.so* /usr/lib64/liblapack.so* \
            /usr/lib/*/liblapack.a /usr/lib/liblapack.a; do
@@ -78,18 +81,16 @@ avail_gb=$(df -BG --output=avail "$XLA_DIR" | tail -1 | tr -dc '0-9')
 cd "$XLA_DIR"
 if [[ -f configure.py ]]; then
   echo "build_plugin: configure.py --backend=CPU --host_compiler=CLANG"
-  # Newer XLA defaults to a hermetic clang toolchain; configure.py may then
-  # refuse --host_compiler=CLANG without an explicit --clang_path. Falling back
-  # to no configure at all is fine: the checked-in .bazelrc already selects a
-  # working CPU toolchain.
+  # configure.py may refuse --host_compiler=CLANG without --clang_path (newer
+  # XLA defaults to a hermetic clang). No configure at all is fine: the
+  # checked-in .bazelrc already selects a working CPU toolchain.
   python3 configure.py --backend=CPU --host_compiler=CLANG \
     || python3 configure.py --backend=CPU \
     || echo "build_plugin: configure.py declined; using the checked-in .bazelrc"
 fi
 
 # ----------------------------------------------------------------------- build
-# WORKSPACE mode: XLA at this pin sets `common --noenable_bzlmod
-# --enable_workspace` in .bazelrc, so no --config=bzlmod here.
+# No --config=bzlmod: XLA at this pin selects WORKSPACE mode in its .bazelrc.
 read -r -a startup_args <<< "${BAZEL_STARTUP_ARGS:-}"
 read -r -a arch_args <<< "$ARCH_FLAGS"
 
@@ -110,36 +111,24 @@ cp -f "$BUILT" "$OUT"
 chmod u+w "$OUT"
 strip --strip-unneeded "$OUT" || echo "build_plugin: warning: strip failed, keeping unstripped plugin" >&2
 
-# The plugin exports exactly one symbol; if it does not, the build produced
-# something we cannot dlopen.
+# A PJRT plugin exports GetPjrtApi; anything else cannot be dlopen-ed as one.
 nm -D --defined-only "$OUT" 2>/dev/null | grep -q ' T GetPjrtApi' \
   || die "$OUT does not export GetPjrtApi"
 
-# Prefer what the tree actually is over what versions.env claims it should be.
-# git fails in the container, though: compose mounts third_party/xla at /xla,
-# and a submodule's .git is a file pointing back into the superproject, which
-# is not mounted. Without the fallback every container-built asset records
-# "unknown" here, which defeats the point of PLUGIN_INFO.txt -- and the
-# container is the documented way to build one.
+# What the tree is, over what versions.env claims. In the container git fails
+# (a submodule's .git is a file pointing into the superproject, which is not
+# mounted), so fall back to versions.env rather than record "unknown".
 fork_commit="$(git -C "$XLA_DIR" rev-parse HEAD 2>/dev/null || true)"
 fork_branch="$(git -C "$XLA_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-if [[ -z "$fork_commit" && -f "$REPO_ROOT/versions.env" ]]; then
-  # One subshell for both values: sourcing twice needs the directive twice,
-  # and a missed one is a CI failure rather than a warning.
-  # shellcheck disable=SC1091
-  read -r fork_commit fork_branch <<<"$(
-    . "$REPO_ROOT/versions.env" && echo "${XLA_FORK_COMMIT:-} ${XLA_FORK_BRANCH:-}"
-  )"
-  [[ -n "$fork_commit" ]] && \
-    echo "build_plugin: no git metadata in $XLA_DIR; recording the fork commit from versions.env" >&2
+if [[ -z "$fork_commit" && -n "${XLA_FORK_COMMIT:-}" ]]; then
+  fork_commit="$XLA_FORK_COMMIT"
+  fork_branch="${XLA_FORK_BRANCH:-}"
+  echo "build_plugin: no git metadata in $XLA_DIR; recording the fork commit from versions.env" >&2
 fi
 fork_commit="${fork_commit:-unknown}"
 fork_branch="${fork_branch:-unknown}"
 api_minor="$(grep -m1 '^#define PJRT_API_MINOR' "$XLA_DIR/xla/pjrt/c/pjrt_c_api.h" 2>/dev/null | awk '{print $3}')"
 glibc_max="$(objdump -T "$OUT" 2>/dev/null | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)"
-
-# shellcheck disable=SC1091
-[[ -f "$REPO_ROOT/versions.env" ]] && . "$REPO_ROOT/versions.env"
 
 cat > "$OUT_DIR/PLUGIN_INFO.txt" <<INFO
 PJRT CPU plugin for call_jax_from_cpp
@@ -170,8 +159,7 @@ if [[ "$PACKAGE" == 1 ]]; then
   arch="$(uname -m)"
   ver="${JAX_VERSION:-unknown}"
   tarball="$OUT_DIR/pjrt_cpu_plugin-jax-v${ver}-linux-${arch}.tar.gz"
-  # LICENSE-xla only exists when the XLA tree carried one; the binary is
-  # Apache-2.0 either way, so ship it whenever it is there.
+  # The binary is Apache-2.0 XLA; ship its licence whenever the tree had one.
   tar_members=(libpjrt_c_api_cpu_plugin.so PLUGIN_INFO.txt)
   [[ -f "$OUT_DIR/LICENSE-xla" ]] && tar_members+=(LICENSE-xla)
   tar czf "$tarball" -C "$OUT_DIR" "${tar_members[@]}"

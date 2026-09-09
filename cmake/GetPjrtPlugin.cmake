@@ -1,26 +1,23 @@
 # Resolve a PJRT CPU plugin for this build tree.
 #
-# There is no official prebuilt CPU PJRT C-API plugin: jaxlib links its CPU
-# client statically and never exports GetPjrtApi. This project therefore builds
-# its own from an XLA fork and publishes it as a GitHub Release asset per JAX
-# version; tools/plugin_versions.txt is the manifest, and versions.env names the
-# release tag.
-#
-# Nothing links against the plugin -- it is dlopen-ed at run time -- so a
-# missing plugin is never a configure error. It only means binaries from this
-# tree have no compiled-in default and will look at $PJRT_CPU_PLUGIN instead.
+# There is no official prebuilt CPU PJRT C-API plugin (jaxlib never exports
+# GetPjrtApi), so this project publishes its own per JAX version:
+# tools/plugin_versions.txt is the manifest, versions.env names the release
+# tag. Nothing links against the plugin, so a missing one is never a configure
+# error: the binaries then have no compiled-in default and read
+# $PJRT_CPU_PLUGIN.
 #
 #   pjrt_exec_get_plugin(<out-var>)
 #
-# Sets <out-var> to the .so, or to the empty string when none could be
-# resolved. Honours, in order:
+# Sets <out-var> to the .so, or to "" when none could be resolved. Honours, in
+# order:
 #
 #   PJRT_EXEC_PLUGIN_PATH          an existing plugin, used as given
 #   PJRT_EXEC_PLUGIN_SOURCE_BUILD  build it from the fork now (bazel; slow)
 #   PJRT_EXEC_FETCH_PLUGIN         download the published asset (default)
 #
-# Also defines the `pjrt_plugin` target, which does the same work at build time
-# rather than configure time.
+# Also defines the `pjrt_plugin` target, which does the same work at build
+# time.
 
 include_guard(GLOBAL)
 
@@ -34,9 +31,8 @@ set(PJRT_EXEC_PLUGIN_DIR "${CMAKE_BINARY_DIR}/plugin" CACHE PATH
     "Where a downloaded or locally built PJRT CPU plugin is installed")
 
 #[==[
-Read one KEY=VALUE line out of versions.env, the single source of truth for
-every pinned version in this project. Sets <out-var> to the value, or to the
-empty string when the key is absent.
+Read one KEY=VALUE line out of versions.env. Sets <out-var> to the value, or
+to "" when the key is absent.
 ]==]
 function(pjrt_exec_versions_env KEY OUT_VAR)
   set(${OUT_VAR} "" PARENT_SCOPE)
@@ -45,18 +41,17 @@ function(pjrt_exec_versions_env KEY OUT_VAR)
     return()
   endif()
   file(STRINGS "${_file}" _lines REGEX "^${KEY}=")
-  foreach(_line IN LISTS _lines)
+  if(_lines)
+    list(GET _lines 0 _line)
     string(REGEX REPLACE "^${KEY}=[ \t]*" "" _value "${_line}")
     string(STRIP "${_value}" _value)
     set(${OUT_VAR} "${_value}" PARENT_SCOPE)
-    return()
-  endforeach()
+  endif()
 endfunction()
 
 #[==[
-Normalise this host into the <os>-<arch> spelling used by
-tools/plugin_versions.txt and by the release assets: linux/darwin and
-x86_64/aarch64. Sets <out-var> to the empty string on anything else.
+This host as the <os>-<arch> spelling the manifest and the release assets use
+(linux/darwin, x86_64/aarch64), or "" on anything else.
 ]==]
 function(_pjrt_exec_platform OUT_VAR)
   string(TOLOWER "${CMAKE_SYSTEM_NAME}" _os)
@@ -76,9 +71,7 @@ function(_pjrt_exec_platform OUT_VAR)
   set(${OUT_VAR} "${_os}-${_arch}" PARENT_SCOPE)
 endfunction()
 
-# The remedies get_plugin.sh prints, so a CMake user and a Make user are told
-# the same three things. The caller says what went wrong first; this only lists
-# the ways out.
+# The same three remedies get_plugin.sh prints; the caller says what went wrong.
 function(_pjrt_exec_remedies)
   message(STATUS
     "pjrt_exec: the build continues without a compiled-in plugin path. "
@@ -98,8 +91,7 @@ Find, download or build the PJRT CPU plugin. See the file header.
 function(pjrt_exec_get_plugin OUT_VAR)
   set(${OUT_VAR} "" PARENT_SCOPE)
 
-  # 1. An explicit path wins over everything and is never second-guessed: a
-  #    consumer with their own plugin is a supported configuration.
+  # An explicit path is used as given: a consumer may have their own plugin.
   if(PJRT_EXEC_PLUGIN_PATH)
     if(NOT EXISTS "${PJRT_EXEC_PLUGIN_PATH}")
       message(WARNING
@@ -113,15 +105,15 @@ function(pjrt_exec_get_plugin OUT_VAR)
 
   set(_so "${PJRT_EXEC_PLUGIN_DIR}/libpjrt_c_api_cpu_plugin.so")
 
-  # 2. Build from the fork. This is bazel compiling LLVM: 30-60 minutes on a
-  #    cold cache, tens of gigabytes of disk. It happens at CONFIGURE time,
-  #    which is surprising if you did not ask for it -- hence opt-in only.
+  # Already in the build tree, whichever way it was asked for.
+  if((PJRT_EXEC_PLUGIN_SOURCE_BUILD OR PJRT_EXEC_FETCH_PLUGIN) AND EXISTS "${_so}")
+    message(STATUS "pjrt_exec: reusing the plugin at ${_so}")
+    set(${OUT_VAR} "${_so}" PARENT_SCOPE)
+    return()
+  endif()
+
+  # Opt-in only: this is bazel compiling LLVM, at configure time.
   if(PJRT_EXEC_PLUGIN_SOURCE_BUILD)
-    if(EXISTS "${_so}")
-      message(STATUS "pjrt_exec: reusing the plugin at ${_so}")
-      set(${OUT_VAR} "${_so}" PARENT_SCOPE)
-      return()
-    endif()
     message(STATUS
       "pjrt_exec: building the PJRT CPU plugin from source; this runs bazel "
       "and takes 30-60 minutes on a cold cache")
@@ -139,14 +131,8 @@ function(pjrt_exec_get_plugin OUT_VAR)
     return()
   endif()
 
-  # 3. The published asset.
+  # The published asset.
   if(PJRT_EXEC_FETCH_PLUGIN)
-    if(EXISTS "${_so}")
-      message(STATUS "pjrt_exec: reusing the plugin at ${_so}")
-      set(${OUT_VAR} "${_so}" PARENT_SCOPE)
-      return()
-    endif()
-
     set(_release "${PJRT_EXEC_PLUGIN_VERSION}")
     if(NOT _release)
       pjrt_exec_versions_env(PLUGIN_RELEASE _release)
@@ -167,8 +153,7 @@ function(pjrt_exec_get_plugin OUT_VAR)
       return()
     endif()
 
-    # Rows are: <release-tag> <os-arch> <url> <sha256>. Comments and blank
-    # lines are skipped by the REGEX; the sha may be "-" for an unpinned asset.
+    # Rows: <release-tag> <os-arch> <url> <sha256>; the sha may be "-".
     file(STRINGS "${_manifest}" _rows REGEX "^[ \t]*[^#\t ]")
     set(_url "")
     set(_sha "")
@@ -202,11 +187,9 @@ function(pjrt_exec_get_plugin OUT_VAR)
       return()
     endif()
 
-    # The digest is compared here rather than with DOWNLOAD's EXPECTED_HASH,
-    # which raises a hard CMake error: a bad download must leave a tree that
-    # still configures (the plugin is not linked against, and a consumer may
-    # have their own), while being loud enough that nobody misses it. Nothing
-    # is installed either way -- the archive is deleted unverified.
+    # Compared here rather than with DOWNLOAD's EXPECTED_HASH, which is a hard
+    # CMake error: a bad download must leave a tree that still configures. The
+    # archive is discarded either way.
     if(_sha AND NOT _sha STREQUAL "-")
       file(SHA256 "${_archive}" _actual)
       string(TOLOWER "${_sha}" _sha_lc)
@@ -239,7 +222,6 @@ function(pjrt_exec_get_plugin OUT_VAR)
     return()
   endif()
 
-  # 4. Nothing was asked for. The runtime still resolves $PJRT_CPU_PLUGIN.
   message(STATUS
     "pjrt_exec: not resolving a plugin (PJRT_EXEC_FETCH_PLUGIN is OFF); set "
     "PJRT_CPU_PLUGIN at run time")

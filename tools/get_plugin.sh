@@ -2,18 +2,15 @@
 #
 # Download the prebuilt PJRT CPU plugin for the pinned JAX version.
 #
-# There is no official prebuilt distribution of the CPU PJRT C-API plugin:
-# jaxlib links its CPU client statically and never exposes GetPjrtApi. So this
-# project publishes its own, built from the XLA fork (which adds the LAPACK FFI
-# kernels and the synchronous-execution create option), as GitHub Release
-# assets tagged per JAX version.
+# There is no official prebuilt CPU PJRT C-API plugin (jaxlib never exports
+# GetPjrtApi), so this project publishes its own, built from the XLA fork, as
+# a GitHub Release asset per JAX version.
 #
 # Usage:
 #   tools/get_plugin.sh [--dest DIR] [--release TAG] [--url URL] [--check]
 #                       [--versions-file F] [--manifest F]
 #
-# Falls back with an explicit remedy when no asset exists for this platform:
-# building from source is always available (tools/build_plugin.sh).
+# With no asset for this platform it prints the remedies and exits 1.
 
 set -euo pipefail
 
@@ -25,6 +22,16 @@ RELEASE=""
 URL=""
 CHECK_ONLY=0
 
+die() { echo "get_plugin: $*" >&2; exit 1; }
+
+# The header comment is the help text; it ends at the first non-comment line.
+usage() { awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; }
+
+# A PJRT plugin exports exactly one symbol; anything else is not one.
+exports_pjrt_api() {
+  nm -D --defined-only "$1" 2>/dev/null | grep -q ' T GetPjrtApi'
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dest)          DEST="$2"; shift 2 ;;
@@ -33,12 +40,10 @@ while [[ $# -gt 0 ]]; do
     --check)         CHECK_ONLY=1; shift ;;
     --versions-file) VERSIONS_FILE="$2"; shift 2 ;;
     --manifest)      MANIFEST="$2"; shift 2 ;;
-    -h|--help)       sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help)       usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
-
-die() { echo "get_plugin: $*" >&2; exit 1; }
 
 for tool in curl sha256sum tar; do
   command -v "$tool" >/dev/null || die "$tool is required"
@@ -63,8 +68,7 @@ platform="${os}-${arch}"
 SO="$DEST/libpjrt_c_api_cpu_plugin.so"
 if [[ "$CHECK_ONLY" == 1 ]]; then
   [[ -f "$SO" ]] || die "no plugin at $SO"
-  nm -D --defined-only "$SO" 2>/dev/null | grep -q ' T GetPjrtApi' \
-    || die "$SO does not export GetPjrtApi"
+  exports_pjrt_api "$SO" || die "$SO does not export GetPjrtApi"
   echo "get_plugin: $SO looks like a PJRT plugin"
   exit 0
 fi
@@ -115,8 +119,7 @@ fi
 
 tar xzf "$tmp/plugin.tar.gz" -C "$DEST"
 [[ -f "$SO" ]] || die "the archive did not contain libpjrt_c_api_cpu_plugin.so"
-nm -D --defined-only "$SO" 2>/dev/null | grep -q ' T GetPjrtApi' \
-  || die "$SO does not export GetPjrtApi"
+exports_pjrt_api "$SO" || die "$SO does not export GetPjrtApi"
 
 echo "get_plugin: installed $SO"
 [[ -f "$DEST/PLUGIN_INFO.txt" ]] && cat "$DEST/PLUGIN_INFO.txt"

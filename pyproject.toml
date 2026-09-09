@@ -16,11 +16,9 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Mathematics",
 ]
 
-# jax and jaxlib must match exactly; see versions.env, which is the single
-# source of truth. tests/python/test_versions.py checks that they agree.
-# jaxlib 0.11.0 publishes cp312, cp313 and cp314 wheels and no cp315, so this
-# pin does not resolve on Python 3.15 even though requires-python allows it.
-# mise.toml pins 3.12.14, which is what this tree is developed and tested on.
+# Pinned to versions.env exactly; tests/python/test_versions.py checks. jaxlib
+# 0.11.0 ships no cp315 wheel, so the pin does not resolve on Python 3.15 even
+# though requires-python allows it.
 dependencies = [
   "jax==0.11.0",
   "jaxlib==0.11.0",

@@ -1,31 +1,21 @@
 # Build the pjrt_exec library, the examples, the C++ tests and the benchmark.
 #
-# Two facts shape this file:
-#
-#   1. NOTHING links against the PJRT plugin. It is dlopen-ed at run time, so
-#      the library links only -ldl and -lpthread and a plain `make` never
-#      touches bazel or the network. `make plugin` is a separate errand that
-#      only the RUN targets care about.
-#   2. Every pinned version lives in versions.env. This file greps it rather
-#      than repeating a number that would then rot.
-#
-# Everything below is overridable from the command line, e.g.
+# Nothing links against the PJRT plugin: it is dlopen-ed at run time, so a
+# plain `make` never touches bazel or the network, and `make plugin` is a
+# separate errand that only the run targets need. Every pinned version comes
+# from versions.env. Every variable below is overridable from the command line:
 #   make CXX=g++ BUILD_DIR=/tmp/b bench BENCH_ARGS="--fixture trajopt --iterations 500"
 
-# The default goal is `all` (library + examples) rather than `help`, because
-# the documentation, the Dockerfile and CI all say "run make" and mean "build
-# the thing". `make help` lists the rest and is one word away.
+# `all`, not `help`: the docs, the Dockerfile and CI say `make` and mean build.
 .DEFAULT_GOAL := all
 
-# A failed recipe must not leave a half-written .o or .a behind to be picked up
-# as up to date by the next run.
+# A failed recipe must not leave a half-written .o behind as up to date.
 .DELETE_ON_ERROR:
 
 # ----------------------------------------------------------------- toolchain
 
-# `CXX ?= clang++` would be a no-op: make already defines CXX as g++, so the
-# override has to be conditional on the value still being make's own default.
-# An explicit `make CXX=g++` (or a CXX in the environment) still wins.
+# `CXX ?= clang++` would be a no-op: make predefines CXX as g++, so the default
+# is replaced only while it is still make's own. An explicit CXX still wins.
 ifeq ($(origin CXX),default)
 CXX := clang++
 endif
@@ -60,12 +50,10 @@ GUARD    := $(LIB_DIR)/malloc_guard.so
 REPORTS  := $(ARTIFACTS_DIR)/reports
 
 # ----------------------------------------------------------------- versions
-#
-# One grep per variable out of versions.env, which is the single source of
-# truth for every pin in this project. `:=` so the greps run once, not once per
-# reference. Reported by `make print-config`.
+
+# `:=` so each value is read from versions.env once, not once per reference.
 VERSIONS_ENV   := versions.env
-version_of      = $(patsubst $(1)=%,%,$(shell grep -m1 '^$(1)=' $(VERSIONS_ENV) 2>/dev/null))
+version_of      = $(shell sed -n 's/^$(1)=//p' $(VERSIONS_ENV) 2>/dev/null | head -1)
 JAX_VERSION    := $(call version_of,JAX_VERSION)
 PLUGIN_RELEASE := $(call version_of,PLUGIN_RELEASE)
 
@@ -82,13 +70,11 @@ EXAMPLE_BINS := example_01_basic example_02_trajopt example_03_minimal \
 TEST_BINS    := fn_info test_debug_checks test_load_errors test_latency \
                 test_guard_selftest
 BENCH_BIN    := bench
-# plugin_probe is a developer tool, not part of the deliverable; build it only
-# when its source is present so a trimmed checkout still builds.
+# A developer tool; a trimmed checkout may not carry its source.
 TOOL_BINS    := $(if $(wildcard tools/plugin_probe.cpp),plugin_probe)
 
-# A binary is one main object plus the library. `main_<binary>` names that
-# object; the link rule below reads it back through secondary expansion, which
-# is what keeps this to a single rule instead of one per binary.
+# One main object plus the library per binary. The link rule reads
+# `main_<binary>` back through secondary expansion: one rule, not one each.
 main_example_01_basic    := $(OBJ_DIR)/examples/01_basic/basic.o
 main_example_02_trajopt  := $(OBJ_DIR)/examples/02_trajopt/trajopt.o
 main_example_03_minimal  := $(OBJ_DIR)/examples/03_minimal/minimal.o
@@ -113,25 +99,20 @@ TOOL_PATHS    := $(addprefix $(BIN_DIR)/,$(TOOL_BINS))
 
 # --------------------------------------------------------- compilation flags
 
-# Kept for `make print-config`: the plugin-path define below carries nested
-# quotes that no single echo can reproduce faithfully, so it is reported on its
-# own line instead.
+# For `make print-config`: the plugin-path define below carries nested quotes
+# that echo cannot reproduce, so it is reported on its own line.
 CPPFLAGS_DISPLAY := $(CPPFLAGS)
 
-# A binary run from any directory has to find the plugin, so the build-time
-# default is absolute. $PJRT_CPU_PLUGIN and RuntimeOptions::plugin_path still
-# win over it at run time.
+# Absolute, so a binary run from any directory finds the plugin.
+# $PJRT_CPU_PLUGIN and RuntimeOptions::plugin_path still win at run time.
 CPPFLAGS += -DPJRT_EXEC_DEFAULT_PLUGIN_PATH='"$(abspath $(PLUGIN))"'
 
-# -MMD -MP: one .d per object listing the headers it read, with a phony target
-# for each of them so a deleted header does not wedge the build.
+# -MP: a phony target per header, so a deleted header does not wedge the build.
 DEPFLAGS := -MMD -MP
 
-# Examples include their own shared helpers as "common/cli.hpp"; bench and the
-# C++ tests get the same courtesy for their local headers. bench and the tests
-# also reuse examples/common (the CLI parser, the JSON report writer and the
-# host-environment probe are the same code the examples show off), so they get
-# -Iexamples too rather than a second copy of all three.
+# -Iexamples for all of them: the examples include their helpers as
+# "common/cli.hpp", and bench and the tests reuse those helpers rather than
+# carrying a copy.
 $(EXAMPLE_OBJS):            CPPFLAGS += -Iexamples
 $(main_bench):              CPPFLAGS += -Ibench -Iexamples
 $(TEST_OBJS):               CPPFLAGS += -Itests -Iexamples -Ibench
@@ -146,7 +127,7 @@ endif
 # --------------------------------------------------------------------- phony
 
 .PHONY: all lib examples tests-cpp tools guard bench export run-examples \
-        test test-slow test-rt test-alloc check rt-check plugin plugin-source \
+        test test-slow test-rt test-alloc rt-check plugin plugin-source \
         docs docs-live docs-linkcheck docs-clean format clean distclean \
         print-config help plugin-hint
 
@@ -178,8 +159,8 @@ $(LIB): $(LIB_OBJS) | $(LIB_DIR)
 $(BIN_DIR)/%: $$(main_$$*) $(LIB) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(main_$*) $(LIB) $(LDLIBS)
 
-# Nothing links against the guard: it is preloaded, and the binaries resolve
-# its markers with dlsym and no-op when they are absent.
+# Preloaded, never linked: the binaries find its markers with dlsym and no-op
+# without it.
 $(GUARD): tests/support/malloc_guard.c | $(LIB_DIR)
 	$(CC) -shared -fPIC -O2 -Wall -Wextra -o $@ $< -ldl
 
@@ -187,10 +168,8 @@ $(GUARD): tests/support/malloc_guard.c | $(LIB_DIR)
 
 # -------------------------------------------------------------------- plugin
 #
-# There is no official prebuilt CPU PJRT C-API plugin (jaxlib links its CPU
-# client statically and never exports GetPjrtApi), so this project publishes
-# its own. Neither target is a prerequisite of a build: only running needs a
-# plugin.
+# No official prebuilt CPU plugin exists (jaxlib never exports GetPjrtApi), so
+# this project publishes its own. Only running needs one.
 
 plugin:  ## Download the prebuilt PJRT CPU plugin (sha256-verified)
 	tools/get_plugin.sh --dest $(PLUGIN_DIR)
@@ -198,8 +177,7 @@ plugin:  ## Download the prebuilt PJRT CPU plugin (sha256-verified)
 plugin-source:  ## Build the PJRT CPU plugin from the XLA fork (bazel, 30-60 min)
 	tools/build_plugin.sh --out $(PLUGIN_DIR)
 
-# Advice, not a gate: a plugin supplied through $PJRT_CPU_PLUGIN is just as
-# valid as one in build/plugin, and CI does exactly that.
+# Advice, not a gate: CI supplies its plugin through $PJRT_CPU_PLUGIN.
 plugin-hint:
 	@if [ ! -f "$(PLUGIN)" ] && [ -z "$$PJRT_CPU_PLUGIN" ]; then \
 	  echo "note: no plugin at $(PLUGIN), and PJRT_CPU_PLUGIN is unset."; \
@@ -210,20 +188,12 @@ plugin-hint:
 
 # -------------------------------------------------------------------- export
 #
-# Serialized executables embed target machine code, so these must be produced
-# on the machine that will run them; that is why artifacts/ is gitignored and
-# why every run target depends on the export rather than on a committed file.
-#
-# The three names below are what the export scripts write. They are variables
-# so that a rename is a one-line fix here instead of a rule that re-exports on
-# every invocation.
-EXPORT_BASIC   ?= basic
-EXPORT_TRAJOPT ?= trajopt
-EXPORT_ARM     ?= arm
-
-BASIC_ARTIFACT   := $(ARTIFACTS_DIR)/$(EXPORT_BASIC).binpb
-TRAJOPT_ARTIFACT := $(ARTIFACTS_DIR)/$(EXPORT_TRAJOPT).binpb
-ARM_ARTIFACT     := $(ARTIFACTS_DIR)/$(EXPORT_ARM).binpb
+# Artifacts embed machine code for the exporting host, so every run target
+# depends on the export rather than on a committed file. The three .binpb
+# names are what the export scripts write.
+BASIC_ARTIFACT   := $(ARTIFACTS_DIR)/basic.binpb
+TRAJOPT_ARTIFACT := $(ARTIFACTS_DIR)/trajopt.binpb
+ARM_ARTIFACT     := $(ARTIFACTS_DIR)/arm.binpb
 EXPORTER_SRCS    := $(wildcard python/jax2exec/*.py)
 
 # PYTHONPATH so an interpreter that has jax but not this package installed
@@ -251,9 +221,8 @@ run-examples: examples export guard plugin-hint | $(REPORTS)  ## Run all four ex
 	$(PRELOAD_VAR)=$(abspath $(GUARD)) \
 	  $(BIN_DIR)/example_04_realtime --iterations 1000 --json $(REPORTS)/realtime.json
 
-# `bench` builds and runs, because a benchmark that was built but not run tells
-# you nothing. The load average goes with the numbers: a concurrent build does
-# not add noise to a tail measurement, it invalidates it.
+# The load average goes with the numbers: a concurrent build does not add
+# noise to a tail measurement, it invalidates it.
 bench: $(BIN_DIR)/bench export plugin-hint  ## Build and run the benchmark (see BENCH_ARGS)
 	@echo "load average: $$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || uptime)"
 	$(BIN_DIR)/bench $(BENCH_ARGS)
@@ -263,19 +232,15 @@ bench: $(BIN_DIR)/bench export plugin-hint  ## Build and run the benchmark (see 
 test: examples tests-cpp guard plugin-hint  ## Build everything, then run the test suite
 	$(PYTEST) $(PYTEST_ARGS)
 
-check: test  ## Alias for `test`
-
 test-slow: examples tests-cpp guard plugin-hint  ## The suite including the long campaigns
 	$(PYTEST) --runslow $(PYTEST_ARGS)
 
-# Only meaningful on a tuned, idle host; rt-check reports whether this is one.
 test-rt: examples tests-cpp guard plugin-hint  ## Real-time gates (tuned, idle host only)
 	@echo "load average: $$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null || uptime)"
 	$(PYTEST) -m rt $(PYTEST_ARGS)
 
-# Proves the wrapper's own steady-state allocations are zero. The count that
-# matters is `self`: XLA's thunk runtime allocates ~15,400 times per call
-# inside the plugin, and that is not reachable from here.
+# `--alloc-gate self`: the wrapper's own count must be zero. XLA's thunk
+# runtime allocates thousands of times per call inside the plugin, out of reach.
 test-alloc: guard $(BIN_DIR)/bench export plugin-hint | $(REPORTS)  ## Gate: zero wrapper allocations per call
 	$(PRELOAD_VAR)=$(abspath $(GUARD)) $(BIN_DIR)/bench \
 	  --iterations 200 --warmup 20 --alloc-gate self --require-guard \
@@ -306,9 +271,8 @@ FORMAT_CXX := $(wildcard include/pjrt_exec/*.hpp src/pjrt_exec/*.cpp \
                          tests/cpp/*.cpp tools/*.cpp \
                          tests/support/malloc_guard.c)
 
-# clang-format has no config file in this tree on purpose; --fallback-style is
-# what picks the house style, and adding a .clang-format later changes nothing
-# here because -style=file prefers it.
+# No .clang-format in the tree: --fallback-style picks the house style, and
+# -style=file would prefer a config file if one appeared.
 format:  ## Format the C++ and Python sources in place
 	@if command -v clang-format >/dev/null 2>&1; then \
 	  clang-format -i -style=file --fallback-style=Google $(FORMAT_CXX); \
@@ -318,9 +282,7 @@ format:  ## Format the C++ and Python sources in place
 	$(RUFF) format .
 	$(RUFF) check --fix .
 
-# The plugin is expensive to obtain (a download, or an hour of bazel) and is
-# not a build product of this tree, so `clean` leaves it alone. distclean does
-# not.
+# The plugin is a download or an hour of bazel, not a build product: kept.
 clean:  ## Remove objects, binaries and the library (keeps build/plugin)
 	rm -rf $(OBJ_DIR) $(BIN_DIR) $(LIB_DIR)
 

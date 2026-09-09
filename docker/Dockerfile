@@ -13,8 +13,8 @@
 #                   --output type=local
 #   dev             the final image: venv + plugin + workspace
 #
-# The plugin is dlopen'ed at run time, so nothing in the image links against
-# it; PJRT_CPU_PLUGIN tells the runtime where it is.
+# Nothing links against the plugin; PJRT_CPU_PLUGIN tells the runtime where
+# it is.
 
 ARG PLUGIN_SOURCE=none
 
@@ -57,13 +57,12 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
 FROM base AS python
 USER dev
 WORKDIR /build
-# uv.loc[k] is the "copy it only if it exists" idiom: the lock may not have
-# been generated yet on a fresh tree.
+# uv.loc[k] copies the lock only when it exists; a fresh tree has none.
 COPY --chown=dev:dev pyproject.toml uv.loc[k] /build/
 COPY --chown=dev:dev python /build/python
 COPY --chown=dev:dev README.md LICENSE /build/
-# Ubuntu 24.04's python3 is 3.12; using it keeps the venv's interpreter
-# symlink valid in the stages that copy /opt/venv.
+# The system python3, so the venv's interpreter symlink stays valid in the
+# stages that copy /opt/venv.
 RUN if [ -f uv.lock ]; then \
       uv sync --locked --all-groups --extra docs --python /usr/bin/python3; \
     else \
@@ -91,11 +90,9 @@ RUN git clone --depth 1 --branch "${XLA_REF}" "${XLA_REPO}" /home/dev/xla \
     || git clone --filter=blob:none "${XLA_REPO}" /home/dev/xla \
        && git -C /home/dev/xla checkout --detach "${XLA_REF}"
 COPY --chown=dev:dev tools/build_plugin.sh /home/dev/build_plugin.sh
-# BuildKit creates a cache mount's missing parent directories as root, and
-# bazelisk writes ~/.cache/bazelisk beside the mount, so without this the very
-# first bazel invocation dies with "permission denied" before it compiles
-# anything. Creating the parent as dev leaves the mount to land inside a
-# directory dev already owns.
+# BuildKit creates a cache mount's missing parents as root, and bazelisk
+# writes ~/.cache/bazelisk beside the mount; created as dev first, the mount
+# lands inside a directory dev owns.
 RUN mkdir -p /home/dev/.cache
 RUN --mount=type=cache,id=bazel-${TARGETARCH},target=/home/dev/.cache/bazel,uid=1000,gid=1000,sharing=locked \
     XLA_DIR=/home/dev/xla OUT_DIR=/opt/pjrt BUILD_MODE="${BUILD_MODE}" \
@@ -113,13 +110,9 @@ FROM base AS dev
 COPY --from=python /opt/venv /opt/venv
 COPY --from=plugin /opt/pjrt /opt/pjrt
 RUN chown -R dev:dev /opt/venv /opt/pjrt
-# The same hazard as the cache mount in plugin-source, one layer out: compose
-# mounts the bazel-cache volume at /home/dev/.cache/bazel, and docker creates a
-# mount point's missing parents as root. That leaves dev unable to write
-# ~/.cache/bazelisk or ~/.cache/uv, so `run --rm plugin-builder` dies with
-# "permission denied" before bazel starts and `run --rm dev` cannot even sync
-# the venv. Creating both as dev here means the volume lands inside a directory
-# dev already owns.
+# The cache-mount hazard again: compose mounts the bazel-cache volume at
+# /home/dev/.cache/bazel, and docker creates a mount point's missing parents
+# as root, leaving dev unable to write ~/.cache/uv or ~/.cache/bazelisk.
 RUN install -d -o dev -g dev /home/dev/.cache /home/dev/.cache/bazel
 ENV PJRT_CPU_PLUGIN=/opt/pjrt/libpjrt_c_api_cpu_plugin.so \
     CJFC_IN_CONTAINER=1

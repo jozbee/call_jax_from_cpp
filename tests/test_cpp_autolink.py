@@ -1,14 +1,10 @@
 """The code-block autolinker: what it links, and what it refuses to.
 
-The extension is loaded from ``docs/_ext`` by path rather than imported,
-because the docs extra is not installed for the fast suite and the module
-deliberately imports no Sphinx above ``setup``.  Everything under test is a
-pure function of a fake index built from ``get_objects()``-shaped tuples, so
-these run in milliseconds and do not need a site.
-
-What is being defended is the *refusals*.  A wrong link in a code block is
-worse than no link: it sends a reader who is already lost to the wrong page,
-and unlike a broken reference it does not fail any build.
+Loaded from ``docs/_ext`` by path, because the docs extra is not installed
+for the fast suite.  Everything under test is a pure function of a fake
+index, so no site is needed.  The refusals are what is defended: a wrong
+link in a code block sends a lost reader to the wrong page and fails no
+build.
 """
 
 from __future__ import annotations
@@ -27,8 +23,7 @@ MODULE_PATH = REPO_ROOT / "docs" / "_ext" / "cpp_autolink.py"
 def _load():
     spec = importlib.util.spec_from_file_location("cpp_autolink", MODULE_PATH)
     module = importlib.util.module_from_spec(spec)
-    # dataclasses resolves annotations through sys.modules, so the module has
-    # to be registered before it is executed.
+    # dataclasses resolves annotations through sys.modules, so register first.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
@@ -37,105 +32,52 @@ def _load():
 autolink = _load()
 
 
-#: ``(name, dispname, objtype, docname, anchor, priority)``, the shape the
-#: C++ domain yields.  Two ``report`` functions on purpose: the ambiguity is
-#: what stops ``guard.report(`` from linking.
+def obj(name, objtype, docname, anchor):
+    """One ``get_objects()`` tuple; the display name is the last component."""
+    return (name, re.split(r"::|\.", name)[-1], objtype, docname, anchor, 1)
+
+
+#: The shape the C++ domain yields.  Two ``report`` functions on purpose: the
+#: ambiguity is what stops ``guard.report(`` from linking.
 CPP_OBJECTS = [
-    ("pjrt::Function", "Function", "class", "api/cpp/function", "_CPPv4F", 1),
-    (
-        "pjrt::Function::call",
-        "call",
-        "function",
-        "api/cpp/function",
-        "_CPPv4C",
-        1,
-    ),
-    (
-        "pjrt::rt::harden_malloc",
-        "harden_malloc",
-        "function",
-        "api/cpp/rt",
-        "_CPPv4HM",
-        1,
-    ),
-    (
-        "pjrt::rt::lock_memory",
-        "lock_memory",
-        "function",
-        "api/cpp/rt",
-        "_CPPv4LM",
-        1,
-    ),
-    ("pjrt::rt::Status", "Status", "struct", "api/cpp/rt", "_CPPv4S", 1),
-    (
-        "pjrt::LoadPolicy",
-        "LoadPolicy",
-        "enum",
-        "api/cpp/runtime",
-        "_CPPv4LP",
-        1,
-    ),
-    (
+    obj("pjrt::Function", "class", "api/cpp/function", "_CPPv4F"),
+    obj("pjrt::Function::call", "function", "api/cpp/function", "_CPPv4C"),
+    obj("pjrt::rt::harden_malloc", "function", "api/cpp/rt", "_CPPv4HM"),
+    obj("pjrt::rt::lock_memory", "function", "api/cpp/rt", "_CPPv4LM"),
+    obj("pjrt::rt::Status", "struct", "api/cpp/rt", "_CPPv4S"),
+    obj("pjrt::LoadPolicy", "enum", "api/cpp/runtime", "_CPPv4LP"),
+    obj(
         "pjrt::LoadPolicy::BinaryOnly",
-        "BinaryOnly",
         "enumerator",
         "api/cpp/runtime",
         "_CPPv4BO",
-        1,
     ),
-    (
+    obj(
         "pjrt::LatencyRecorder::record",
-        "record",
         "function",
         "api/cpp/latency",
         "_CPPv4R",
-        1,
     ),
-    (
+    obj(
         "pjrt::LatencyRecorder::report",
-        "report",
         "function",
         "api/cpp/latency",
         "_CPPv4LRR",
-        1,
     ),
-    (
+    obj(
         "cjfc::AllocReport::report",
-        "report",
         "function",
         "api/cpp/examples",
         "_CPPv4ARR",
-        1,
     ),
-    (
-        "cjfc::workload::feedback",
-        "feedback",
-        "function",
-        "api/cpp/examples",
-        "_CPPv4FB",
-        1,
-    ),
-    ("std::vector::size", "size", "function", "api/cpp/x", "_CPPv4SZ", 1),
-    (
-        "pjrt::Function::x",
-        "x",
-        "functionParam",
-        "api/cpp/function",
-        "_CPPv4X",
-        1,
-    ),
+    obj("cjfc::workload::feedback", "function", "api/cpp/examples", "_CPPv4FB"),
+    obj("std::vector::size", "function", "api/cpp/x", "_CPPv4SZ"),
+    obj("pjrt::Function::x", "functionParam", "api/cpp/function", "_CPPv4X"),
 ]
 
 PY_OBJECTS = [
-    (
-        "jax2exec.export",
-        "export",
-        "function",
-        "api/python",
-        "jax2exec.export",
-        1,
-    ),
-    ("jax2exec.check", "check", "function", "api/python", "jax2exec.check", 1),
+    obj("jax2exec.export", "function", "api/python", "jax2exec.export"),
+    obj("jax2exec.check", "function", "api/python", "jax2exec.check"),
 ]
 
 
@@ -180,12 +122,8 @@ def test_qualified_exact_links(index):
 
 
 def test_unique_suffix_links_alias(index):
-    """``rt::lock_memory`` and ``workload::feedback`` are written that way.
-
-    Inside ``namespace pjrt`` or after a ``using``, the code a page shows is
-    not fully qualified.  A suffix that matches exactly one documented entity
-    is unambiguous, so it links; one that matches several does not.
-    """
+    """Inside ``namespace pjrt`` or after a ``using`` the code a page shows is
+    not fully qualified; a suffix matching exactly one entity links."""
     out = rewrite(names("rt", "lock_memory"), index)
     assert hrefs(out) == [("api/cpp/rt.html#_CPPv4LM", "pjrt::rt::lock_memory")]
 
@@ -202,8 +140,7 @@ def test_longest_prefix_wins(index):
         ("api/cpp/runtime.html#_CPPv4BO", "pjrt::LoadPolicy::BinaryOnly")
     ]
 
-    # Nothing documents cjfc::json::object, so only the documented prefix is
-    # wrapped and the tail is left as it was.
+    # Only the documented prefix is wrapped; the undocumented tail is left.
     out = rewrite(names("pjrt", "rt", "Status", "ok"), index)
     assert hrefs(out) == [("api/cpp/rt.html#_CPPv4S", "pjrt::rt::Status")]
     assert out.endswith('<span class="o">::</span><span class="n">ok</span>')
@@ -264,8 +201,7 @@ def test_strict_prefix_warns_and_ignore_silences(index):
     assert len(warnings) == 1
     assert "pjrt::nothing::here" in warnings[0]
 
-    # Not a strict prefix: an example's own namespace is not the reference's
-    # business.
+    # Not a strict prefix: an example's own namespace is not the reference's.
     warnings.clear()
     rewrite(
         names("basic", "foo"),

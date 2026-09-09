@@ -1,16 +1,11 @@
 """Cheap checks that the documentation still describes the code.
 
-Prose drifts silently.  Nothing fails when a dtype is added to the exporter
-and not to the table, or when a ``throw`` grows a new message that no page
-explains, or when a code sample's markers are renamed out from under a
-``literalinclude`` -- the docs simply become wrong, and stay wrong until a
-reader is misled by them.  These checks cost milliseconds and catch the
-kinds of drift that a human review reliably misses.
-
-None of them tries to check that the prose is *good*, only that the nouns in
-it still exist.  Where a rule cannot be enforced without guessing at intent
--- a marker that no page happens to use is perfectly legitimate -- it is
-reported as a warning instead of a failure.
+Nothing fails when a dtype is added to the exporter and not to the table,
+when a ``throw`` grows a message no page explains, or when a marker is
+renamed out from under a ``literalinclude``; the docs simply become wrong.
+None of this checks that the prose is *good*, only that the nouns in it
+still exist.  Where a rule cannot be enforced without guessing at intent it
+warns instead of failing.
 """
 
 from __future__ import annotations
@@ -22,10 +17,8 @@ import warnings
 
 import pytest
 
-#: Directories that are generated, vendored, built, or not the subject.
-#: ``tests`` is excluded because no page includes code from the suite, and
-#: scanning it would find this file's own regexes and report them as
-#: markers.
+#: Generated, vendored, built, or not the subject.  ``tests`` because a scan
+#: of it would find this file's own regexes and report them as markers.
 IGNORED = {
     "_build",
     "third_party",
@@ -60,57 +53,44 @@ START_AFTER = re.compile(
 #: A ``docs: begin <name>`` marker in a source file.
 MARKER = re.compile(r"docs: begin (\S+)")
 
-#: Below this many characters a message prefix is a fragment like ``" ('"``
-#: or ``"output "``, which would match half the page by accident and says
-#: nothing about whether the message itself is documented.
+#: Below this many characters a message prefix is a fragment like ``"output "``
+#: that would match half the page by accident.
 MIN_DISTINCTIVE = 12
 
-#: A fenced block and everything in it.  Code samples quote real numbers --
-#: a command line, a report, an included region -- and none of those is the
-#: page making a claim of its own.
+#: A fenced block and everything in it.  Code samples quote real numbers, and
+#: none of those is the page making a claim of its own.
 FENCE = re.compile(
     r"^([ \t]*)(```+|~~~+).*?^[ \t]*\2[ \t]*$", re.MULTILINE | re.DOTALL
 )
 
-#: The two pages that may carry a measured figure: the Developer guide, where
-#: the provenance is written down beside it, and the benchmarks page.
+#: The two homes of a measured figure.
 FIGURE_HOMES = ("docs/developer/", "docs/benchmarks.md")
 
 #: A duration: ``2027 us``, ``1.5 ms``, ``950,000 µs``.
 DURATION = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?\s*(?:µs|us|ms)\b")
 
-#: A ratio: ``2.4x``, ``4x``.  The trailing ``\b`` already excludes a size
-#: like ``1024x768``, where the ``x`` is followed by a digit.
+#: A ratio: ``2.4x``, ``4x``.  The ``\b`` excludes a size like ``1024x768``.
 RATIO = re.compile(r"(?<![\dx.])\d+(?:\.\d+)?x\b")
 
-#: How far below the H1 the assumes line may sit.  Three is the shape every
-#: page has today -- H1, blank, assumes -- and six leaves room for a label or
-#: a directive above it without letting the line drift out of the first
-#: screenful, which is the only place it does its job.
+#: How far below the H1 the assumes line may sit: room for a label or a
+#: directive above it, not enough to drift out of the first screenful.
 ASSUMES_WINDOW = 6
 
-#: What the opening line of the ``{glossary}`` directive says, so that its
-#: block can be picked out of :data:`FENCE`'s matches.  Inside it a term is
-#: flush against the left margin and its definition is indented under it.
+#: The opening line of the ``{glossary}`` directive, which picks its block out
+#: of :data:`FENCE`'s matches.  Inside it a term is flush left and its
+#: definition indented.
 GLOSSARY_DIRECTIVE = "{glossary}"
 
-#: A ``{term}`` reference, in either spelling: ``{term}`arena``` names the
-#: term directly, ``{term}`arenas <arena>``` displays one word and links
-#: another.
+#: A ``{term}`` reference in either spelling: ``{term}`arena``` or
+#: ``{term}`arenas <arena>```.
 TERM_ROLE = re.compile(r"\{term\}`(?P<text>[^`]*)`")
 
 #: The ``title <target>`` half of a reference, when it has one.
 TERM_TARGET = re.compile(r"^.*?<(?P<target>[^<>]*)>$", re.DOTALL)
 
-#: Numbers these patterns match that are not measurements of this project,
-#: and why each one is not.  Keyed by the text rather than by a line number,
-#: because a line number goes stale the next time a paragraph moves.
-#:
-#: Kept to what is actually excused today.  The kernel constants that used to
-#: sit here (the ``/dev/cpu_dma_latency`` values, ``sched_rt_period``) now
-#: appear only under ``docs/developer/``, which this rule exempts outright, so
-#: an entry for them would excuse nothing and would quietly widen the rule.
-#: Add one back when a page needs it, with the reason it is not a result.
+#: Matches that are not measurements of this project, and why.  Keyed by text
+#: rather than line number, because a line number goes stale when a paragraph
+#: moves.  Add an entry only with the reason it is not a result.
 NOT_A_MEASUREMENT = {
     ">2x": "the threshold in the rule, not a result",
 }
@@ -161,15 +141,10 @@ def throw_arguments(text):
 
 
 def message_prefixes(root):
-    """The documentable literal from each ``throw`` in the library.
-
-    The first string literal in the expression, which is the message's
-    literal prefix before it is concatenated with a path, an index or a
-    plugin's own words.  ``throw LoadError(path + " is not valid JSON: ")``
-    contributes the second half, since that is the part a reader can grep
-    for; anything shorter than :data:`MIN_DISTINCTIVE` is dropped as a
-    fragment rather than a message.
-    """
+    """The first string literal of each ``throw`` in the library: the part of
+    the message a reader can grep for, before a path or an index is appended.
+    Anything shorter than :data:`MIN_DISTINCTIVE` is a fragment, not a
+    message, and is dropped."""
     found = {}
     for path in sorted(pathlib.Path(root, "src/pjrt_exec").glob("*.cpp")):
         for expression in throw_arguments(path.read_text()):
@@ -188,23 +163,16 @@ def jax2exec():
 
 
 def test_every_supported_dtype_is_in_the_exporting_guide(repo, jax2exec):
-    """The dtype table is the contract; the guide is where it is read.
-
-    A type added to the exporter and not to the table is a type nobody
-    knows they may use.
-    """
+    """A type added to the exporter and not to the table is a type nobody
+    knows they may use."""
     guide = pathlib.Path(repo.root, "docs/guides/exporting.md").read_text()
     missing = [name for name in jax2exec.SUPPORTED_DTYPES if name not in guide]
     assert not missing, f"not in docs/guides/exporting.md: {missing}"
 
 
 def test_every_throw_message_has_a_row_in_the_debugging_guide(repo):
-    """Every distinct failure the loader can report is documented.
-
-    The table in docs/guides/debugging.md is the first thing anyone hits
-    when a load fails, and a message that is not in it sends the reader to
-    the source instead.
-    """
+    """Every distinct failure the loader can report has a row in the table
+    that is the first thing anyone hits when a load fails."""
     guide = pathlib.Path(repo.root, "docs/guides/debugging.md").read_text()
     prefixes = message_prefixes(repo.root)
     assert prefixes, "no throw messages found; did the sources move?"
@@ -218,47 +186,39 @@ def test_every_throw_message_has_a_row_in_the_debugging_guide(repo):
     )
 
 
-def test_every_included_marker_exists(repo):
-    """Each ``literalinclude`` resolves to a file and finds its marker.
-
-    A renamed marker does not break the docs build loudly; Sphinx emits a
-    warning and renders an empty block, so the page silently loses the code
-    it was written around.
-    """
-    broken = []
-    referenced = set()
-    for page in pages(repo.root):
-        text = page.read_text()
-        for block in INCLUDE.finditer(text):
-            target = (page.parent / block.group("path")).resolve()
+def included_markers(root):
+    """Each ``literalinclude``: page, path as written, target, marker."""
+    for page in pages(root):
+        for block in INCLUDE.finditer(page.read_text()):
+            spelled = block.group("path")
+            target = (page.parent / spelled).resolve()
             for name in START_AFTER.findall(block.group("options")):
-                referenced.add((target, name))
-                where = page.relative_to(repo.root)
-                if not target.is_file():
-                    broken.append(f"{where}: no such file {block.group(1)}")
-                elif f"docs: begin {name}" not in target.read_text():
-                    broken.append(
-                        f"{where}: no 'docs: begin {name}' in "
-                        f"{block.group('path')}"
-                    )
-    assert referenced, "no literalinclude markers found; did docs/ move?"
+                yield page, spelled, target, name
+
+
+def test_every_included_marker_exists(repo):
+    """Each ``literalinclude`` resolves to a file and finds its marker.  A
+    renamed marker only warns in Sphinx and renders an empty block."""
+    broken = []
+    found = 0
+    for page, spelled, target, name in included_markers(repo.root):
+        found += 1
+        where = page.relative_to(repo.root)
+        if not target.is_file():
+            broken.append(f"{where}: no such file {spelled}")
+        elif f"docs: begin {name}" not in target.read_text():
+            broken.append(f"{where}: no 'docs: begin {name}' in {spelled}")
+    assert found, "no literalinclude markers found; did docs/ move?"
     assert not broken, "\n".join(broken)
 
 
 def test_unused_markers_are_only_reported(repo):
-    """Markers no page includes are a warning, not a failure.
-
-    A marker kept for a page that has not been written yet, or one left
-    behind by a page that was restructured, is untidy rather than wrong --
-    and failing on it would push someone into deleting the marker instead
-    of writing the page.
-    """
-    referenced = set()
-    for page in pages(repo.root):
-        for block in INCLUDE.finditer(page.read_text()):
-            target = (page.parent / block.group("path")).resolve()
-            for name in START_AFTER.findall(block.group("options")):
-                referenced.add((target, name))
+    """A marker no page includes is untidy, not wrong; failing on it would
+    push someone into deleting the marker instead of writing the page."""
+    referenced = {
+        (target, name)
+        for _page, _spelled, target, name in included_markers(repo.root)
+    }
 
     unused = []
     for path in sources(repo.root):
@@ -286,22 +246,13 @@ def prose(text):
 def test_measured_figures_stay_under_developer_and_benchmarks(repo):
     """A latency or a ratio outside its home is a figure without a host.
 
-    The rule the site follows: a guide, an example page, a reference page or
-    the landing page states the *shape* of a result and links to the page
-    that holds the figure, because a number reprinted away from the machine
-    it was measured on cannot be checked, compared or refuted later.
-
-    Asserted, not warned.  It warned while the pages were being moved, which
-    was the right setting for a week and the wrong one afterwards: a warning
-    about a figure is itself the thing that gets copied forward.  What it
-    costs when it fires is a sentence rewritten to name a shape and link to
-    the page holding the number, or one allowlist entry saying why the match
-    is not a result.
-
-    Prose only: fenced blocks are blanked first, so a figure in sample
-    output or in a command line is not a claim the page is making.  The two
-    ``{include}`` pages (``changelog``, ``contributing``) are a fence each,
-    so what those files say is governed where they live, not here.
+    Every other page states the *shape* of a result and links to the page
+    holding the figure, because a number reprinted away from the machine it
+    was measured on cannot be checked, compared or refuted later.  Asserted,
+    not warned: a warning about a figure is itself the thing that gets copied
+    forward.  Prose only: fenced blocks are blanked first.  The two
+    ``{include}`` pages are a fence each, so what those files say is governed
+    where they live.
     """
     hits = []
     for page in pages(repo.root):
@@ -313,9 +264,8 @@ def test_measured_figures_stay_under_developer_and_benchmarks(repo):
             for pattern in (DURATION, RATIO):
                 for match in pattern.finditer(line):
                     found = match.group(0)
-                    # The match itself has to be part of the allowlisted
-                    # text, so a real figure sharing a line with a kernel
-                    # constant is still reported.
+                    # The match itself must be inside the excused text, so a
+                    # real figure sharing a line with one is still reported.
                     excused = any(
                         text in line and found in text
                         for text in NOT_A_MEASUREMENT
@@ -341,15 +291,9 @@ def entry_pages(root):
 
 
 def test_every_guide_and_example_page_states_what_it_assumes(repo):
-    """A reader arrives from a search engine, not from the page before.
-
-    Every guide and example page opens with an italic line saying what it
-    takes for granted and where the rest is, so that landing in the middle
-    of the site tells you immediately whether you are in the right place.
-    The line is a convention rather than a mechanism, which is exactly the
-    kind of thing that survives one pass and erodes over the next three, so
-    it is asserted.
-    """
+    """A reader arrives from a search engine, not from the page before, so
+    every guide and example opens with the italic *Assumes* line.  A
+    convention rather than a mechanism, which is why it is asserted."""
     missing = []
     for page in entry_pages(repo.root):
         lines = page.read_text().splitlines()
@@ -372,18 +316,11 @@ def test_every_guide_and_example_page_states_what_it_assumes(repo):
 
 
 def test_glossary_terms_are_used(repo):
-    """A term nothing links is a definition nobody reaches.
-
-    The glossary exists so that a guide can link a word on its first use
-    instead of defining it inline; a term no page references is either a
-    link that was never made or an entry that has outlived its page.  Both
-    are worth seeing and neither is worth failing a build over -- a term
-    added ahead of the page that will link it is legitimate -- so this
-    reports, like the unused-marker check.
-
-    Comparison is case-insensitive, as Sphinx's own glossary lookup is, and
-    the ``{term}`title <target>``` form is compared on its target.
-    """
+    """A term nothing links is a definition nobody reaches: either a link
+    never made or an entry that outlived its page.  Reported, not failed,
+    since a term added ahead of its page is legitimate.  Case-insensitive,
+    as Sphinx's lookup is, and the ``title <target>`` form is compared on
+    its target."""
     glossary = pathlib.Path(repo.root, "docs/background/glossary.md")
     blocks = [
         block.group(0)
@@ -420,14 +357,10 @@ def test_glossary_terms_are_used(repo):
 
 
 def test_no_substitution_is_wrapped_in_inline_code(repo):
-    """``{{ x }}`` inside backticks renders as those literal characters.
-
-    MyST does not substitute within inline code, and the result is valid
+    """MyST does not substitute inside inline code, and the result is valid
     markdown, so the build stays green while the page tells a reader the
-    fork branch is ``{{ xla_fork_branch }}``. It shipped that way to the
-    live site once. ``docs/conf.py`` publishes a ``<key>_code`` variant of
-    every value that carries its own backticks; use that instead.
-    """
+    branch is ``{{ xla_fork_branch }}``.  ``docs/conf.py`` publishes a
+    ``<key>_code`` variant of every value for this."""
     wrapped = re.compile(r"`\{\{\s*[a-z_]+\s*\}\}`")
     offenders = [
         f"{path.relative_to(repo.root)}:{number}: {line.strip()}"
@@ -445,11 +378,8 @@ def test_no_substitution_is_wrapped_in_inline_code(repo):
 
 def test_the_pinned_jax_version_agrees_everywhere(repo, jax2exec):
     """``versions.env`` is the single source of truth; the others follow it.
-
-    jax and jaxlib must match exactly, and the exporter refuses to run
-    against a version it was not tested with, so a pin that drifts here
-    turns into a refusal at export time rather than a subtle difference.
-    """
+    The exporter refuses a version it was not tested with, so a pin that
+    drifts turns into a refusal at export time."""
     env_text = pathlib.Path(repo.root, "versions.env").read_text()
     versions = dict(
         line.split("=", 1)

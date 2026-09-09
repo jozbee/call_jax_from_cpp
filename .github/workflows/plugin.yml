@@ -1,26 +1,16 @@
 # Build the PJRT CPU plugin from the XLA fork and publish it as a release
 # asset, one per architecture.
 #
-# What this costs, honestly: a from-scratch XLA CPU plugin build compiles LLVM
-# from source, and on a 4-vCPU hosted runner that takes hours. The primary
-# producer of release assets is tools/release_plugin.sh on a developer machine
-# with real cores and a warm bazel cache; this workflow is the reproducible
-# secondary path - it proves the tarball can be regenerated from nothing but
-# versions.env and the fork, and it fills in an architecture the developer
-# machine does not have. timeout-minutes is 355 because the hard job limit is
-# 360, and a job killed at the limit tells you nothing about why it was slow.
+# A from-scratch XLA build compiles LLVM, and on a 4-vCPU hosted runner that
+# takes hours. tools/release_plugin.sh on a developer machine is the primary
+# producer; this workflow is the reproducible secondary path, and fills in an
+# architecture the developer machine does not have. timeout-minutes is 355
+# because the hard limit is 360, and a job killed at the limit says nothing
+# about why it was slow.
 #
-# Action versions verified 2026-09-05 with
-#   gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
-# and each action.yml checked for its runtime, because Node 20 is removed from
-# GitHub runners in September 2026:
-#   actions/checkout             latest v7.0.1   pinned v7        node24
-#   bazel-contrib/setup-bazel    latest 0.19.0   pinned 0.19.0    node24
-#   actions/upload-artifact      latest v7.0.1   pinned v7        node24
-#   actions/download-artifact    latest v8.0.1   pinned v8        node24
-#   softprops/action-gh-release  latest v3.0.3   pinned v3        node24
-# bazel-contrib/setup-bazel publishes no floating major tag (its releases are
-# 0.x), so it is pinned to the exact release.
+# Action pins verified 2026-09-05 as in ci.yml. bazel-contrib/setup-bazel
+# publishes no floating major tag (its releases are 0.x), so it is pinned to
+# the exact release.
 
 name: plugin
 
@@ -56,9 +46,8 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 355
     strategy:
-      # One architecture failing must not cancel the other: a partial set can
-      # be published, and the missing architecture added later with
-      # tools/release_plugin.sh.
+      # One architecture failing must not cancel the other; the missing one
+      # can be added to the release later with tools/release_plugin.sh.
       fail-fast: false
       matrix:
         include:
@@ -67,10 +56,8 @@ jobs:
           - runner: ubuntu-24.04-arm
             arch: aarch64
     steps:
-      # This one needs the fork: third_party/xla is the tree bazel builds. It
-      # therefore only works once the fork branch is PUSHED. A commit that
-      # exists only locally cannot be fetched by anyone, including its author -
-      # see the lost-commit lesson in docs/developer/bumping-jax.md.
+      # With the submodule: third_party/xla is the tree bazel builds, so the
+      # fork branch must be pushed first (docs/developer/bumping-jax.md).
       - uses: actions/checkout@v7
         with:
           submodules: true
@@ -88,9 +75,8 @@ jobs:
             version="${REF_NAME#plugin-jax-v}"
           fi
           . ./versions.env
-          # build_plugin.sh names the tarball and fills PLUGIN_INFO.txt from
-          # versions.env, so a version that disagrees with the tree would
-          # publish assets whose names contradict the release tag.
+          # build_plugin.sh names the tarball from versions.env, so a version
+          # that disagrees with the tree would contradict the release tag.
           if [ "${version}" != "${JAX_VERSION}" ]; then
             echo "::error::asked for JAX ${version} but versions.env pins ${JAX_VERSION}; bump the tree first (docs/developer/bumping-jax.md)"
             exit 1
@@ -108,8 +94,8 @@ jobs:
             echo "fork ${XLA_FORK_BRANCH} @ ${fork_commit}"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # bazel wants ~25G for an XLA build and the runner root disk does not
-      # have it with the preinstalled toolchains in place.
+      # bazel wants ~25G; the root disk has less with the preinstalled
+      # toolchains in place.
       - name: Free disk space
         run: |
           set -euo pipefail
@@ -121,16 +107,14 @@ jobs:
       - name: Install the build dependencies
         run: |
           set -euo pipefail
-          # liblapack/libblas: the fork links jaxlib's LAPACK FFI kernels into
-          # the plugin, so the link step needs them. xxd and python3-dev are
-          # used by XLA's own build rules.
+          # liblapack/libblas for the fork's LAPACK FFI kernels; xxd and
+          # python3-dev for XLA's own build rules.
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             clang lld liblapack-dev libblas-dev xxd python3-dev
 
       # The hosted x86_64 runners mount a large temporary disk at /mnt; the
-      # arm64 image may not. build_plugin.sh passes BAZEL_STARTUP_ARGS through
-      # to bazel, so the output base moves without touching the script.
+      # arm64 image may not.
       - name: Point the bazel output base at /mnt when it exists
         run: |
           set -euo pipefail
@@ -144,15 +128,15 @@ jobs:
 
       - uses: bazel-contrib/setup-bazel@0.19.0
         with:
-          # XLA is the bazel module here, not the repository root: this is
-          # where .bazelversion and WORKSPACE live, and what the caches key on.
+          # XLA is the bazel module, not the repository root; the caches key
+          # on it.
           module-root: third_party/xla
           bazelisk-cache: true
           repository-cache: true
           disk-cache: plugin-${{ matrix.arch }}
           bazelrc: |
-            # 4 vCPU, and the LLVM link steps are memory-hungry enough to be
-            # OOM-killed if bazel assumes it owns all of RAM.
+            # 4 vCPU; the LLVM link steps are OOM-killed if bazel assumes all
+            # of RAM.
             build --jobs=4
             build --local_resources=memory=HOST_RAM*.7
 
@@ -162,15 +146,12 @@ jobs:
         run: |
           set -euo pipefail
           # No ARCH_FLAGS: release assets are built baseline so they run on any
-          # machine of that architecture. Serialized executables are the
-          # ISA-locked part, not the plugin.
+          # machine of that architecture; the artifacts are the ISA-locked part.
           tools/build_plugin.sh --package --mode "${BUILD_MODE}"
 
-      # Bazel's own disk-cache garbage collection is behind experimental flags
-      # whose availability depends on the Bazel version XLA pins, so the cap is
-      # applied here instead: trim to 5G before setup-bazel's post step saves
-      # the directory, or this cache alone evicts everything else the
-      # repository has under the 10G limit.
+      # Bazel's own disk-cache GC is behind experimental flags, so trim to 5G
+      # here before setup-bazel saves the directory: this cache alone would
+      # otherwise evict everything else under the repository's 10G limit.
       - name: Cap the bazel disk cache
         if: always()
         run: |
@@ -208,9 +189,8 @@ jobs:
   release:
     name: release
     needs: build
-    # !cancelled() rather than always(): publish whatever architectures did
-    # build - the missing one can be added to the same release later with
-    # tools/release_plugin.sh - but a cancelled run publishes nothing.
+    # !cancelled() rather than always(): publish whatever did build, but a
+    # cancelled run publishes nothing.
     if: ${{ !cancelled() && (github.event_name == 'push' || inputs.publish) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -273,6 +253,5 @@ jobs:
           # A release with no assets is a silent failure: the manifest row it
           # is meant to feed would point at nothing.
           fail_on_unmatched_files: true
-          # These are per-JAX-version toolchain assets, not the project's
-          # releases; "latest" must keep meaning the latest source release.
+          # "latest" must keep meaning the latest source release.
           make_latest: "false"

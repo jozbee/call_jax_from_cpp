@@ -1,20 +1,12 @@
 """The two periodic loops: ``example_03_minimal`` and ``example_04_realtime``.
 
-03 is the same loop with nothing around it, so the one thing asked of it
-here is that it runs and prints what it measured; everything below it is
-about 04's report.
-
-The structural assertions run everywhere.  The statistical ones are marked
+03 is the loop with nothing around it, so all that is asked of it is that it
+runs and prints what it measured; the rest is about 04's report.  The
+structural assertions run everywhere.  The statistical ones are marked
 ``rt`` and run only where the conftest's audit says the host is tuned and
-idle, because this project has measured what an untuned one does to them: at
-a 3 ms period the same artifact on the same core reports p50 2027 us, and at
-a 10 ms period 5196 us, the powersave governor clocking the core down while
-the loop idles between calls.  A fixed latency threshold in the default suite
-would be a test that fails on a healthy machine, which is worse than no test.
-
-``period_jitter_us`` is signed on purpose -- waking early is as much a
-scheduling defect as waking late -- so what is checked about it is that the
-field is present and numeric, never that it is positive.
+idle, because on an untuned host the same artifact's p50 moves with nothing
+but the caller's period (``docs/benchmarks.md``), and a test that fails on a
+healthy machine is worse than no test.
 """
 
 from __future__ import annotations
@@ -26,10 +18,9 @@ import re
 import helpers
 import pytest
 
-#: Every top-level key a schema-1 report must carry.  Checked as a set
-#: rather than one at a time: a report that silently stops writing its host
-#: audit is still valid JSON, and the missing provenance is exactly what
-#: makes a latency number unusable three weeks later.
+#: Every top-level key a schema-1 report must carry.  Checked as a set: a
+#: report that silently stops writing its host audit is still valid JSON, and
+#: the missing provenance is what makes a latency number unusable later.
 TOP_LEVEL_KEYS = frozenset(
     {
         "schema",
@@ -54,38 +45,25 @@ TOP_LEVEL_KEYS = frozenset(
 #: The four distributions, each of which must be a complete summary.
 SERIES = ("compute_us", "cycle_us", "wake_latency_us", "period_jitter_us")
 
-#: The control period every run in this file uses.  10 ms is comfortably
-#: above the ~2 ms the artifact takes, so a missed deadline means the
-#: schedule slipped rather than that the work did not fit.
+#: The control period every run here uses: comfortably above what the
+#: artifact takes, so a missed deadline means the schedule slipped.
 PERIOD_US = 10000
 
-#: Cycles for the census run.  Shorter than the timed one on purpose: the
-#: census counts allocations *per cycle*, which 300 establish as firmly as
-#: 2000 while costing seventeen fewer seconds.
+#: Cycles for the census run.  Allocations are counted per cycle, which 300
+#: establish as firmly as 2000.
 CENSUS_ITERATIONS = 300
 
-#: Gates for the ``rt`` mark only, and what a quiet, pinned, SCHED_FIFO run
-#: on a tuned host reaches.  This host does not, which is the entire reason
-#: they sit behind a marker.
+#: Gates for the ``rt`` mark only: what a quiet, pinned, SCHED_FIFO run on a
+#: tuned host reaches.
 MAX_P999_OVER_P50 = 1.3
 MAX_MAX_OVER_P50 = 2.0
 MAX_WAKE_P99_US = 100.0
 
-#: Hardening steps whose ``ok: false`` is not a failure of the host to
-#: provide something.  ``cpu_dma_latency`` needs write access to the device
-#: and is off unless asked for; ``corral_xla_threads`` reports this detail
-#: when it found no pool threads at all, which is a plugin that named none
-#: rather than a step that could not do its work.  Both are matched on the
-#: detail rather than waved through by name, so a corral that genuinely
-#: fails still fails the gate.
-#:
-#: This excuse used to be load-bearing for the wrong reason: it was written
-#: believing ``--threads 1`` created no pool threads, and it was silently
-#: covering a helper that found none on any host.  Reading
-#: ``/proc/<pid>/task/*/comm`` of a live run shows ``--threads N`` gives
-#: exactly N ``tf_XLAEigen`` threads, one included, so on this plugin the
-#: excuse should now never be needed -- and
-#: ``test_the_corral_finds_xlas_pool_threads`` is what says so.
+#: Hardening details whose ``ok: false`` is not the host failing to provide
+#: something.  ``cpu_dma_latency`` needs write access to the device and is
+#: off unless asked for; ``corral_xla_threads`` found no pool threads, which
+#: is a plugin that named none.  Matched on the detail, not waved through by
+#: name, so a corral that genuinely fails still fails the gate.
 NOT_A_FAILURE = {
     "cpu_dma_latency": ("needs root", "not requested", "not supported"),
     "corral_xla_threads": ("no XLA worker threads found",),
@@ -118,11 +96,8 @@ def iterations():
 def realtime(
     run, build, plugin, artifacts, tmp_path_factory, load_json, iterations
 ):
-    """One periodic run, shared by every test that reads its report.
-
-    Cached rather than repeated: 2000 cycles at 10 ms is twenty seconds of
-    wall clock, and every assertion below is about that same window anyway.
-    """
+    """One periodic run, shared by every test that reads its report: 2000
+    cycles at 10 ms is twenty seconds of wall clock."""
 
     def go():
         out = tmp_path_factory.mktemp("realtime") / "report.json"
@@ -155,13 +130,9 @@ def realtime_census(
 def test_minimal_loop_exits_zero_and_prints_two_summaries(
     run, build, plugin, artifacts
 ):
-    """``example_03_minimal`` runs its period and reports both distributions.
-
-    Structural only.  The minimal loop has no report to parse and no host
-    audit to gate on, so what is checked is that the artifact loaded, the
-    residual was computed, and each recorder printed a summary -- the failure
-    this catches is a copied file that compiles and then measures nothing.
-    """
+    """``example_03_minimal`` loaded, computed the residual, and each recorder
+    printed a summary: the failure this catches is a copied file that
+    compiles and then measures nothing."""
     result = run(
         [
             build.bin("example_03_minimal"),
@@ -202,13 +173,9 @@ def test_config_records_what_was_asked_for(realtime, iterations):
 
 
 def test_every_hardening_step_says_what_it_did(realtime):
-    """Each step reports whether it worked *and* why, in words.
-
-    A step with ``ok: false`` and an empty detail is the failure this cares
-    most about.  An unprivileged run is expected to lose some of these, and
-    the only thing that makes that survivable is the sentence saying which
-    one and what it would have needed.
-    """
+    """Each step reports whether it worked *and* why, in words.  An
+    unprivileged run is expected to lose some of these, and the sentence
+    saying which one and what it needed is what makes that survivable."""
     _, report = realtime
     hardening = report["hardening"]
     assert hardening, "no hardening steps were recorded"
@@ -222,20 +189,11 @@ def test_the_corral_finds_xlas_pool_threads(
 ):
     """``corral_xla_threads`` moves the threads XLA actually started.
 
-    Its own run, because the shared fixture asks for one worker thread and
-    pins the loop, and neither tells you much: what is being checked is that
-    the helper *finds* something, so the run asks for two workers and leaves
-    the affinity mask whole (``--cpu none``) so the corral has somewhere to
-    move them to.  Needs no privilege -- a thread's own affinity is not a
-    capability -- and Linux-only by way of the ``build`` fixture, which the
-    conftest skips elsewhere.
-
-    This is the test that was missing.  The helper matched thread names by a
-    prefix that XLA had stopped using, so it found nothing on every host and
-    said so in a sentence that reads like success ("no XLA worker threads
-    found (client not created?)").  Every assertion that existed passed
-    throughout.  Asserting on the count is what makes the difference
-    visible.
+    Its own run: two workers and the affinity mask left whole (``--cpu
+    none``), so the corral has something to find and somewhere to move it.
+    A helper matching a thread name XLA no longer uses finds nothing on every
+    host and says so in a sentence that reads like success, which is why the
+    count is asserted.
     """
     out = tmp_path / "corral.json"
     result = run(
@@ -247,10 +205,8 @@ def test_the_corral_finds_xlas_pool_threads(
     step = load_json(out)["hardening"]["corral_xla_threads"]
     assert step["ok"] is True, step["detail"]
 
-    # "moved 2 of 2 XLA threads" -- read as numbers rather than matched as a
-    # string, so a version of XLA that names more threads than were asked for
-    # still passes.  Two workers were requested; fewer than two found means
-    # the search is missing them again.
+    # "moved 2 of 2 XLA threads", read as numbers so a version of XLA that
+    # names more threads than were asked for still passes.
     counts = re.search(r"moved (\d+) of (\d+)", step["detail"])
     assert counts, f"unreadable detail: {step['detail']!r}"
     moved, seen = int(counts.group(1)), int(counts.group(2))
@@ -266,13 +222,9 @@ def test_every_cycle_was_recorded(realtime, iterations):
 
 @pytest.mark.parametrize("series", SERIES)
 def test_each_series_is_a_full_summary(realtime, series):
-    """All four distributions are present, numeric and ordered.
-
-    ``period_jitter_us`` is the one to be careful with: it is signed, so the
-    only honest check is that its numbers are numbers.  Requiring a positive
-    minimum would be requiring the loop never to wake early, which is not a
-    property anyone should want enforced.
-    """
+    """Present, numeric and ordered.  ``period_jitter_us`` is signed --
+    waking early is as much a defect as waking late -- so the only honest
+    check on it is that its numbers are numbers."""
     _, report = realtime
     summary = report[series]
     for field in ("min_us", "p50_us", "p99_us", "p999_us", "max_us"):
@@ -304,13 +256,8 @@ def test_no_major_faults(realtime):
 
 
 def test_the_census_measured_something(realtime_census):
-    """The guard was loaded, and could attribute what it saw.
-
-    ``guard_present: false`` is a record of "not measured", which must never
-    read as zero allocations: the two are indistinguishable in a green log
-    otherwise, and that is how an allocation-free claim quietly stops being
-    true.
-    """
+    """``guard_present: false`` is a record of "not measured", which must
+    never read as zero allocations."""
     result, report = realtime_census
     assert result.returncode == 0
     allocations = report["allocations"]
@@ -319,12 +266,8 @@ def test_the_census_measured_something(realtime_census):
 
 
 def test_the_loop_allocates_nothing_of_its_own(realtime_census):
-    """``self`` is the number that must be zero.
-
-    The plugin's own count is XLA thunk-runtime allocation -- structural,
-    about 9,750 per call on this artifact, and not reachable from this side
-    of the C API.
-    """
+    """``self`` is the number that must be zero; the plugin's count is XLA's
+    thunk runtime, not reachable from this side of the C API."""
     _, report = realtime_census
     allocations = report["allocations"]
     assert allocations["self"] == 0
@@ -335,11 +278,8 @@ def test_the_loop_allocates_nothing_of_its_own(realtime_census):
 
 @pytest.mark.rt
 def test_tail_ratios(realtime):
-    """p99.9/p50 and max/p50, on a host declared tuned and idle.
-
-    Not the mean: the mean of a control loop's call latency is the one
-    statistic that cannot tell you whether it will make its deadline.
-    """
+    """p99.9/p50 and max/p50, not the mean: the mean of a control loop's call
+    latency cannot tell you whether it will make its deadline."""
     _, report = realtime
     compute = report["compute_us"]
     assert compute["p999_over_p50"] <= MAX_P999_OVER_P50
@@ -361,13 +301,9 @@ def test_no_deadline_was_missed(realtime):
 
 @pytest.mark.rt
 def test_no_faults_and_few_involuntary_switches(realtime, iterations):
-    """Minor faults must be zero; involuntary switches must be rare.
-
-    A minor fault inside the window means ``mlockall`` did not hold, and an
-    involuntary context switch means something outranked a SCHED_FIFO loop.
-    The switch budget scales with the run rather than being a flat number,
-    since a longer run has proportionally more chances to be preempted.
-    """
+    """A minor fault inside the window means ``mlockall`` did not hold; an
+    involuntary switch means something outranked a SCHED_FIFO loop.  The
+    switch budget scales with the run."""
     _, report = realtime
     rusage = report["rusage"]
     assert rusage["minflt"] == 0
@@ -378,15 +314,8 @@ def test_no_faults_and_few_involuntary_switches(realtime, iterations):
 @pytest.mark.rt
 def test_hardening_succeeded(realtime):
     """Everything the loop asked the kernel for, and could have had, it got.
-
-    Two steps are exempt, and only for a stated reason rather than by name.
-    ``cpu_dma_latency`` needs write access to the device, so it is exempt
-    unless this process is root.  ``corral_xla_threads`` is exempt only when
-    it found no pool threads to move; a corral that fails for any other
-    reason still fails here.  That the threads are there to be found is
-    ``test_the_corral_finds_xlas_pool_threads``, which does not need the
-    ``rt`` mark to be worth running.
-    """
+    ``cpu_dma_latency`` is exempt unless this process is root; the other
+    exemptions are :data:`NOT_A_FAILURE`, matched on the detail."""
     _, report = realtime
     failed = {}
     for name, step in report["hardening"].items():
@@ -402,14 +331,9 @@ def test_hardening_succeeded(realtime):
 
 
 def test_run_realtime_script_audits_before_it_measures(run, repo, plugin):
-    """``run_realtime.sh`` prints the host audit first, then runs.
-
-    The order is the point, and is why this asserts on positions rather than
-    on mere presence: a latency figure whose provenance was written down
-    afterwards is one nobody can defend later.  Not marked ``rt`` -- the
-    script is expected to work on any host and to report what it could not
-    get, which is precisely what makes it worth having.
-    """
+    """``run_realtime.sh`` prints the host audit first, then runs.  Positions,
+    not presence: a latency figure whose provenance was written down
+    afterwards is one nobody can defend later."""
     launcher = repo.root / "examples/04_realtime/run_realtime.sh"
     if not launcher.is_file():
         pytest.skip(f"{launcher} is not in this checkout")

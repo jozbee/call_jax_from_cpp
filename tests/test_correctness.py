@@ -1,23 +1,18 @@
 """``bench``: does the fast path compute the same thing as the reference?
 
-The sweep is the load-bearing test here, and the reason it runs two passes
-is worth stating.  The steady-state path reuses one set of zero-copy input
-buffers for the life of a ``Function``, so what has to be exercised is
-*changing* the inputs between calls -- which a benchmark that feeds the same
-case every time never does.  Two passes, forwards then backwards, give every
-case a different predecessor: a buffer left stale by the previous call
-produces the right answer for exactly one ordering, and one pass would call
-that acceptable.
+The sweep runs two passes, forwards then backwards, so every case has a
+different predecessor.  The steady-state path reuses one set of zero-copy
+input buffers for the life of a ``Function``, and a buffer left stale by the
+previous call gives the right answer for exactly one ordering.
 
-Tolerances come from the fixture manifest rather than from a constant in this
-file.  They are what ``jax2exec.reference`` froze the cases with, and a test
-carrying its own copy would be free to drift away from what the exporter
-promised.
+Tolerances come from the fixture manifest, not from a constant here: they are
+what ``jax2exec.reference`` froze the cases with.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import re
 import struct
 from pathlib import Path
@@ -32,29 +27,28 @@ CASE_LINE = re.compile(r"^\s*pass (\d+) case (\d+):", re.MULTILINE)
 AGREEMENT = "all cases agree with the reference"
 
 
-def sweep_argv(build, artifacts, *extra, artifacts_dir=None):
+def sweep_argv(build, directory, *extra):
+    """The correctness sweep over the artifact set in @p directory."""
     return [
         build.bin("bench"),
         "--all-cases",
         "--fixture",
         "trajopt",
         "--assets-dir",
-        artifacts.dir,
+        directory,
         "--artifacts-dir",
-        artifacts_dir or artifacts.dir,
+        directory,
         *extra,
     ]
 
 
 @pytest.fixture
 def tolerance(artifacts, load_json):
-    """The loosest per-dtype tolerance the fixture manifest declares.
+    """The loosest per-dtype tolerance the manifest declares.
 
-    ``max_rel_err`` is a maximum over every floating element of every
-    output, float32 and float64 together, so the only number it can honestly
-    be compared against is the looser of the two.  Gating per dtype is
-    ``bench``'s own job, and its verdict -- ``correctness.ok`` -- is asserted
-    separately below.
+    ``max_rel_err`` is a maximum over float32 and float64 outputs together,
+    so the looser of the two is the only honest comparison; the per-dtype
+    gate is ``bench``'s own ``correctness.ok``, asserted separately.
     """
 
     def go():
@@ -72,7 +66,7 @@ def all_cases(run, build, plugin, artifacts):
     """The correctness sweep, shared by the tests that read it."""
 
     def go():
-        return run(sweep_argv(build, artifacts))
+        return run(sweep_argv(build, artifacts.dir))
 
     return helpers.cached("bench_all_cases", go)
 
@@ -110,12 +104,8 @@ def test_sweep_exits_zero(all_cases):
 
 
 def test_sweep_covers_every_case_twice(all_cases, artifacts, load_json):
-    """Two passes over all four cases, forwards then backwards.
-
-    Counting the lines rather than trusting the closing verdict: a sweep
-    that silently ran one pass would still print that everything agreed, and
-    the second pass is the half that catches a stale reused buffer.
-    """
+    """Two passes over every case, forwards then backwards -- counted, since
+    a sweep that ran one pass would still print that everything agreed."""
     n_cases = len(load_json(artifacts.trajopt_cases)["cases"])
     seen = CASE_LINE.findall(all_cases.stdout)
     assert len(seen) == 2 * n_cases, all_cases.stdout
@@ -132,13 +122,9 @@ def test_sweep_agrees_with_the_reference(all_cases):
 
 
 def test_every_case_is_within_tolerance(all_cases, tolerance):
-    """Each printed comparison, not only the summary line.
-
-    ``bench`` prints ``max rel err``, the exact mismatches and the NaN count
-    for every case; the NaN count is the one a maximum-of-relative-errors
-    check cannot see at all, since a NaN difference is not a large error but
-    an absent one.
-    """
+    """Each printed comparison, not only the summary line.  The NaN count is
+    the one a maximum-of-relative-errors check cannot see: a NaN difference
+    is not a large error but an absent one."""
     reported = re.findall(
         r"max rel err ([\d.e+-]+), (\d+) exact mismatches, (\d+) nan",
         all_cases.stdout,
@@ -151,13 +137,9 @@ def test_every_case_is_within_tolerance(all_cases, tolerance):
 
 
 def test_async_is_still_correct(run, build, plugin, artifacts):
-    """A plugin that ignores ``--async`` must still be right.
-
-    Whether the plugin honours the request is a latency question.  Whether
-    the answers are still correct is not negotiable either way, and this is
-    the test that says so.
-    """
-    result = run(sweep_argv(build, artifacts, "--async"))
+    """Whether the plugin honours ``--async`` is a latency question; whether
+    the answers are still right is not negotiable either way."""
+    result = run(sweep_argv(build, artifacts.dir, "--async"))
     assert result.returncode == 0
     assert AGREEMENT in result.stdout
 
@@ -182,13 +164,11 @@ def test_timed_run_is_within_tolerance(timed_run, tolerance):
     assert correctness["max_rel_err"] <= tolerance
 
 
-# --------------------------------------------------------------- negative controls
+# ------------------------------------------------------------ negative controls
 #
-# The tests above all assert that the comparison REPORTED agreement, which is
-# exactly what a comparator that never compares anything would print. These two
-# damage a reference case on purpose and require the sweep to notice. Without
-# them, `Fixture::compare` could be replaced by `return {.ok = true}` and the
-# whole suite would stay green -- which was true until these were written.
+# Everything above asserts that the comparison REPORTED agreement, which is
+# what a comparator that never compares would print too.  These damage a
+# reference case and require the sweep to notice.
 
 
 def _corrupt_case_output(base: Path, *, nan: bool) -> None:
@@ -211,12 +191,10 @@ def _corrupt_case_output(base: Path, *, nan: bool) -> None:
         "uint32": 4,
         "uint64": 8,
     }
-    offset = 0
-    for spec in manifest["inputs"]:
-        numel = 1
-        for extent in spec["shape"]:
-            numel *= extent
-        offset += numel * itemsize[spec["dtype"]]
+    offset = sum(
+        math.prod(spec["shape"]) * itemsize[spec["dtype"]]
+        for spec in manifest["inputs"]
+    )
 
     case = base.parent / manifest["cases"][0]
     raw = bytearray(case.read_bytes())
@@ -234,19 +212,7 @@ def test_a_damaged_reference_case_is_caught(
     base = tmp_artifacts.copy("trajopt")
     _corrupt_case_output(base, nan=nan)
 
-    result = run(
-        [
-            build.bin("bench"),
-            "--all-cases",
-            "--fixture",
-            "trajopt",
-            "--assets-dir",
-            base.parent,
-            "--artifacts-dir",
-            base.parent,
-        ],
-        check=False,
-    )
+    result = run(sweep_argv(build, base.parent), check=False)
 
     assert result.returncode != 0, (
         "bench reported agreement against a case whose output was corrupted; "
@@ -263,9 +229,9 @@ def test_a_fixture_wider_than_the_artifact_is_refused(
     """A manifest declaring a larger output than the artifact produces.
 
     The comparison reads `numel` elements straight out of the arenas the
-    `Function` owns, so a manifest that overstates an output used to read past
-    the end of one. `--assets-dir` and `--artifacts-dir` are separate options,
-    so pairing a manifest with a different export takes one wrong flag.
+    `Function` owns, so an overstated output would read past the end of one.
+    `--assets-dir` and `--artifacts-dir` are separate options, so pairing a
+    manifest with a different export takes one wrong flag.
     """
     base = tmp_artifacts.copy("trajopt")
     manifest_path = base.parent / f"{base.name}_cases.json"
@@ -278,19 +244,7 @@ def test_a_fixture_wider_than_the_artifact_is_refused(
     for case in sorted(base.parent.glob(f"{base.name}_case*.bin")):
         case.write_bytes(case.read_bytes() + b"\0" * (10 * 6 * 8))
 
-    result = run(
-        [
-            build.bin("bench"),
-            "--all-cases",
-            "--fixture",
-            "trajopt",
-            "--assets-dir",
-            base.parent,
-            "--artifacts-dir",
-            base.parent,
-        ],
-        check=False,
-    )
+    result = run(sweep_argv(build, base.parent), check=False)
 
     assert result.returncode != 0
     assert "different exports" in (result.stdout + result.stderr), (

@@ -1,10 +1,9 @@
 # docs: begin make-fragment
 # pjrt_exec.mk -- drop-in fragment for a Make-based consumer.
 #
-# This project is vendored, not installed: you check it out (submodule, subtree
-# or a plain copy), include this file, and build its three sources into your own
-# tree. Nothing here links against the PJRT plugin -- it is dlopen-ed at run
-# time -- so including this adds no link-time dependency beyond -ldl -lpthread.
+# Vendored, not installed: check the tree out, include this file, and build its
+# three sources into your own tree. Nothing links against the PJRT plugin, so
+# the only link-time dependency is -ldl -lpthread.
 #
 #   PJRT_EXEC_DIR   ?= third_party/call_jax_from_cpp   # default: this file's dir
 #   PJRT_EXEC_BUILD ?= build/pjrt_exec                 # where the .o files go
@@ -20,26 +19,23 @@
 # other variable and touches neither CPPFLAGS nor CXXFLAGS: your flags stay
 # yours, and the C++ standard must be at least C++17.
 
-# The location of this fragment, captured immediately: MAKEFILE_LIST keeps
-# growing as your makefiles are read, so `$(lastword ...)` means something else
-# by the time a deferred variable would expand it.
+# Captured immediately: MAKEFILE_LIST keeps growing as your makefiles are read,
+# so a deferred `$(lastword ...)` would name a different file.
 pjrt_exec_this := $(lastword $(MAKEFILE_LIST))
 PJRT_EXEC_DIR   ?= $(patsubst %/,%,$(dir $(pjrt_exec_this)))
 PJRT_EXEC_BUILD ?= $(PJRT_EXEC_DIR)/build
 
-# Including a fragment must not steal your default goal: make would otherwise
-# pick the library rule below, because it is the first explicit rule it reads.
-# An empty .DEFAULT_GOAL means "not chosen yet", so restoring the empty value
-# at the end of the file hands the choice back to the next target you define.
+# Including a fragment must not steal your default goal, which make would
+# otherwise take from the first rule below. An empty .DEFAULT_GOAL means "not
+# chosen yet", so restoring it at the end hands the choice back to your rules.
 pjrt_exec_saved_goal := $(.DEFAULT_GOAL)
 
-# Both include roots are needed: the public headers say #include "pjrt/..."
-# and #include "nlohmann/json.hpp", which resolve under third_party/.
+# Both roots: the public headers include "pjrt/..." and "nlohmann/json.hpp",
+# which live under third_party/.
 PJRT_EXEC_CPPFLAGS := -I$(PJRT_EXEC_DIR)/include -I$(PJRT_EXEC_DIR)/third_party
 
-# Optional: compile in the plugin location for a binary that must find it
-# without $PJRT_CPU_PLUGIN being set. Absolute, because a control binary is
-# rarely started from the directory that built it.
+# Optional: compile in the plugin location. Absolute, because a control binary
+# is rarely started from the directory that built it.
 ifneq ($(PJRT_EXEC_PLUGIN_PATH),)
 PJRT_EXEC_CPPFLAGS += -DPJRT_EXEC_DEFAULT_PLUGIN_PATH='"$(abspath $(PJRT_EXEC_PLUGIN_PATH))"'
 endif
@@ -59,8 +55,7 @@ $(PJRT_EXEC_LIB): $(PJRT_EXEC_OBJS)
 	@mkdir -p $(@D)
 	$(AR) rcs $@ $(PJRT_EXEC_OBJS)
 
-# Header dependencies for the fragment's own objects only; yours are your
-# business.
+# Header dependencies for the fragment's own objects only.
 -include $(PJRT_EXEC_OBJS:.o=.d)
 
 .DEFAULT_GOAL := $(pjrt_exec_saved_goal)

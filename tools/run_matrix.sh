@@ -4,13 +4,11 @@
 # row per (config, round).
 #
 # Configurations are interleaved in short rounds rather than run to completion
-# one after another: a sequential A/B drifts by a few percent as the CPU heats
-# up, which is the same order as the differences being measured.  Compare
-# medians across rounds, not single runs.
+# one after another: a sequential A/B drifts with CPU temperature by the same
+# order as the differences being measured. Compare medians across rounds.
 #
-# The machine must be otherwise idle.  A concurrent build saturating the cores
-# does not add a little noise to these numbers, it invalidates them, which is
-# why /proc/loadavg is printed before the first run and again after the last.
+# The machine must be otherwise idle: a concurrent build does not add noise to
+# these numbers, it invalidates them. /proc/loadavg is printed before and after.
 #
 # Usage:
 #   tools/run_matrix.sh [fixture] [iterations] [rounds] [csv]
@@ -27,8 +25,7 @@
 set -euo pipefail
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  # The header comment is the help text; stopping at the first non-comment line
-  # means there is no line range to keep in step with edits.
+  # The header comment is the help text; it ends at the first non-comment line.
   awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"
   exit 0
 fi
@@ -55,11 +52,9 @@ if awk -v l="$load_before" 'BEGIN { exit !(l > 0.5) }'; then
   echo
 fi
 
-# label:flags -- the axes are whether execution is inline (synchronous) and how
-# many threads XLA is allowed to use.  `tdefault` leaves PJRT_NPROC unset, which
-# is what a caller gets by accident; the numbered ones are what a control loop
-# should be pinned to.  The last row adds the real-time hardening (SCHED_FIFO,
-# mlockall, a pinned core) on top of the best-behaved configuration.
+# label:flags. The axes are inline vs async execution and the XLA thread count;
+# `tdefault` leaves it unset, which is what a caller gets by accident. The last
+# row adds the real-time hardening on top of the best-behaved configuration.
 # docs: begin matrix-configs
 CONFIGS=(
   "sync_t1:--threads 1"
@@ -81,8 +76,7 @@ if [[ -e "$CSV" ]]; then
   echo "      of them, including any from an earlier sweep"
 fi
 
-# Rounds are the OUTER loop on purpose: this is what interleaves the
-# configurations instead of running each one to completion in sequence.
+# Rounds are the outer loop: that is what interleaves the configurations.
 for round in $(seq 1 "$ROUNDS"); do
   for entry in "${CONFIGS[@]}"; do
     label="${entry%%:*}"
@@ -126,7 +120,9 @@ for r in rows:
 
 print(f"{'config':22s}" + "".join(f"{t:>9s}" for _, t in cols) + f"{'rounds':>8s}")
 for label, rs in by.items():
-    med = lambda k: statistics.median(float(x[k]) for x in rs)  # noqa: E731
+    def med(key):
+        return statistics.median(float(row[key]) for row in rs)
+
     cells = "".join(
         f"{med(k):9.3f}" if k == "max_over_p50" else f"{med(k):9.1f}"
         for k, _ in cols

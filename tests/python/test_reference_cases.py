@@ -1,15 +1,10 @@
 """The frozen results the C++ side is checked against.
 
-A C++ call path that runs is not the same as a C++ call path that is right.
-``write_reference_cases`` runs the function under JAX and writes, per case,
-every input and every output as raw bytes in call order, plus a manifest
-saying what those bytes are.  The C++ test then memcpys them into its arenas
-and compares -- so if the manifest and the bytes ever disagree, the strongest
-test in the suite starts comparing the wrong things.
-
-These tests read the bytes back the way that C++ reader does: from the
-manifest alone, with no header, no padding and no length prefixes, because
-that is exactly what is on disk.
+``write_reference_cases`` writes, per case, every input and every output as
+raw bytes in call order plus a manifest saying what those bytes are; if the
+two ever disagree, the strongest test in the suite compares the wrong
+things.  These read the bytes back the way the C++ reader does: from the
+manifest alone, with no header, no padding and no length prefixes.
 """
 
 from __future__ import annotations
@@ -21,26 +16,22 @@ import pytest
 
 jax = pytest.importorskip("jax", reason="freezing a reference case runs JAX")
 
-# Process-global, and set before anything traces: the reference bytes have to
-# be the widths the executable will really be handed.
+# Process-global, and before anything traces: the reference bytes have to be
+# the widths the executable will really be handed.
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
 import numpy as np
 from jax2exec import SCHEMA_VERSION
 
-# From the submodules rather than the package: see the note in
-# tests/python/test_exporter.py about the lazy loader's shadowed `export`.
+# From the submodules, not the package; see tests/python/test_exporter.py.
 from jax2exec.export import ExportError
 from jax2exec.reference import write_reference_cases
 
 
 def mixed(state, step, use_terminal):
-    """Three dtypes in, three dtypes out.
-
-    float64 for the quantity, int32 for a counter and bool for a mode flag:
-    the same mix the trajopt fixture has, small enough to check by hand.
-    """
+    """float64, int32 and bool in and out: the mix the trajopt fixture has,
+    small enough to check by hand."""
     scaled = state * jnp.where(use_terminal, 2.0, 0.5)
     return {
         "total": scaled.sum(),
@@ -49,7 +40,7 @@ def mixed(state, step, use_terminal):
     }
 
 
-#: Two cases, differing in every argument, so a reader that ignored the case
+#: Two cases differing in every argument, so a reader that ignored the case
 #: index or reused a buffer would produce identical bytes and be caught.
 CASES = (
     (np.arange(6.0).reshape(2, 3), np.int32(7), np.bool_(True)),
@@ -97,18 +88,15 @@ def test_manifest_describes_the_layout(frozen):
         "float64",
     ]
 
-    # Float32 gets more room than float64 because XLA is free to fuse and
+    # Float32 gets more room than float64: XLA is free to fuse and
     # reassociate, and two paths need not reassociate the same way.
     assert manifest["tolerance"]["float32"] > manifest["tolerance"]["float64"]
 
 
 @pytest.mark.parametrize("case", range(len(CASES)))
 def test_case_bytes_are_what_jax_computed(frozen, case):
-    """Read each case the way the C++ reader does, and recompute it.
-
-    Every array is read at the offset the manifest implies -- no header, no
-    padding -- and the file has to end exactly where the last output ends.
-    """
+    """Read each case the way the C++ reader does, and recompute it; the file
+    has to end exactly where the last output ends."""
     directory, manifest = frozen
     blob = (directory / manifest["cases"][case]).read_bytes()
 
@@ -138,17 +126,14 @@ def test_case_bytes_are_what_jax_computed(frozen, case):
                 err_msg=entry["name"],
             )
         else:
-            # Integers and bools have no tolerance to speak of: a counter that
-            # is one out is not a rounding difference.
+            # Integers and bools have no tolerance: a counter that is one out
+            # is not a rounding difference.
             np.testing.assert_array_equal(got, want, err_msg=entry["name"])
 
 
 def test_cases_differ(frozen):
-    """Two cases, two different files.
-
-    Cheap, and it catches the failure mode a round trip cannot: a writer that
-    froze case 0 twice would satisfy every assertion above.
-    """
+    """Two cases, two different files: a writer that froze case 0 twice would
+    satisfy every assertion above."""
     directory, manifest = frozen
     payloads = {(directory / name).read_bytes() for name in manifest["cases"]}
     assert len(payloads) == len(manifest["cases"])
@@ -172,12 +157,8 @@ def _read_case(blob: bytes, manifest: dict) -> tuple[list[np.ndarray], int]:
 
 
 def test_a_non_finite_output_is_refused(tmp_path):
-    """A NaN reference silently passes every relative-error comparison.
-
-    Every comparison against NaN is false, so nothing exceeds the tolerance and
-    the C++ comparison becomes a test that cannot fail.  Refusing to freeze one
-    is what keeps that from happening quietly.
-    """
+    """Every comparison against NaN is false, so a NaN reference would make
+    the C++ comparison a test that cannot fail."""
     with pytest.raises(ExportError, match="not finite"):
         write_reference_cases(
             lambda x: jnp.log(x),

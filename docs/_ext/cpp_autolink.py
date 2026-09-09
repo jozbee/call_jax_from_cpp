@@ -1,37 +1,21 @@
 """Turn qualified C++ names inside code blocks into links to the reference.
 
-A reader who arrives at the real-time loop meets ``pjrt::rt::harden_malloc``
-and ``cjfc::workload::feedback`` in a code block, and the prose around the
-block cannot name every identifier it shows without becoming a glossary.  This
-extension makes the code block link itself: after Sphinx has rendered a page,
-every qualified name and every unique member call in a C++ or Python
-highlight block is wrapped in an ``<a>`` pointing at the entry the reference
-already has for it.
+After Sphinx has rendered a page, every qualified name and every unique member
+call in a C++ or Python highlight block is wrapped in an ``<a>`` pointing at
+the entry the reference already has for it.  The targets come out of the
+Sphinx domains, so a link cannot go stale, and a name under a *strict prefix*
+(``pjrt::``, ``cjfc::``) with no reference entry is a warning, which ``-W``
+makes a build failure: a new helper shown on a page must be documented.
 
-Two properties are the reason it is worth having rather than writing the links
-by hand:
+Resolution is conservative, because a wrong link is worse than no link.  A
+run of components links only when its longest prefix resolves exactly or to
+exactly one documented suffix, so ``cjfc::json::object`` links only
+``cjfc::json``.  A member call links only when exactly one documented function
+in the project ends in that name, and never one of `SKIP_MEMBERS`.  A single
+unqualified identifier never links.
 
-* It cannot go stale.  The targets come out of the Sphinx domains, so a
-  renamed symbol takes its links with it and a deleted one stops being linked.
-* It is a build gate.  A name spelled with a *strict prefix* --
-  ``pjrt::`` or ``cjfc::`` -- that has no reference entry raises a warning, and
-  the docs build with ``-W``.  Showing a new helper in a documented region
-  therefore fails the build until the helper is documented.
-
-The resolution is deliberately conservative, because a wrong link is worse
-than no link:
-
-* A run of components links only when the longest prefix of it resolves
-  either exactly or to exactly one documented suffix.  The tail is left alone,
-  so ``pjrt::LoadPolicy::BinaryOnly`` links the enumerator, ``pjrt::rt::Status``
-  the struct, and ``cjfc::json::object`` only ``cjfc::json``.
-* A member call (``f.call()``, ``s.rec->record(``) links only when exactly one
-  documented *function* in the whole project ends in that name, and never when
-  the name is one of the standard-library-shaped ones in `SKIP_MEMBERS`.
-* A single unqualified identifier never links.
-
-Everything above the `setup` function is a pure function of its arguments and
-imports no Sphinx, so the behaviour can be tested without building a site.
+Everything above `setup` is a pure function of its arguments and imports no
+Sphinx, so it is tested without building a site.
 """
 
 from __future__ import annotations
@@ -40,10 +24,9 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 
-#: Member names common enough on standard-library types that a link from one
-#: would usually be a lie.  ``report`` is deliberately *absent*: more than one
-#: documented function ends in it, so the ambiguity rule already refuses it,
-#: and listing it here would hide the day that stops being true.
+#: Member names common on standard-library types, where a link would usually
+#: be a lie.  ``report`` is absent on purpose: the ambiguity rule already
+#: refuses it, and listing it here would hide the day that stops being true.
 SKIP_MEMBERS = frozenset(
     {
         "size",
@@ -72,10 +55,9 @@ SKIP_MEMBERS = frozenset(
 #: Domain object types that are not entities anyone can link to.
 _NOT_ENTITIES = frozenset({"functionParam", "templateParam"})
 
-# The HTML Pygments produces.  A qualified name is a run of name spans --
-# ``n``, ``nf``, ``nc``, ``nn``, ``nl`` -- separated by one operator span
-# holding ``::``; a member access is a ``p`` span holding ``.`` or an ``o``
-# span holding an escaped ``->``.
+# What Pygments emits: a qualified name is a run of name spans (``n``, ``nf``,
+# ``nc``, ``nn``, ``nl``) separated by an operator span holding ``::``; a
+# member access is a ``p`` span holding ``.`` or an ``o`` span holding ``->``.
 BLOCK = re.compile(
     r'<div class="highlight-(cpp|c\+\+|python)[^"]*">.*?</pre></div>\s*</div>',
     re.DOTALL,
@@ -99,7 +81,6 @@ class Target:
     """One entity a name can link to."""
 
     qualified: str
-    objtype: str
     docname: str
     anchor: str
 
@@ -140,7 +121,7 @@ def build_index(objects: Iterable[Sequence], sep: str = "::") -> Index:
             continue
         if name in index.by_name:
             continue
-        target = Target(name, objtype, docname, anchor)
+        target = Target(name, docname, anchor)
         index.by_name[name] = target
 
         components = name.split(sep)
@@ -356,10 +337,8 @@ def setup(app):
     )
     app.add_config_value("cpp_autolink_ignore", [], "html")
 
-    # The domains are stable once reading is done, so the two indexes are
-    # built once and reused for every page.  Keyed on the environment so that
-    # a rebuild in the same process (sphinx-autobuild) does not serve a stale
-    # one.
+    # Built once per environment: the domains are stable once reading is done,
+    # and keying on the env keeps sphinx-autobuild from serving a stale index.
     cache: dict[int, tuple[Index, Index]] = {}
 
     def indexes(env) -> tuple[Index, Index]:

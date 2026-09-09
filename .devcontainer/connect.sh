@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# Bring up the development container and drop into a shell.
-#
-# The compose file grants the privileges the real-time helpers need
-# (CAP_SYS_NICE, rtprio and memlock limits); a plain `docker run` does not.
+# Bring up the development container and drop into a shell. The compose file
+# grants the privileges the real-time helpers need; a plain `docker run` does
+# not.
 set -euo pipefail
 
 COMPOSE="$(cd "$(dirname "${BASH_SOURCE[0]}")/../docker" && pwd)/compose.yml"

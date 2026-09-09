@@ -1,50 +1,42 @@
 """Fixtures shared by the Python and the C++ halves of the suite.
 
-The C++ tests are pytest tests as well: each one builds a binary, runs it and
-reads what it printed.  Everything expensive is therefore session scoped and
-resolved exactly once -- the build, the plugin, the exported artifacts -- and
-everything that can be legitimately absent on a healthy machine produces a
-SKIP carrying the remedy rather than a failure.  A clone with no PJRT plugin
-should report a handful of skips, not a wall of errors; a test that cannot run
-its subject must never pass vacuously either, which is why nothing here
-degrades to a no-op assertion.
+The C++ tests are pytest tests too: each builds a binary, runs it and reads
+what it printed.  Everything expensive -- the build, the plugin, the exported
+artifacts -- is session scoped and resolved once.  Anything that can be
+legitimately absent on a healthy machine skips with the remedy, and nothing
+degrades to a no-op assertion: a test that cannot run its subject must not
+pass.
 
-The real-time gates are conditional for a measured reason.  On this
-developer host the same artifact on the same pinned core reports p50 2027 us
-at a 3 ms period and p50 5196 us at a 10 ms period, because the powersave
-governor clocks the core down while the loop idles.  A fixed latency
-threshold would fail on a perfectly healthy machine, so the ``rt`` marker runs
-only where the host has been audited as tuned and idle (see :func:`rt_strict`).
+The ``rt`` gates run only where the host has been audited as tuned and idle
+(:func:`rt_strict`).  On an untuned host the idle state between calls moves a
+latency by more than the thresholds (``docs/benchmarks.md``), so a fixed one
+would fail a healthy machine.
 
 Environment variables, all optional:
 
 ``CJFC_BUILD_DIR``
-    Build tree.  Default ``build`` under the repository root.
+    Build tree.  Default ``build``.
 ``CJFC_ARTIFACTS_DIR``
-    Where the exported artifacts live.  Default ``artifacts``.
+    Exported artifacts.  Default ``artifacts``.
 ``CJFC_REPORT_DIR``
-    Where binaries write JSON reports.  Default ``$CJFC_ARTIFACTS_DIR/reports``.
+    JSON reports.  Default ``$CJFC_ARTIFACTS_DIR/reports``.
 ``CJFC_BUILD_TOOL``
     ``make`` (default), ``cmake``, or ``none``.
 ``CJFC_SKIP_BUILD``
-    ``1`` to take the tree exactly as it stands.
+    ``1`` to take the tree as it stands.
 ``CJFC_SKIP_EXPORT``
-    ``1`` to reuse the artifacts already on disk instead of re-exporting.
+    ``1`` to reuse the artifacts on disk instead of re-exporting.
 ``CJFC_RT_STRICT``
-    ``1``/``0`` to force the real-time gates on or off, ahead of ``--rt-strict``.
+    ``1``/``0`` forces the real-time gates on or off; outranks ``--rt-strict``.
 ``PJRT_CPU_PLUGIN``
     The plugin to load, overriding ``$CJFC_BUILD_DIR/plugin``.
 ``PYTHON``
-    Interpreter for the export scripts.  Default: the one running pytest,
-    which under ``uv run pytest`` is the project's virtual environment.
+    Interpreter for the export scripts.  Default: the one running pytest.
 
-Relative paths in the ``CJFC_*`` variables are resolved against the repository
-root, not against pytest's working directory, so they mean the same thing the
-identically named ``make`` variables do.
-
-The helpers :func:`run`, :func:`load_json` and :func:`parse_kv_lines` exist
-both as module-level functions (``from conftest import parse_kv_lines``) and
-as fixtures of the same name, so a test can take whichever is less noise.
+Relative ``CJFC_*`` paths resolve against the repository root, not pytest's
+working directory, so they mean what the same ``make`` variables mean.
+:func:`run`, :func:`load_json` and :func:`parse_kv_lines` exist both as
+module-level functions and as fixtures of the same name.
 """
 
 from __future__ import annotations
@@ -64,15 +56,13 @@ from typing import Any
 
 import pytest
 
-#: The repository root: this file lives in ``tests/``.
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 #: What ``make plugin`` and ``tools/get_plugin.sh`` write.
 PLUGIN_FILE_NAME = "libpjrt_c_api_cpu_plugin.so"
 
-#: Fixtures whose presence means the test builds or runs a native binary.
-#: Those are Linux-only here -- the plugin this project publishes is an ELF
-#: shared object -- so collection skips any test that asks for one elsewhere.
+#: Requesting one of these means the test runs a native binary, which is
+#: Linux-only here: the published plugin is an ELF shared object.
 _BINARY_FIXTURES = frozenset({"build", "plugin", "guard_so"})
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
@@ -83,25 +73,11 @@ _FALSE = frozenset({"0", "false", "no", "off"})
 
 
 def _env_bool(name: str) -> bool | None:
-    """Read a tri-state flag from the environment.
+    """Read a tri-state flag: None when unset or empty, else a bool.
 
-    Parameters
-    ----------
-    name : str
-        Variable name.
-
-    Returns
-    -------
-    bool or None
-        None when unset or empty, so a caller can tell "not configured" from
-        "configured off" -- the difference between falling back to the
-        automatic real-time audit and being told to skip the gates outright.
-
-    Raises
-    ------
-    pytest.UsageError
-        For a value that is neither true-ish nor false-ish.  Guessing would
-        turn a typo into a silently skipped test suite.
+    None is distinct from False on purpose: unset falls back to the automatic
+    real-time audit, ``0`` skips the gates outright.  Anything else raises
+    rather than guesses, so a typo cannot silently skip the suite.
     """
     raw = os.environ.get(name)
     if raw is None or not raw.strip():
@@ -129,20 +105,19 @@ def _dir_from_env(name: str, default: Path) -> Path:
 
 
 def _export_python() -> list[str]:
-    """Return the interpreter to run the export scripts with, as argv.
+    """The interpreter for the export scripts, as argv.
 
-    ``$PYTHON`` is honoured because that is the escape hatch the Makefile
-    documents (``make PYTHON=python3 ...``).  The default is the interpreter
-    running pytest rather than ``uv run python``: ``uv`` comes from mise and is
-    not on PATH in a non-interactive shell, while ``uv run pytest`` has already
-    put us inside the environment that has JAX.
+    ``$PYTHON`` is the Makefile's escape hatch.  The default is the
+    interpreter running pytest, not ``uv run python``: ``uv`` is not on PATH
+    in a non-interactive shell, and ``uv run pytest`` is already inside the
+    environment that has JAX.
     """
     raw = os.environ.get("PYTHON", "").strip()
     return shlex.split(raw) if raw else [sys.executable]
 
 
 def _loadavg() -> tuple[float, float, float]:
-    """Return the 1, 5 and 15 minute load averages, or -1 where unavailable."""
+    """The 1, 5 and 15 minute load averages, or -1 where unavailable."""
     try:
         one, five, fifteen = os.getloadavg()
     except (OSError, AttributeError):  # pragma: no cover - not on Linux
@@ -151,14 +126,8 @@ def _loadavg() -> tuple[float, float, float]:
 
 
 def _in_container() -> bool:
-    """Whether this process is running inside a container.
-
-    The same three signals ``examples/common/rt_env.hpp`` and
-    ``tools/rt_check.sh`` use, so all three agree about one host.  It matters
-    for the real-time gates because the settings that decide the tail --
-    governor, isolcpus, nohz_full, C-states -- belong to the host kernel and
-    cannot be read, let alone fixed, from inside.
-    """
+    """The same three signals ``examples/common/rt_env.hpp`` and
+    ``tools/rt_check.sh`` use, so all three agree about one host."""
     return (
         Path("/.dockerenv").exists()
         or Path("/run/.containerenv").exists()
@@ -168,23 +137,17 @@ def _in_container() -> bool:
 
 def _parse_cpulist(text: str) -> tuple[int, ...]:
     """Parse a kernel cpulist (``0-3,8``) into cpu numbers."""
-    cpus: list[int] = []
-    for part in text.strip().split(","):
+    cpus: set[int] = set()
+    for part in text.split(","):
         part = part.strip()
         if not part or part == "(null)":
             continue
-        if "-" in part:
-            first, _, last = part.partition("-")
-            try:
-                cpus.extend(range(int(first), int(last) + 1))
-            except ValueError:
-                continue
-        else:
-            try:
-                cpus.append(int(part))
-            except ValueError:
-                continue
-    return tuple(sorted(set(cpus)))
+        first, _, last = part.partition("-")
+        try:
+            cpus.update(range(int(first), int(last or first) + 1))
+        except ValueError:
+            continue
+    return tuple(sorted(cpus))
 
 
 def _read_text(path: str | Path) -> str:
@@ -199,7 +162,6 @@ def _read_text(path: str | Path) -> str:
 
 
 def pytest_addoption(parser: pytest.Parser) -> None:
-    """Add the two switches that decide what the suite is allowed to run."""
     group = parser.getgroup("call_jax_from_cpp")
     group.addoption(
         "--runslow",
@@ -220,28 +182,16 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 @functools.cache
 def _auto_rt_strict() -> tuple[bool, str]:
-    """Decide, by measurement, whether this host may be gated on its tail.
+    """Decide whether this host may be gated on its tail, and say why.
 
-    Returns
-    -------
-    tuple of (bool, str)
-        Whether the gates should run, and why -- the reason goes into the skip
-        message, because "skipped" without a cause is indistinguishable from a
-        test that was quietly deleted.
-
-    Notes
-    -----
-    Three conditions, all necessary.  ``tools/rt_check.sh`` exits non-zero when
-    anything on the host is worth fixing (governor, PREEMPT_RT, isolcpus,
-    nohz_full, THP, rtprio, memlock).  A one-minute load average at or above
-    1.0 means something else is running, and a concurrent build does not add
-    noise to a tail measurement, it invalidates it: the same configuration
-    measured during a bazel build reported a p50 2.4x high and a max/p50 of
-    4.4 instead of 1.1.  A container can only see the host's kernel settings,
-    not set them.
-
-    Cached: the audit is a subprocess, and the answer cannot change usefully
-    within one session.
+    The reason goes into the skip message: "skipped" without a cause is
+    indistinguishable from a test that was quietly deleted.  Three conditions,
+    all necessary: ``tools/rt_check.sh`` finds nothing worth fixing; the
+    one-minute load is below 1.0, because a concurrent build does not add
+    noise to a tail measurement, it invalidates it
+    (``docs/developer/measurement.md``); and this is not a container, which
+    can see the host's settings but not set them.  Cached: the audit is a
+    subprocess, and the answer does not change within a session.
     """
     if platform.system() != "Linux":
         return False, f"this host runs {platform.system()}, not Linux"
@@ -274,7 +224,7 @@ def _auto_rt_strict() -> tuple[bool, str]:
 
 
 def _rt_strict_reason(config: pytest.Config) -> tuple[bool, str]:
-    """Return the strict-mode decision and the reason behind it."""
+    """The strict-mode decision and the reason behind it."""
     forced = _env_bool("CJFC_RT_STRICT")
     if forced is not None:
         return forced, f"$CJFC_RT_STRICT={'1' if forced else '0'}"
@@ -283,8 +233,7 @@ def _rt_strict_reason(config: pytest.Config) -> tuple[bool, str]:
     return _auto_rt_strict()
 
 
-#: How a skipped real-time gate explains itself.  The reason comes first
-#: because it is the part that differs between hosts.
+#: How a skipped real-time gate explains itself.
 _RT_SKIP = (
     "real-time gates are off: {why}. Turn them on with --rt-strict or "
     "CJFC_RT_STRICT=1, on a tuned and idle host"
@@ -294,23 +243,9 @@ _RT_SKIP = (
 def rt_strict(config: pytest.Config) -> bool:
     """Whether the real-time gates may assert on this host.
 
-    Parameters
-    ----------
-    config : pytest.Config
-        The session configuration, for the ``--rt-strict`` flag.
-
-    Returns
-    -------
-    bool
-        ``$CJFC_RT_STRICT`` when it is set, else true when ``--rt-strict`` was
-        passed, else the automatic audit in :func:`_auto_rt_strict`.
-
-    Notes
-    -----
-    The automatic answer is False on an ordinary developer machine, and that is
-    correct rather than a defect: a powersave governor, a shared timer tick and
-    no isolated cpus produce latencies that vary by 2.5x with nothing but the
-    caller's period.  Numbers measured there describe the machine, not the code.
+    ``$CJFC_RT_STRICT`` when set, else ``--rt-strict``, else the automatic
+    audit.  False on an ordinary developer machine is correct, not a defect:
+    numbers measured there describe the machine, not the code.
     """
     return _rt_strict_reason(config)[0]
 
@@ -318,13 +253,10 @@ def rt_strict(config: pytest.Config) -> bool:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Apply the three conditional skips.
+    """The three conditional skips: ``slow``, ``rt``, and native off Linux.
 
-    ``slow`` needs ``--runslow``; ``rt`` needs strict mode; and anything that
-    builds or launches a native binary needs Linux, because the plugin this
-    project publishes is an ELF shared object and the examples use Linux-only
-    scheduling calls.  A test is recognised as native by asking for one of the
-    fixtures that resolve a binary, a plugin or the preloadable guard.
+    A test is native when it asks for a fixture that resolves a binary, a
+    plugin or the preloadable guard.
     """
     if not config.getoption("--runslow"):
         skip_slow = pytest.mark.skip(
@@ -365,45 +297,20 @@ def run(
     env: Mapping[str, str | None] | None = None,
     timeout: float = 300.0,
     check: bool = True,
-    stdin: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command, capture its output, and report all of it on failure.
 
-    Parameters
-    ----------
-    cmd : Sequence or str
-        Argv.  A string is split with :mod:`shlex`; ``Path`` entries are
-        stringified, so ``run([build.bin("fn_info"), artifacts / "basic"])``
-        needs no conversions.
-    cwd : path-like, optional
-        Working directory.  Defaults to the repository root, which is where
-        every path in this suite is anchored.
-    env : Mapping, optional
-        Variables **added to** the current environment, not a replacement for
-        it: ``$PJRT_CPU_PLUGIN`` and ``$LD_PRELOAD`` have to survive, and so
-        does whatever ``uv run`` put there.  A value of None removes a
-        variable instead, which is the only way to guarantee a child runs with
-        nothing preloaded whatever the parent inherited.
-    timeout : float, optional
-        Seconds before the process is killed and the test fails.
-    check : bool, optional
-        Fail the test on a non-zero exit.  Pass False when the non-zero exit
-        is the thing being tested, then assert on the returned object.
-    stdin : str, optional
-        Text written to the process's standard input.
+    ``cmd`` is a string (split with :mod:`shlex`) or a sequence whose entries
+    are stringified, so ``Path`` values need no conversion.  ``env`` is
+    **added to** the current environment, not a replacement for it:
+    ``$PJRT_CPU_PLUGIN``, ``$LD_PRELOAD`` and whatever ``uv run`` set have to
+    survive.  A value of None removes a variable, the only way to guarantee a
+    child runs with nothing preloaded.  ``check=False`` returns a non-zero
+    exit instead of failing, for tests where the exit is the subject.
 
-    Returns
-    -------
-    subprocess.CompletedProcess
-        With ``stdout`` and ``stderr`` as text.
-
-    Notes
-    -----
-    The command line and any output are printed unconditionally.  pytest shows
-    captured output only for tests that fail, so this costs nothing on a green
-    run and means a red one arrives with the evidence attached -- which is the
-    difference between "the binary exited 1" and seeing the LoadError it
-    printed.
+    The command line and its output are printed unconditionally.  pytest
+    shows them only for a failing test, so a green run costs nothing and a
+    red one arrives with the LoadError it printed rather than "exited 1".
     """
     argv = shlex.split(cmd) if isinstance(cmd, str) else [str(c) for c in cmd]
     child_env = dict(os.environ)
@@ -419,7 +326,6 @@ def run(
             argv,
             cwd=str(cwd),
             env=child_env,
-            input=stdin,
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -477,31 +383,13 @@ def load_json(path: str | os.PathLike[str]) -> Any:
 def parse_kv_lines(stdout: str) -> dict[str, Any]:
     """Turn a binary's machine-parseable output into a dictionary.
 
-    Parameters
-    ----------
-    stdout : str
-        What the program printed.
-
-    Returns
-    -------
-    dict
-        Two line shapes are recognised, and everything else is ignored:
-
-        ``key=value``
-            One or more per line, whitespace separated, landing at the top
-            level: ``num_inputs=2 num_outputs=2`` gives two entries.
-        ``label: key=value ...``
-            A labelled group, landing as a nested dict under the label:
-            ``input[0]: dtype=float64 shape=[4,4] numel=16 nbytes=128``
-            gives ``result["input[0]"]["dtype"] == "float64"``.  A labelled
-            line with no ``key=value`` in it keeps its text verbatim, which is
-            what makes the debug checks readable:
-            ``result["debug_check[non_finite]"]`` is the whole message.
-
-        Values stay strings, deliberately.  ``shape=[4,4]`` has no obvious
-        number to convert to, and a test that wants an int should say so.
-        A repeated key takes the last value, so a binary that prints its
-        summary twice reports the second pass.
+    Two line shapes are recognised and everything else is ignored.
+    ``key=value`` pairs, several per line, land at the top level.
+    ``label: key=value ...`` lands as a nested dict under the label, and a
+    labelled line with no pair keeps its text verbatim, so that
+    ``result["debug_check[non_finite]"]`` is the whole message.  Values stay
+    strings -- ``shape=[4,4]`` has no obvious number to become -- and a
+    repeated key takes the last value.
     """
     parsed: dict[str, Any] = {}
     for raw in stdout.splitlines():
@@ -578,12 +466,7 @@ class Repo:
         return self.artifacts_dir / name
 
     def __fspath__(self) -> str:
-        """The repository root, so ``Path(repo, "versions.env")`` works.
-
-        A fixture that names a directory should be usable as one; the fields
-        above are for the tests that want a specific directory rather than the
-        root.
-        """
+        """The repository root, so ``Path(repo, "versions.env")`` works."""
         return str(self.root)
 
 
@@ -594,9 +477,7 @@ def repo() -> Repo:
     artifacts_dir = _dir_from_env("CJFC_ARTIFACTS_DIR", REPO_ROOT / "artifacts")
     report_dir = _dir_from_env("CJFC_REPORT_DIR", artifacts_dir / "reports")
 
-    # The binaries write reports with --json <path> and do not create the
-    # directory first; make declares it an order-only prerequisite for the
-    # same reason.
+    # The binaries write --json <path> without creating the directory.
     report_dir.mkdir(parents=True, exist_ok=True)
 
     return Repo(
@@ -622,11 +503,8 @@ class Build:
     tool: str
 
     def bin(self, name: str) -> Path:
-        """Return a built binary, failing with the target that produces it.
-
-        A binary missing after a successful build is a defect in the build, not
-        a reason to skip: the suite was told to build it and reported success.
-        """
+        """A built binary.  Missing after a successful build is a defect in
+        the build, not a reason to skip."""
         path = self.repo.bin(name)
         if not path.is_file():
             pytest.fail(
@@ -646,13 +524,9 @@ class Build:
 def build(repo: Repo) -> Build:
     """Build the library, the examples, the C++ tests, the guard and bench.
 
-    Honours ``$CJFC_BUILD_TOOL`` (``make``, ``cmake`` or ``none``) and
-    ``$CJFC_SKIP_BUILD=1``, which is what CI wants when a previous step already
-    built the tree, and what a bisect wants when the tree on disk is the point.
-
-    A build failure fails the tests loudly, with the compiler's output: the
-    alternative -- skipping -- would report a green run for a tree that does
-    not compile.
+    Honours ``$CJFC_BUILD_TOOL`` and ``$CJFC_SKIP_BUILD=1``.  A build failure
+    fails loudly with the compiler's output; skipping would report a green
+    run for a tree that does not compile.
     """
     tool = (os.environ.get("CJFC_BUILD_TOOL") or "make").strip().lower()
     if _env_bool("CJFC_SKIP_BUILD"):
@@ -662,15 +536,11 @@ def build(repo: Repo) -> Build:
 
     if tool == "make":
         command: list[str] = ["make", "-s"]
-        # Only pass the overrides that differ, so the command in the failure
-        # message is the one a reader can paste into a shell.
-        #
-        # `bench` has no phony target of its own and has to be named by path.
-        # make compares target names as strings, so the path must be spelled
-        # the way $(BIN_DIR) is: relative under the default BUILD_DIR, and
-        # absolute only when BUILD_DIR was overridden with an absolute path.
-        # `make /abs/path/build/bin/bench` against the default reports
-        # "Nothing to be done" and builds nothing at all.
+        # Only the overrides that differ, so the command in a failure message
+        # can be pasted into a shell.  `bench` has no phony target and is
+        # named by path, which must be spelled the way $(BIN_DIR) is: make
+        # compares target names as strings, and `make /abs/build/bin/bench`
+        # against the default BUILD_DIR reports "Nothing to be done".
         bench = Path("build") / "bin" / "bench"
         if repo.build_dir != repo.root / "build":
             command.append(f"BUILD_DIR={repo.build_dir}")
@@ -688,8 +558,8 @@ def build(repo: Repo) -> Build:
                 str(repo.root),
                 "-B",
                 str(repo.build_dir),
-                # The plugin is the `plugin` fixture's business, and a test
-                # session must not start a download of its own.
+                # The plugin is the `plugin` fixture's business; a test
+                # session must not start a download.
                 "-DPJRT_EXEC_FETCH_PLUGIN=OFF",
             ],
             ["cmake", "--build", str(repo.build_dir), "--parallel"],
@@ -711,12 +581,10 @@ def build(repo: Repo) -> Build:
 def plugin(repo: Repo) -> Path:
     """Resolve the PJRT CPU plugin, or skip the tests that need one.
 
-    Absent is a normal state for a fresh clone -- the plugin is a 100 MB
-    download or an hour of bazel, and nothing in the build depends on it -- so
-    this skips with the remedy instead of failing.  The runtime resolves the
-    same two sources in the same order (``$PJRT_CPU_PLUGIN``, then the path
-    compiled in at build time), so what this fixture finds is what a binary
-    started from this environment will open.
+    Absent is normal for a fresh clone -- the plugin is a download or an hour
+    of bazel -- so this skips with the remedy.  The runtime resolves the same
+    two sources in the same order: ``$PJRT_CPU_PLUGIN``, then the path
+    compiled in at build time.
     """
     from_env = os.environ.get("PJRT_CPU_PLUGIN", "").strip()
     if from_env:
@@ -736,13 +604,9 @@ def plugin(repo: Repo) -> Path:
             "fork, or set $PJRT_CPU_PLUGIN"
         )
 
-    # Publish it, so every binary these tests launch opens the plugin the
-    # fixture just resolved rather than the path compiled into it. Those are
-    # usually the same file, but not always: the build bakes in an absolute
-    # path, so a tree built on the host and then tested inside the container
-    # has binaries pointing at a directory that does not exist there. The
-    # environment variable outranks the compiled default, which is exactly the
-    # override it is for.
+    # Publish it, so every binary launched here opens this plugin rather than
+    # the absolute path baked in at build time: a tree built on the host and
+    # tested in the container points at a directory that does not exist there.
     os.environ["PJRT_CPU_PLUGIN"] = str(path)
     return path
 
@@ -792,9 +656,8 @@ class Artifacts:
 def _require_jax(python: Sequence[str]) -> None:
     """Skip unless ``python`` can import JAX.
 
-    ``find_spec`` rather than ``import jax``: this runs before every export and
-    importing JAX costs a couple of seconds, while the question asked is only
-    whether the module is installed at all.
+    ``find_spec`` rather than ``import jax``: this runs before every export,
+    importing JAX costs seconds, and the question is only whether it is there.
     """
     probe = (
         "import importlib.util, sys; "
@@ -823,12 +686,11 @@ def _require_jax(python: Sequence[str]) -> None:
 def artifacts(repo: Repo) -> Artifacts:
     """Export ``basic``, ``trajopt`` and ``arm``, and return where they landed.
 
-    A serialized executable embeds machine code for the host that produced it,
-    so artifacts are exported rather than committed, and re-exported by default
-    on every session -- the exporter is the thing half of these tests are
-    about.  ``CJFC_SKIP_EXPORT=1`` reuses what is on disk, but only when the
-    whole set is there: a partial set reused silently is how a test ends up
-    asserting against a sidecar from a different function.
+    A ``.binpb`` embeds machine code for the host that produced it, so
+    artifacts are exported per session rather than committed.
+    ``CJFC_SKIP_EXPORT=1`` reuses what is on disk, but only when the whole
+    set is there: a partial set reused silently ends in a test asserting
+    against a sidecar from a different function.
     """
     names = ("basic", "trajopt", "arm")
     wanted = [
@@ -845,38 +707,25 @@ def artifacts(repo: Repo) -> Artifacts:
     _require_jax(python)
     repo.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
-    # The Makefile does the same: an interpreter that has jax but not this
-    # package installed still has to find jax2exec in the source tree.
+    # As the Makefile does: an interpreter that has jax but not this package
+    # still has to find jax2exec in the source tree.
     pythonpath = os.pathsep.join(
         p for p in (str(repo.python_dir), os.environ.get("PYTHONPATH", "")) if p
     )
     env = {"PYTHONPATH": pythonpath}
     out = str(repo.artifacts_dir)
-    run(
-        [*python, "examples/01_basic/export.py", "--out", out],
-        cwd=repo.root,
-        env=env,
-        timeout=900,
-    )
-    run(
-        [
-            *python,
-            "examples/02_trajopt/export.py",
-            "--out",
-            out,
-            "--cases",
-            "4",
-        ],
-        cwd=repo.root,
-        env=env,
-        timeout=900,
-    )
-    run(
-        [*python, "examples/05_ros2_control/export.py", "--out", out],
-        cwd=repo.root,
-        env=env,
-        timeout=900,
-    )
+    exports = {
+        "examples/01_basic/export.py": (),
+        "examples/02_trajopt/export.py": ("--cases", "4"),
+        "examples/05_ros2_control/export.py": (),
+    }
+    for script, extra in exports.items():
+        run(
+            [*python, script, "--out", out, *extra],
+            cwd=repo.root,
+            env=env,
+            timeout=900,
+        )
 
     missing = [str(p) for p in wanted if not p.is_file()]
     if missing:
@@ -894,9 +743,8 @@ def artifacts(repo: Repo) -> Artifacts:
 def guard_so(repo: Repo) -> Path:
     """The preloadable allocation counter, or a skip.
 
-    It is never linked, only ``LD_PRELOAD``-ed, and the binaries resolve its
-    markers with ``dlsym`` and no-op when it is absent.  Request ``build`` as
-    well if the test should build it rather than find it.
+    Never linked, only ``LD_PRELOAD``-ed.  Request ``build`` as well if the
+    test should build it rather than find it.
     """
     path = repo.lib_dir / "malloc_guard.so"
     if not path.is_file():
@@ -924,20 +772,10 @@ class Host:
 
     @property
     def busy(self) -> bool:
-        """Whether the session started on a machine that was already loaded.
-
-        The same threshold ``examples/common/rt_env.hpp`` uses, so a C++ report
-        and a Python skip message never disagree about one host.
-        """
+        """Whether the session started on a loaded machine.  The threshold is
+        ``examples/common/rt_env.hpp``'s, so a C++ report and a Python skip
+        never disagree about one host."""
         return self.loadavg[0] > 1.0
-
-    def current_loadavg(self) -> tuple[float, float, float]:
-        """Re-read the load average now.
-
-        The snapshot above is from session start; a test about to measure
-        something wants the number for the moment it measures it.
-        """
-        return _loadavg()
 
 
 @pytest.fixture(scope="session")
@@ -962,15 +800,12 @@ def host() -> Host:
 class TmpArtifacts:
     """Copies of an artifact set that a test may damage on purpose.
 
-    The loader's refusals are half its value -- a stale sidecar used to be a
-    heap-overrun class of bug -- and every one of them needs an artifact that
-    is wrong in a specific way.  Damaging the originals in ``artifacts/`` would
-    poison every later test in the session, so each copy lands in its own
-    directory under ``tmp_path``.
+    Each of the loader's refusals needs an artifact wrong in a specific way,
+    and damaging ``artifacts/`` would poison every later test in the session.
     """
 
-    #: Extensions that make up one artifact set.  ``.mlirbc`` is optional:
-    #: `export(write_mlir=False)` produces a set without it.
+    #: One artifact set.  ``.mlirbc`` is optional: ``export(write_mlir=False)``
+    #: produces a set without it.
     SUFFIXES = (".binpb", ".mlirbc", ".json")
 
     def __init__(self, source: Path, root: Path) -> None:
@@ -979,19 +814,8 @@ class TmpArtifacts:
         self._made = 0
 
     def copy(self, name: str = "basic") -> Path:
-        """Copy an artifact set into a fresh directory.
-
-        Parameters
-        ----------
-        name : str, optional
-            Base name of the set, e.g. ``basic`` or ``trajopt``.
-
-        Returns
-        -------
-        Path
-            The base path of the copy, without an extension -- which is what
-            ``pjrt::Runtime`` is handed.
-        """
+        """Copy an artifact set into a fresh directory and return its base
+        path -- no extension, as ``pjrt::Runtime`` is handed it."""
         into = self._root / f"copy{self._made}"
         self._made += 1
         into.mkdir(parents=True, exist_ok=True)
@@ -1009,9 +833,7 @@ class TmpArtifacts:
                 "exports one"
             )
 
-        # The reference cases travel with the artifact when there are any, so a
-        # test can damage a case without touching the originals every later
-        # test reads.
+        # The reference cases travel with the copy, so a test can damage one.
         manifest = self._source / f"{name}_cases.json"
         if manifest.is_file():
             shutil.copy2(manifest, into / manifest.name)
@@ -1020,68 +842,40 @@ class TmpArtifacts:
 
         return into / name
 
-    def sidecar(self, base: Path) -> dict[str, Any]:
-        """Read the sidecar of a copy."""
-        return load_json(base.with_suffix(".json"))
-
-    def write_sidecar(self, base: Path, sidecar: Mapping[str, Any]) -> None:
-        """Write a sidecar back, in the layout the exporter writes."""
-        text = json.dumps(sidecar, indent=2, sort_keys=False) + "\n"
-        base.with_suffix(".json").write_text(text, encoding="utf-8")
-
     def edit_sidecar(
         self, base: Path, mutate: Callable[[dict[str, Any]], None]
     ) -> dict[str, Any]:
-        """Apply ``mutate`` to the sidecar in place and write it back.
-
-        Returns the sidecar as written, so a test can assert on what it did.
-        """
-        sidecar = self.sidecar(base)
+        """Apply ``mutate`` to the sidecar, write it back, and return it."""
+        path = base.with_suffix(".json")
+        sidecar = load_json(path)
         mutate(sidecar)
-        self.write_sidecar(base, sidecar)
+        path.write_text(json.dumps(sidecar, indent=2) + "\n", encoding="utf-8")
         return sidecar
 
-    def drop_output(self, base: Path, index: int = -1) -> dict[str, Any]:
-        """Remove one output from the sidecar, renumbering the rest.
+    def drop_output(self, base: Path) -> dict[str, Any]:
+        """Remove the last output from the sidecar, renumbering the rest.
 
-        The executable still returns what it always returned, so the sidecar
-        now under-declares -- the disagreement the loader checks for, and the
-        one the PJRT C API can actually see, since it answers
-        ``PJRT_Executable_NumOutputs`` but has no query for the inputs.
+        The executable still produces it, so the sidecar now under-declares:
+        the disagreement the loader checks for, and the one the C API can
+        see (it answers ``PJRT_Executable_NumOutputs``; there is no query for
+        the inputs).
         """
 
         def mutate(sidecar: dict[str, Any]) -> None:
             outputs = sidecar.get("outputs")
             if not outputs:
                 pytest.fail(f"{base}.json declares no outputs to drop")
-            outputs.pop(index)
+            outputs.pop()
             for position, entry in enumerate(outputs):
                 entry["index"] = position
 
         return self.edit_sidecar(base, mutate)
 
-    def truncate_executable(
-        self, base: Path, *, keep: int | None = None
-    ) -> Path:
-        """Cut the ``.binpb`` short, leaving a file no plugin can deserialize.
-
-        Parameters
-        ----------
-        base : Path
-            Base path from :meth:`copy`.
-        keep : int, optional
-            Bytes to keep.  Default: half the file, which is past any header
-            and firmly inside the executable.
-
-        Returns
-        -------
-        Path
-            The truncated file.
-        """
+    def truncate_executable(self, base: Path) -> Path:
+        """Cut the ``.binpb`` to half: past any header, inside the code."""
         path = base.with_suffix(".binpb")
         data = path.read_bytes()
-        cut = len(data) // 2 if keep is None else max(0, min(keep, len(data)))
-        path.write_bytes(data[:cut])
+        path.write_bytes(data[: len(data) // 2])
         return path
 
     def remove(self, base: Path, suffix: str) -> Path:

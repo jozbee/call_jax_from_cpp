@@ -1,27 +1,23 @@
 #!/usr/bin/env bash
 #
-# Audit the host settings that decide whether a bounded computation actually
-# finishes on time.  Read-only: it reports, it does not change anything.
-#
-# Run this before trusting any latency number from a machine, and keep the
-# output next to the numbers -- "p99.9 was 4.8 ms" means little without knowing
-# whether the governor was on `powersave` at the time.
+# Audit the host settings that decide whether a bounded computation finishes
+# on time. Read-only. Run it before trusting a latency number from a machine,
+# and keep the output next to the number: a p99.9 means little without knowing
+# what the governor was at the time.
 #
 # Usage:
 #   tools/rt_check.sh [--quiet]
 #
 #   --quiet  print only the summary line (for use in a report header).
 #
-# Exit status is non-zero when anything is worth fixing, so this can gate a
-# measurement run.  The output is grouped into greppable sections: cpu, kernel,
-# isolation, memory, process limits, container.
+# Exits non-zero when anything is worth fixing, so it can gate a run. Sections:
+# cpu, kernel, isolation, memory, process limits, container.
 
 set -euo pipefail
 
 QUIET=0
 
-# The header comment is the help text, and stopping at the first non-comment
-# line means there is no line range to keep in step with edits.
+# The header comment is the help text; it ends at the first non-comment line.
 usage() { awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; }
 
 while [[ $# -gt 0 ]]; do
@@ -62,8 +58,7 @@ fi
 
 echo "cpu"
 info "cores: $(nproc)"
-# `|| true`: no cpufreq at all (a VM, or a kernel without the driver) is a
-# reportable state, not a reason to abort the audit.
+# No cpufreq at all (a VM) is a finding, not a reason to abort.
 governors=$(cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor 2>/dev/null \
             | sort -u | tr '\n' ' ' || true)
 if [[ -z "$governors" ]]; then
@@ -74,7 +69,6 @@ else
   bad "scaling governor: $governors (want: performance)"
 fi
 
-# Frequency scaling and deep idle states both trade wake-up latency for power.
 if [[ -r /sys/devices/system/cpu/intel_pstate/no_turbo ]]; then
   if [[ "$(cat /sys/devices/system/cpu/intel_pstate/no_turbo)" == "1" ]]; then
     ok "turbo disabled (consistent clocks)"
@@ -108,7 +102,6 @@ else
   fi
 fi
 
-# Real-time throttling is a foot-gun with a 50 ms edge, not a gradual one.
 rt_runtime=$(read_or /proc/sys/kernel/sched_rt_runtime_us unavailable)
 rt_period=$(read_or /proc/sys/kernel/sched_rt_period_us unavailable)
 if [[ "$rt_runtime" == "-1" ]]; then
@@ -194,8 +187,9 @@ else
 fi
 
 echo
-echo "=== $pass ok, $warn worth fixing ==="
+summary="=== $pass ok, $warn worth fixing ==="
+echo "$summary"
 if [[ "$QUIET" == 1 ]]; then
-  echo "=== $pass ok, $warn worth fixing ===" >&3
+  echo "$summary" >&3
 fi
 [[ "$warn" -eq 0 ]]

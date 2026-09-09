@@ -1,13 +1,7 @@
-"""The one helper in ``conftest`` with logic worth pinning down.
-
-:func:`conftest.parse_kv_lines` turns what the C++ binaries print into a
-dictionary, and every assertion the integration tests make about a binary
-goes through it.  A parser that quietly returned an empty dict would turn
-those into tests that cannot fail, so the two line shapes it claims to
-recognise are checked here against real output.
-
-The lines below are copied from ``example_01_basic``, verbatim.
-"""
+"""``conftest.parse_kv_lines``, checked against real ``example_01_basic``
+output.  Every assertion the integration tests make about a binary goes
+through it, and a parser that quietly returned an empty dict would turn
+those into tests that cannot fail."""
 
 from __future__ import annotations
 

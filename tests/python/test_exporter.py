@@ -1,16 +1,10 @@
 """What ``jax2exec.export`` writes, and what it refuses to write.
 
 The sidecar is the only description of an executable's parameters that
-exists: the PJRT C API answers ``PJRT_Executable_NumOutputs`` and the output
-types, but has no query for the inputs at all.  Everything the C++ loader
-believes about the input arenas -- how many, how wide, what to call them --
-comes from this file's subject, so these tests assert on the sidecar field by
-field rather than on "an export happened".
-
-The refusals get the same weight as the successes.  Each one exists because
-the alternative is a C++ caller writing into an arena of the wrong width and
-discovering it as corrupted output somewhere else, which is why every
-rejection is also checked to leave nothing on disk.
+exists -- the PJRT C API has no query for the inputs at all -- so these
+assert on it field by field.  The refusals get the same weight as the
+successes, and every rejection is also checked to leave nothing on disk:
+the alternative is a C++ caller writing into an arena of the wrong width.
 """
 
 from __future__ import annotations
@@ -25,9 +19,8 @@ import pytest
 jax = pytest.importorskip("jax", reason="the exporter is JAX")
 jaxlib = pytest.importorskip("jaxlib")
 
-# Before anything is traced, and process-global: without it JAX narrows every
-# float64 to float32 silently, which is the trap `test_x64_narrowing_*` below
-# exercises -- in a subprocess, because flipping this back is not possible.
+# Process-global, and before anything traces: without it JAX narrows every
+# float64 to float32 silently, the trap `test_x64_narrowing_*` exercises.
 jax.config.update("jax_enable_x64", True)
 
 import jax.numpy as jnp
@@ -36,26 +29,20 @@ from jax2exec import SCHEMA_VERSION, SUPPORTED_DTYPES
 from jax2exec._dtypes import SUPPORTED_SUMMARY
 from jax2exec._sidecar import TOOL_NAME, TOOL_VERSION
 
-# Imported from the submodule rather than from the package, deliberately:
-# `from jax2exec import ExportError, export` binds `export` to the *module*
-# of that name, not to the function, whenever another lazily loaded attribute
-# is touched first.  That is a live defect in the package's lazy loader --
-# `test_export_survives_a_lazy_sibling_import` below records it -- and this
-# import route is unambiguous either way.
+# From the submodule, not the package: `export` is both a submodule and the
+# function it defines, and this route is unambiguous whichever lazy attribute
+# the session touched first.
 from jax2exec.export import ExportError, export
 
-#: The repository root; this file is ``tests/python/test_exporter.py``.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-#: Element types XLA has and this project deliberately does not.  A C++ caller
-#: has no way to spell them, so the exporter names them rather than letting
-#: bytes be reinterpreted downstream.
+#: Element types XLA has and this project does not: a C++ caller has no way
+#: to spell them.
 UNSUPPORTED = ("float16", "bfloat16", "complex64")
 
 
-#: A fresh interpreter importing the public API the way an editor's import
-#: sorter writes it: names within one ``from`` statement come out
-#: alphabetically, with ``export`` last.
+#: A fresh interpreter importing the public API the way an import sorter
+#: writes it, with ``export`` last.
 _PUBLIC_IMPORT = """
 from jax2exec import ExportError, export
 
@@ -65,15 +52,9 @@ print(f"callable={callable(export)}")
 
 
 def test_export_survives_a_lazy_sibling_import(run):
-    """``from jax2exec import ExportError, export`` must give the function.
-
-    Run in a subprocess because the answer depends on which lazy attribute the
-    process touched first, and by the time this test runs the session has
-    touched several.  The examples in this repository happen to import
-    ``export`` first and so are unaffected; a caller who does not, or whose
-    formatter sorts the names, gets ``TypeError: 'module' object is not
-    callable`` from the documented public API.
-    """
+    """``from jax2exec import ExportError, export`` must give the function,
+    not the submodule.  In a subprocess because the answer depends on which
+    lazy attribute the process touched first."""
     completed = run(
         [sys.executable, "-c", _PUBLIC_IMPORT],
         env={"PYTHONPATH": str(REPO_ROOT / "python")},
@@ -84,11 +65,8 @@ def test_export_survives_a_lazy_sibling_import(run):
 
 
 def two_in_two_out(matrix, vector):
-    """A matrix, a vector, and a result that depends on both.
-
-    Every input has to reach an output or XLA drops it from the executable and
-    the exporter refuses, so the smallest honest example still multiplies.
-    """
+    """A matrix, a vector, and a result that depends on both: an input that
+    reaches no output is dropped by XLA and refused by the exporter."""
     scaled = matrix @ vector
     return {"scaled": scaled, "total": scaled.sum()}
 
@@ -123,8 +101,7 @@ def test_sidecar_identifies_itself(exported):
 
 
 def test_sidecar_records_the_exporting_host(exported):
-    """The host block is what the loader compares against before it opens a
-    file: a ``.binpb`` embeds machine code for the machine that produced it."""
+    """The host block the loader compares against before it opens a file."""
     export_block = exported.metadata["export"]
     assert export_block["x64_enabled"] is True
     host = export_block["host"]
@@ -158,8 +135,8 @@ def test_sidecar_describes_every_array(exported):
             assert entry["numel"] == max(
                 1, int(np.prod(entry["shape"], dtype=np.int64))
             )
-            # nbytes is what the loader allocates and what a caller memcpys
-            # into; a disagreement here is a heap overrun, not a wrong answer.
+            # nbytes is what the loader allocates; a disagreement here is a
+            # heap overrun, not a wrong answer.
             assert entry["nbytes"] == entry["numel"] * info.itemsize
 
     # Inputs record donation, outputs do not have the key at all.
@@ -169,8 +146,8 @@ def test_sidecar_describes_every_array(exported):
 
 
 def test_sidecar_digests_match_the_files(exported):
-    """The digests are how a truncated or swapped artifact is told apart from
-    a matching one, so they have to be of what actually landed."""
+    """The digests tell a truncated or swapped artifact from a matching one,
+    so they have to be of what actually landed."""
     artifacts = exported.metadata["artifacts"]
     assert artifacts["executable"] == exported.executable.name
     assert artifacts["executable_sha256"] == _sha256(exported.executable)
@@ -191,8 +168,8 @@ def test_sidecar_on_disk_is_the_returned_metadata(exported, load_json):
 
 
 def test_mlir_bytecode_is_written_and_not_empty(exported):
-    """The ``.mlirbc`` is the answer to the architecture lock: it is what the
-    loader compiles in-process when the ``.binpb`` was built elsewhere."""
+    """The ``.mlirbc`` is what the loader compiles in-process when the
+    ``.binpb`` was built elsewhere."""
     assert exported.mlir is not None
     assert exported.mlir.is_file()
     assert exported.mlir.stat().st_size > 0
@@ -208,12 +185,9 @@ def _sha256(path: Path) -> str:
 
 
 def test_rank_n_shapes_survive_the_round_trip(tmp_path):
-    """Rank is carried through untouched, in both directions.
-
-    A rank-1 example cannot detect a layout disagreement -- every element still
-    lands where it was expected to -- so the shapes that matter are the ones
-    with more than one axis.
-    """
+    """Rank is carried through untouched, in both directions.  A rank-1
+    example cannot detect a layout disagreement, so the shapes that matter
+    have more than one axis."""
 
     def reshape(block):
         return jnp.broadcast_to(block.sum(), (2, 2, 2)) * 1.0
@@ -239,18 +213,14 @@ def test_rank_n_shapes_survive_the_round_trip(tmp_path):
 
 @pytest.mark.parametrize("dtype_name", sorted(SUPPORTED_DTYPES))
 def test_every_supported_dtype_exports(dtype_name, tmp_path):
-    """One export per row of the dtype table.
-
-    The table is the contract four consumers have to agree on -- NumPy, PJRT,
-    C++ and the sidecar -- and a row that was added to it without being
-    exportable is exactly the half-added dtype the table exists to prevent.
-    """
+    """One export per row of the dtype table, which is the contract NumPy,
+    PJRT, C++ and the sidecar have to agree on."""
     info = SUPPORTED_DTYPES[dtype_name]
     dtype = jnp.dtype(dtype_name)
 
     def double(x):
-        # Bool has no arithmetic to speak of; the point is only that the
-        # element type survives from the argument to the result.
+        # Bool has no arithmetic; the point is only that the element type
+        # survives from the argument to the result.
         return jnp.logical_not(x) if dtype_name == "bool" else x + x
 
     result = export(
@@ -288,13 +258,8 @@ def test_unsupported_dtypes_are_named_not_reinterpreted(dtype_name, tmp_path):
 
 
 def test_keyword_arguments_are_rejected(tmp_path):
-    """A C++ call is positional, so the arguments have to be too.
-
-    ``export`` only ever calls ``lower(*args)``, which is what makes its
-    internal keyword-argument guard unreachable from here; the reachable half
-    of the same rule is this one, and a caller reaching for keywords reaches
-    for a mapping.
-    """
+    """A C++ call is positional, so the arguments have to be too; a caller
+    reaching for keywords reaches for a mapping."""
     with pytest.raises(ExportError) as raised:
         export(
             two_in_two_out,
@@ -323,13 +288,9 @@ def test_zero_element_arrays_are_rejected(tmp_path):
 
 
 def test_a_rejected_export_writes_nothing_at_all(tmp_path):
-    """The whole directory stays empty, not just the artifacts of this name.
-
-    The exporter this replaced wrote the executable first and asserted
-    afterwards, so a rejected function left a stale ``.binpb`` beside a sidecar
-    describing something else -- which the C++ side then loaded, and which
-    failed a long way from the cause.
-    """
+    """The whole directory stays empty, not just the artifacts of this name:
+    a stale ``.binpb`` beside a sidecar describing something else is loaded
+    by the C++ side and fails a long way from the cause."""
     target = tmp_path / "nothing-should-land-here"
     target.mkdir()
     with pytest.raises(ExportError):
@@ -342,11 +303,11 @@ def test_a_rejected_export_writes_nothing_at_all(tmp_path):
     assert list(target.iterdir()) == []
 
 
-# ------------------------------------------------------------------ the x64 trap
+# ----------------------------------------------------------------- the x64 trap
 
-#: Run in a subprocess: ``jax_enable_x64`` is process-global and cannot be
-#: turned back on for the tests that follow, so a test that needs it off needs
-#: an interpreter of its own.  Exits 0 only when the export was refused.
+#: Run in a subprocess: ``jax_enable_x64`` is process-global, so a test that
+#: needs it off needs an interpreter of its own.  Exits 0 only when the
+#: export was refused.
 _X64_TRAP = """
 import pathlib
 import sys
@@ -381,13 +342,9 @@ raise SystemExit(1)
 
 def test_x64_narrowing_is_refused_not_recorded(run, tmp_path):
     """float64 without ``jax_enable_x64`` must be an error, not a float32
-    sidecar.
-
-    JAX narrows the argument and says nothing; the export then succeeds and the
-    sidecar honestly records float32, and a C++ caller writing doubles into a
-    4-byte-per-element arena walks off the end of it.  The message has to name
-    the switch, because that is the whole fix.
-    """
+    sidecar: a C++ caller writing doubles into a 4-byte-per-element arena
+    walks off the end of it.  The message has to name the switch, because
+    that is the whole fix."""
     completed = run(
         [sys.executable, "-c", _X64_TRAP, str(tmp_path)],
         env={

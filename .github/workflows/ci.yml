@@ -1,19 +1,10 @@
 # Lint, build the documentation, and run the test suite in the project's
 # Docker image on both architectures.
 #
-# Action versions verified 2026-09-05 with
-#   gh api repos/<owner>/<repo>/releases/latest --jq .tag_name
-# and each action.yml then checked for its runtime, because Node 20 is removed
-# from GitHub runners in September 2026 and anything still on a Node 20 major
-# stops working there:
-#   actions/checkout            latest v7.0.1   pinned v7        node24
-#   actions/cache               latest v6.1.0   pinned v6        node24
-#   actions/upload-artifact     latest v7.0.1   pinned v7        node24
-#   astral-sh/setup-uv          latest v10.0.1  pinned v10.0.1   node24
-#   docker/setup-buildx-action  latest v4.3.0   pinned v4        node24
-#   docker/build-push-action    latest v7.3.0   pinned v7        node24
-# astral-sh/setup-uv stopped publishing a floating major tag after v7, so it is
-# pinned to the exact release; every other action resolves its major alias.
+# Action pins verified 2026-09-05 with `gh api repos/<o>/<r>/releases/latest`,
+# each checked to run on Node 24, because Node 20 leaves GitHub runners in
+# September 2026. astral-sh/setup-uv publishes no floating major tag after v7,
+# so it is pinned to the exact release; the others resolve their major alias.
 
 name: ci
 
@@ -52,16 +43,14 @@ jobs:
       - name: Sync the Python environment
         run: |
           set -euo pipefail
-          # --locked only once a lock file is committed; a tree without one
-          # must still lint rather than fail on a missing uv.lock.
+          # --locked only once a lock file is committed.
           if [ -f uv.lock ]; then
             uv sync --locked
           else
             uv sync
           fi
 
-      # --no-sync: `uv run` otherwise re-syncs the environment to the flags it
-      # is given, which would undo the step above.
+      # --no-sync: `uv run` would otherwise re-sync and undo the step above.
       - name: ruff check
         run: uv run --no-sync ruff check .
 
@@ -92,8 +81,7 @@ jobs:
       - name: Install doxygen
         run: |
           set -euo pipefail
-          # breathe reads doxygen's XML, and conf.py generates it during the
-          # sphinx run, so doxygen has to be on PATH before sphinx-build.
+          # conf.py runs doxygen during the sphinx build.
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends doxygen graphviz
 
@@ -110,10 +98,8 @@ jobs:
             uv sync --extra docs
           fi
 
-      # -W turns warnings into errors and --keep-going reports all of them in
-      # one run instead of stopping at the first. --no-sync keeps the
-      # environment the step above built: a bare `uv run` re-syncs without the
-      # docs extra and removes sphinx out from under this command.
+      # --no-sync: a bare `uv run` would re-sync without the docs extra and
+      # remove sphinx out from under this command.
       - name: sphinx-build
         run: |
           uv run --no-sync sphinx-build -W --keep-going -b html \
@@ -143,16 +129,13 @@ jobs:
             arch: aarch64
             required: false
     steps:
-      # No submodules: third_party/xla is only needed to build the plugin from
-      # source, which plugin.yml does.
+      # No submodules: third_party/xla is only needed by plugin.yml.
       - uses: actions/checkout@v7
 
       - name: Read the pinned versions
         id: versions
         run: |
           set -euo pipefail
-          # versions.env is the single source of truth; nothing here restates a
-          # version by hand.
           . ./versions.env
           echo "jax_version=${JAX_VERSION}" >> "$GITHUB_OUTPUT"
           echo "plugin_release=${PLUGIN_RELEASE}" >> "$GITHUB_OUTPUT"
@@ -160,10 +143,9 @@ jobs:
 
       - uses: docker/setup-buildx-action@v4
 
-      # docker compose reuses an image that is already tagged locally, so
-      # building call_jax_from_cpp:dev here (load: true) is what the `ci`
-      # service picks up below. The cache scope is per architecture: an x86_64
-      # layer is useless to the arm64 runner.
+      # load: true tags the image locally, which is what the `ci` compose
+      # service picks up. Cache scope per architecture: an x86_64 layer is
+      # useless to the arm64 runner.
       - name: Build the dev image
         uses: docker/build-push-action@v7
         with:
@@ -176,8 +158,7 @@ jobs:
           cache-from: type=gha,scope=dev-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=dev-${{ matrix.arch }}
 
-      # Restore and save are split so a failed download is never cached: the
-      # save step below only runs once a plugin is actually present.
+      # Restore and save are split so a failed download is never cached.
       - name: Restore the cached plugin
         id: plugin-restore
         uses: actions/cache/restore@v6
@@ -185,21 +166,17 @@ jobs:
           path: build/plugin
           key: plugin-${{ matrix.arch }}-${{ steps.versions.outputs.plugin_release }}-${{ hashFiles('tools/plugin_versions.txt') }}
 
-      # Expected to fail until the first plugin release is published for this
-      # JAX version: tools/get_plugin.sh then prints the remedies (build from
-      # the fork, publish the asset, or point PJRT_CPU_PLUGIN at your own).
-      # That is a missing artifact, not a broken tree, so it does not fail CI.
+      # No asset yet for this JAX version is a missing artifact, not a broken
+      # tree, so it does not fail CI; get_plugin.sh prints the remedies.
       - name: Download the prebuilt plugin
         id: plugin-download
         if: steps.plugin-restore.outputs.cache-hit != 'true'
         continue-on-error: true
         run: make plugin
 
-      # Opt-in, and slow enough to blow this job's 90-minute budget on a
-      # 4-vCPU runner: bazel compiles LLVM from source. plugin.yml is the
-      # supported builder; this exists to reproduce a build failure under CI
-      # conditions. It also needs the XLA fork branch to be pushed
-      # (see docs/developer/bumping-jax.md).
+      # Opt-in and slow (bazel compiles LLVM; more than this job's 90 minutes).
+      # plugin.yml is the supported builder; this reproduces a build failure
+      # under CI conditions.
       - name: Build the plugin from source in Docker
         if: >-
           ${{ inputs.build_plugin
@@ -223,9 +200,8 @@ jobs:
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
 
-      # Only the downloaded asset is cached. The optional source build above is
-      # a one-off; caching it under the release key would hand later runs
-      # something other than the published artifact.
+      # Only the downloaded asset is cached: a source build under the release
+      # key would hand later runs something other than the published artifact.
       - name: Save the plugin to the cache
         if: ${{ always() && steps.plugin-download.outcome == 'success' && steps.plugin.outputs.present == 'true' }}
         uses: actions/cache/save@v6
@@ -233,40 +209,31 @@ jobs:
           path: build/plugin
           key: ${{ steps.plugin-restore.outputs.cache-primary-key }}
 
-      # --user root: the runner user is uid 1001 while the image user is 1000,
-      # and both the bind-mounted workspace and /opt/venv (which the entrypoint
-      # re-syncs) must be writable. PJRT_CPU_PLUGIN is redirected because the
-      # image was built with PLUGIN_SOURCE=none, so /opt/pjrt is empty and the
-      # plugin we fetched lives in the bind mount instead.
-      #
-      # docker/compose.yml asks for CAP_SYS_NICE and rtprio/memlock ulimits.
-      # Whether SCHED_FIFO then takes effect on a hosted VM is not something
-      # this project relies on: every real-time step reports [skip] when the
-      # privilege is absent, and nothing in CI gates on it. Latency numbers
-      # from a shared runner are not reportable either way.
-      # Always, plugin or not. Nothing links against the plugin -- it is
-      # dlopen'ed at run time -- so the whole tree compiles without one, and a
-      # job that skipped this would turn a green badge into "ruff and sphinx
-      # passed", which is worse than no badge.
+      # --user root: the runner user is uid 1001, the image user 1000, and both
+      # the bind mount and /opt/venv must be writable. Always, plugin or not:
+      # nothing links against the plugin, and a job that skipped this would
+      # turn a green badge into "ruff and sphinx passed". compose.yml asks for
+      # CAP_SYS_NICE and the rtprio/memlock ulimits; whether SCHED_FIFO then
+      # takes effect on a hosted VM is not relied on: every real-time step
+      # reports [skip] without the privilege, nothing in CI gates on it, and a
+      # latency number from a shared runner is not reportable either way.
       - name: make (compile everything)
         run: |
           docker compose -f docker/compose.yml run --rm --user root \
             ci make lib examples tests-cpp guard tools build/bin/bench
 
-      # Also always. Tests that need a plugin skip themselves with the reason,
-      # so without one this still runs everything that can run; with one it
-      # runs the lot.
+      # Also always: tests that need a plugin skip themselves with the reason.
+      # PJRT_CPU_PLUGIN is redirected because the image was built with
+      # PLUGIN_SOURCE=none; the fetched plugin lives in the bind mount.
       - name: make test
         run: |
           docker compose -f docker/compose.yml run --rm --user root \
             -e PJRT_CPU_PLUGIN=/workspace/build/plugin/libpjrt_c_api_cpu_plugin.so \
             ci make test
 
-      # Example 05 only, and only where there is a plugin to load: the
-      # controller is a ros2_control package, so it needs a ROS 2 image rather
-      # than the dev one, and it needs artifacts/arm, which `make test` above
-      # exported into the bind mount. x86_64 only -- the arm64 runner has no
-      # published plugin, so there would be nothing for the controller to load.
+      # Example 05 needs a ROS 2 image rather than the dev one, artifacts/arm
+      # (exported by `make test` above), and a plugin to load, which the arm64
+      # runner has none of.
       - name: Build the ros2 image
         if: ${{ matrix.arch == 'x86_64' && steps.plugin.outputs.present == 'true' }}
         uses: docker/build-push-action@v7
@@ -278,9 +245,7 @@ jobs:
           cache-from: type=gha,scope=ros2-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=ros2-${{ matrix.arch }}
 
-      # --user root for the same reason the steps above use it: the runner user
-      # is uid 1001 and the image user is 1000, and colcon writes into the bind
-      # mount.
+      # --user root as above: colcon writes into the bind mount.
       - name: Run example 05 under ros2_control
         if: ${{ matrix.arch == 'x86_64' && steps.plugin.outputs.present == 'true' }}
         run: |
@@ -295,8 +260,8 @@ jobs:
         run: |
           echo "::warning title=no plugin::the tree compiled and the plugin-free tests ran, but everything needing a PJRT CPU plugin skipped (no asset for ${ARCH} at release ${RELEASE}). Publish one with tools/release_plugin.sh, or re-run with build_plugin=true."
 
-      # The container wrote as root; hand the tree back so the artifact upload
-      # and the runner's own workspace cleanup can read it.
+      # The container wrote as root; hand the tree back for the upload and the
+      # runner's cleanup.
       - name: Restore workspace ownership
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" .

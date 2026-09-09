@@ -1,15 +1,10 @@
 """Every place a JAX version is written down has to say the same thing.
 
-``versions.env`` is the single source of truth -- the Makefile, CMake, the
-docs build and CI all read it -- but ``pyproject.toml`` has to repeat the pin
-for the packaging tools, the environment has to actually contain that release,
-and the exporter records what it was tested against.  Four copies of one
-number, and drift between them is exactly what a half-finished JAX bump looks
-like: the lockfile moved, ``versions.env`` did not, and the artifacts are
-still being produced against the old plugin.
-
-A ``.binpb`` is not portable across a JAX bump, so this failing is worth more
-than it costs.
+``versions.env`` is the single source of truth, but ``pyproject.toml`` has to
+repeat the pin, the environment has to contain that release, and the
+exporter records what it was tested against.  Drift between them is what a
+half-finished JAX bump looks like, and a ``.binpb`` is not portable across
+one.
 """
 
 from __future__ import annotations
@@ -20,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-#: The repository root; this file is ``tests/python/test_versions.py``.
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: ``name==version``, the only requirement form these two pins may take.
@@ -49,7 +43,7 @@ def pyproject() -> dict:
 
 
 def exact_pins() -> dict[str, str]:
-    """Return the ``==`` pins from ``[project].dependencies``."""
+    """The ``==`` pins from ``[project].dependencies``."""
     pins = {}
     for requirement in pyproject()["project"]["dependencies"]:
         match = _PIN.match(requirement)
@@ -85,12 +79,9 @@ def test_jax_and_jaxlib_are_pinned_to_the_same_release():
     [("jax", "JAX_VERSION"), ("jaxlib", "JAXLIB_VERSION")],
 )
 def test_the_installed_release_is_the_pinned_one(module_name, key):
-    """What is importable here is what the pins claim.
-
-    An environment a release behind produces artifacts the published plugin
-    cannot load, and the failure arrives from the C++ side as a deserialization
-    error with nothing in it pointing back to here.
-    """
+    """An environment a release behind produces artifacts the published
+    plugin cannot load, and the failure arrives from the C++ side with
+    nothing in it pointing back to here."""
     module = pytest.importorskip(
         module_name, reason=f"{module_name} is not installed; run `uv sync`"
     )
@@ -106,7 +97,7 @@ def test_the_exporter_agrees_about_the_supported_release():
 
 
 def test_the_tool_version_in_every_sidecar_is_the_package_version():
-    """``generator.version`` is how an artifact is traced back to the exporter
-    that produced it, which only works if it is the version that shipped."""
+    """``generator.version`` traces an artifact back to the exporter that
+    produced it, which only works if it is the version that shipped."""
     jax2exec = pytest.importorskip("jax2exec")
     assert jax2exec.__version__ == pyproject()["project"]["version"]

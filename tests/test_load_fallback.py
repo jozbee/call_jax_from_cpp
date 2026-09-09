@@ -1,25 +1,15 @@
 """What the loader does when an artifact is wrong, stale or half-present.
 
-``tests/cpp/test_load_errors.cpp`` loads one artifact under one deliberately
-awkward condition and prints a single line -- ``LOADED kind=... detail=...``
-or ``THREW: <what()>`` -- so what is asserted here is the *message*.  That is
-the whole point of these failures: a load that stops is only useful if it
-names the file and says what was wrong with it, and a string is something
-pytest is better at judging than C++ is.
+``tests/cpp/test_load_errors.cpp`` loads one artifact under one awkward
+condition and prints a single line -- ``LOADED kind=... detail=...`` or
+``THREW: <what()>`` -- so what is asserted here is the *message*: a load
+that stops is only useful if it names the file and says what was wrong.
 
-Every damaged case works on a copy from ``tmp_artifacts``.  Damaging the real
-``artifacts/trajopt.binpb`` would leave the checkout needing a re-export, and
-worse, every later test in the session would silently be measuring the
-compiled path instead of the deserialized one.
-
-The distinction being defended is between a fallback and a failure.  Falling
-back from a stale ``.binpb`` to compiling the ``.mlirbc`` is correct -- a
-serialized executable is locked to the JAX and XLA build that wrote it, so a
-refusal after an upgrade is routine -- but it costs seconds where the AOT
-path costs milliseconds, so it must be *reported* and never silent.  A
-sidecar that disagrees with its executable is the other kind: there is no
-safe way to continue, because the mismatch is a buffer overrun that would
-otherwise surface much later as corrupted output.
+The distinction defended is fallback against failure.  Falling back from a
+stale ``.binpb`` to compiling the ``.mlirbc`` is correct but costs seconds
+where the AOT path costs milliseconds, so it must be *reported*.  A sidecar
+that disagrees with its executable is a buffer overrun waiting to surface as
+corrupted output, so it is refused.
 """
 
 from __future__ import annotations
@@ -31,9 +21,9 @@ LOADED = "LOADED "
 THREW = "THREW: "
 
 
-def load(run, build, base, scenario, **kwargs):
+def load(run, build, base, scenario):
     """Load @p base under @p scenario and return the single reported line."""
-    result = run([build.bin("test_load_errors"), base, scenario], **kwargs)
+    result = run([build.bin("test_load_errors"), base, scenario])
     assert result.returncode == 0, result.stderr
     lines = [
         line
@@ -45,11 +35,8 @@ def load(run, build, base, scenario, **kwargs):
 
 
 def test_an_intact_artifact_deserializes(run, build, plugin, artifacts):
-    """The baseline the rest of the file is measured against.
-
-    Without this, every assertion below could be satisfied by a loader that
-    refuses everything.
-    """
+    """The baseline: without it, a loader that refuses everything would
+    satisfy every assertion below."""
     line = load(run, build, artifacts.trajopt, "ok")
     assert line.startswith(LOADED)
     assert "kind=deserialized" in line
@@ -58,12 +45,9 @@ def test_an_intact_artifact_deserializes(run, build, plugin, artifacts):
 def test_a_sidecar_missing_an_output_is_refused(
     run, build, plugin, tmp_artifacts
 ):
-    """The count mismatch names both sides.
-
-    Without this check the loader allocates one arena too few and the
-    executable writes past the end of the last one -- a heap overrun found,
-    if at all, as corrupted numbers somewhere else entirely.
-    """
+    """The count mismatch names both sides.  Unchecked, the loader would
+    allocate one arena too few and the executable would write past the end
+    of the last one."""
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.drop_output(base)
 
@@ -76,12 +60,8 @@ def test_a_sidecar_missing_an_output_is_refused(
 def test_a_sidecar_with_the_wrong_shape_is_refused(
     run, build, plugin, tmp_artifacts
 ):
-    """The shape mismatch names the declared shape and the produced one.
-
-    Both halves matter: which of the two is wrong is not obvious from either
-    alone, and the answer decides whether to re-export or to fix the
-    function.
-    """
+    """The shape mismatch names the declared shape and the produced one:
+    which is wrong decides whether to re-export or to fix the function."""
     base = tmp_artifacts.copy("trajopt")
 
     def shrink(sidecar):
@@ -101,12 +81,10 @@ def test_a_sidecar_with_the_wrong_shape_is_refused(
 def test_a_truncated_executable_falls_back_and_says_why(
     run, build, plugin, tmp_artifacts
 ):
-    """A stale ``.binpb`` compiles the ``.mlirbc`` instead, out loud.
-
-    The detail is the point.  A load that takes 600 ms instead of 10 ms and
-    does not explain itself is how a deployment discovers, months later and
-    from a latency graph, that its AOT path stopped working.
-    """
+    """A stale ``.binpb`` compiles the ``.mlirbc`` instead, out loud: a load
+    that takes seconds instead of milliseconds and does not explain itself
+    is how a deployment discovers from a latency graph that its AOT path
+    stopped working."""
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.truncate_executable(base)
 
@@ -120,11 +98,8 @@ def test_a_truncated_executable_falls_back_and_says_why(
 def test_a_truncated_executable_with_no_bytecode_is_fatal(
     run, build, plugin, tmp_artifacts
 ):
-    """Both routes gone: the message has to name both files.
-
-    Either reason alone sends the reader to the wrong file, which on a stale
-    checkout is a long detour.
-    """
+    """Both routes gone: the message names both files, since either reason
+    alone sends the reader to the wrong one."""
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.truncate_executable(base)
     tmp_artifacts.remove(base, ".mlirbc")
@@ -140,13 +115,9 @@ def test_a_truncated_executable_with_no_bytecode_is_fatal(
 def test_compile_only_ignores_the_binary_beside_it(
     run, build, plugin, artifacts
 ):
-    """``LoadPolicy::CompileOnly`` compiles even with a good ``.binpb`` there.
-
-    The policy exists to reproduce a compilation and to run an artifact
-    exported elsewhere, so "there is a binary, use it" would defeat it.  The
-    detail names the policy, which is how a reader of a slow load tells this
-    apart from a fallback nobody asked for.
-    """
+    """``LoadPolicy::CompileOnly`` compiles even with a good ``.binpb`` there,
+    and the detail names the policy, which is how a slow load is told apart
+    from a fallback nobody asked for."""
     line = load(run, build, artifacts.trajopt, "compile-only")
     assert line.startswith(LOADED)
     assert "kind=compiled" in line
@@ -154,11 +125,8 @@ def test_compile_only_ignores_the_binary_beside_it(
 
 
 def test_binary_only_deserializes(run, build, plugin, artifacts):
-    """``LoadPolicy::BinaryOnly`` is what a deployment wants.
-
-    A fallback that quietly compiles for seconds is not a fallback in a
-    control loop, so this policy refuses rather than substituting.
-    """
+    """``LoadPolicy::BinaryOnly`` refuses rather than substitutes: a fallback
+    that compiles for seconds is not a fallback in a control loop."""
     line = load(run, build, artifacts.trajopt, "binary-only")
     assert line.startswith(LOADED)
     assert "kind=deserialized" in line
@@ -166,27 +134,19 @@ def test_binary_only_deserializes(run, build, plugin, artifacts):
 
 
 def test_a_missing_artifact_is_refused(run, build, plugin, tmp_path):
-    """A base path with nothing under it fails at the sidecar.
-
-    The path is given *without* an extension, which is the mistake this
-    message exists to catch, so it names the file it actually tried to open.
-    """
+    """A base path with nothing under it fails at the sidecar, naming the
+    file it tried to open -- the path is given *without* an extension."""
     line = load(run, build, tmp_path / "not_an_artifact", "missing")
     assert line.startswith(THREW)
     assert "cannot open sidecar" in line
 
 
 def test_a_plugin_that_will_not_open_names_dlopen(run, build, artifacts):
-    """``dlopen(`` plus the loader's own words.
-
-    The plugin is opened ``RTLD_NOW``, so an unresolved symbol -- a missing
-    ``liblapack``, most often -- surfaces here rather than on the first
-    ``jnp.linalg`` call, which is why the raw ``dlerror`` is passed through
-    rather than summarized.  This scenario points the runtime at the
-    sidecar, a file that certainly exists and certainly is not an ELF
-    object, so it cannot accidentally succeed by finding a real plugin at a
-    made-up path.
-    """
+    """``dlopen(`` plus the raw ``dlerror``: the plugin is opened ``RTLD_NOW``,
+    so a missing ``liblapack`` surfaces here rather than on the first
+    ``jnp.linalg`` call.  The scenario points the runtime at the sidecar, a
+    file that exists and is not an ELF object, so it cannot succeed by
+    finding a real plugin at a made-up path."""
     line = load(run, build, artifacts.trajopt, "bad-plugin")
     assert line.startswith(THREW)
     assert "dlopen(" in line
@@ -196,15 +156,10 @@ def test_a_plugin_that_will_not_open_names_dlopen(run, build, artifacts):
 def test_the_compiled_path_computes_the_same_thing(
     run, build, plugin, artifacts, tmp_artifacts
 ):
-    """After a fallback, every reference case still agrees.
-
-    This is what makes the fallback trustworthy rather than merely
-    available: the compiled executable and the deserialized one are two
-    routes to the same numbers, and only a sweep over changing inputs shows
-    that the second is not quietly different.  The reference cases stay in
-    the real artifacts directory; only the executable being loaded is the
-    damaged copy.
-    """
+    """After a fallback, every reference case still agrees: the compiled and
+    the deserialized executable are two routes to the same numbers.  The
+    reference cases stay in the real artifacts directory; only the executable
+    being loaded is the damaged copy."""
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.truncate_executable(base)
 

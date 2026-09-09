@@ -1,9 +1,6 @@
-# Documentation build.
-#
-# Everything runs through `uv run`, which resolves the docs extra from the
-# repository's pyproject.toml. uv is not on PATH in a non-interactive shell
-# unless mise has been activated; `mise exec -- make html` is the way in if
-# `uv: command not found` is what you get.
+# Documentation build. Everything runs through `uv run`, which resolves the
+# docs extra from pyproject.toml; `mise exec -- make html` is the way in when
+# uv is not on PATH.
 #
 #   make html        one build, warnings are errors
 #   make live        rebuild and reload in a browser as you edit
@@ -15,26 +12,23 @@ SPHINXOPTS  ?=
 SOURCEDIR    = .
 BUILDDIR     = _build
 
+# -W --keep-going: fail on any warning, but report all of them in one build.
+SPHINXBUILD  = $(UV) run --extra docs sphinx-build -W --keep-going
+
 .PHONY: html live linkcheck clean
 
-# -W --keep-going: fail on the first warning, but report all of them first, so
-# one build tells you everything that is wrong instead of one thing at a time.
 html:
-	$(UV) run --extra docs sphinx-build -W --keep-going -b html \
-		$(SOURCEDIR) $(BUILDDIR)/html $(SPHINXOPTS)
+	$(SPHINXBUILD) -b html $(SOURCEDIR) $(BUILDDIR)/html $(SPHINXOPTS)
 
-# conf.py runs Doxygen at import, and sphinx-autobuild re-imports it on every
-# rebuild, so watching ../include regenerates the C++ XML as the headers
-# change. ../python and ../examples are watched for the same reason: autodoc
-# and the literalinclude blocks read them.
+# sphinx-autobuild re-imports conf.py, which runs Doxygen, so watching
+# ../include regenerates the XML; autodoc and literalinclude read the other two.
 live:
 	$(UV) run --extra docs sphinx-autobuild -b html \
 		--watch ../include --watch ../python --watch ../examples \
 		$(SOURCEDIR) $(BUILDDIR)/html $(SPHINXOPTS)
 
 linkcheck:
-	$(UV) run --extra docs sphinx-build -W --keep-going -b linkcheck \
-		$(SOURCEDIR) $(BUILDDIR)/linkcheck $(SPHINXOPTS)
+	$(SPHINXBUILD) -b linkcheck $(SOURCEDIR) $(BUILDDIR)/linkcheck $(SPHINXOPTS)
 
 clean:
 	rm -rf $(BUILDDIR)

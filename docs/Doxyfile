@@ -1,10 +1,6 @@
-# Doxygen configuration for the C++ headers.
-#
-# This produces XML and nothing else. Breathe reads the XML; Doxygen's own HTML
-# would be a second, worse copy of the same reference pages, so it is off.
-#
-# Run from docs/ (conf.py does exactly that), which is what the relative INPUT
-# and OUTPUT_DIRECTORY below are relative to.
+# Doxygen configuration for the C++ headers: XML only, which Breathe reads.
+# Run from docs/, as conf.py does; INPUT and OUTPUT_DIRECTORY are relative to
+# it.
 
 PROJECT_NAME           = pjrt_exec
 PROJECT_BRIEF          = "Load once, call many: JAX executables from C++"
@@ -18,41 +14,29 @@ GENERATE_HTML          = NO
 GENERATE_LATEX         = NO
 GENERATE_XML           = YES
 
-# The source listing would be duplicated into every XML file and is never
-# rendered: Sphinx links to GitHub for source, not to a Doxygen copy of it.
+# Never rendered: Sphinx links to GitHub for source.
 XML_PROGRAMLISTING     = NO
 
-# EXTRACT_ALL = NO is the load-bearing setting here. An undocumented public
-# member does not appear in the XML at all, so the doxygenfunction /
-# doxygenclass directive that names it fails to find it and the Sphinx build
-# fails. That is deliberate: it makes an undocumented public entity a build
-# error rather than an empty box on the reference page.
+# Load-bearing: an undocumented member is absent from the XML, so the directive
+# that names it fails the Sphinx build rather than rendering an empty box.
 EXTRACT_ALL            = NO
 HIDE_UNDOC_MEMBERS     = YES
 
-# The `detail` namespaces are the examples' internals: a slot table, a signal
-# handler, a throw helper. They are documented for whoever reads the header,
-# but they are not part of what a reference page offers, and Breathe would
-# raise a duplicate declaration for each one it saw twice.
+# The examples' internals: not part of the reference, and Breathe would raise
+# a duplicate declaration for each one it saw twice.
 EXCLUDE_SYMBOLS        = cjfc::detail cjfc::detail::* \
                          cjfc::workload::detail cjfc::workload::detail::*
 
-# ...which is also why undocumented members are not warned about here. Breathe
-# is the gate for the public API; a Doxygen warning for every private helper
-# would only drown it out.
+# Breathe is the gate for the public API; a warning per private helper would
+# drown it out.
 WARN_IF_UNDOCUMENTED   = NO
 
 JAVADOC_AUTOBRIEF      = YES
 BUILTIN_STL_SUPPORT    = YES
 
-# The headers guard the Linux-only real-time helpers behind __linux__, and the
-# reference documents the Linux behaviour.
-#
-# __unix__ is here for alloc_guard.hpp, which selects between the real
-# dlsym-based AllocGuard and an inert stand-in on
-# `defined(__unix__) || defined(__APPLE__)`. Without it Doxygen takes the
-# stand-in branch and the reference page documents a class whose every accessor
-# returns 0 -- which is not the class anyone links against.
+# The reference documents the Linux behaviour. __unix__ is for alloc_guard.hpp:
+# without it Doxygen takes the inert stand-in branch and documents a class
+# whose every accessor returns 0.
 ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = YES

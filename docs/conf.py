@@ -1,18 +1,10 @@
 """Sphinx configuration for the call_jax_from_cpp documentation.
 
-Two things happen here that a stock ``conf.py`` does not do, and both are
-deliberate:
-
-* Doxygen runs at import time, below, so the XML Breathe reads always matches
-  the headers on disk.  ``sphinx-autobuild`` re-imports this module on every
-  rebuild, which is what makes ``--watch ../include`` regenerate the XML.
-* Every version this project pins is read out of ``versions.env`` and injected
-  as a MyST substitution.  No page hand-types a version number; a bump edits
-  one file.
-
-The build runs with ``-W``, so a warning is a failure.  That is the point: an
-orphan page, a broken cross-reference, or an unknown theme option should stop
-the site from shipping rather than quietly degrade it.
+Two things a stock ``conf.py`` does not do: Doxygen runs at import time, so
+the XML Breathe reads always matches the headers on disk (``sphinx-autobuild``
+re-imports this module, which is what regenerates it); and every pinned
+version is read out of ``versions.env`` and injected as a MyST substitution,
+so no page hand-types one. The build runs with ``-W``: a warning is a failure.
 """
 
 from __future__ import annotations
@@ -35,10 +27,8 @@ sys.path.insert(0, str(DOCS_DIR / "_ext"))
 project = "call_jax_from_cpp"
 author = "Brent Koogler"
 
-# The release is whatever the installed jax2exec says it is, so the docs cannot
-# drift from the package the way a hard-coded string does.  A missing
-# distribution means the docs are being built against a tree that was never
-# installed, which is worth stopping for.
+# The release is whatever the installed jax2exec says it is, so it cannot
+# drift from the package.
 try:
     release = _package_version("jax2exec")
 except PackageNotFoundError as exc:  # pragma: no cover - environment error
@@ -56,9 +46,7 @@ version = release
 def _read_versions_env(path: Path) -> dict[str, str]:
     """Parse ``versions.env`` into ``{lower_case_key: value}``.
 
-    The file is a flat ``KEY=value`` list with ``#`` comments -- deliberately
-    simple, because the Makefile, CMake and CI all source it too.  Anything
-    that is not a ``KEY=value`` line is skipped rather than guessed at.
+    Flat ``KEY=value`` lines with ``#`` comments; anything else is skipped.
     """
     if not path.is_file():
         raise RuntimeError(
@@ -88,10 +76,8 @@ DOXYGEN_XML = DOCS_DIR / "_build" / "doxygen" / "xml"
 def _run_doxygen() -> None:
     """Regenerate the Doxygen XML that Breathe reads.
 
-    This runs at module level rather than from a ``builder-inited`` handler so
-    that the XML exists before any extension is set up, and so that
-    ``sphinx-autobuild`` -- which re-imports this file on each rebuild --
-    picks up header edits.
+    Called at module level rather than from ``builder-inited`` so the XML
+    exists before any extension is set up.
     """
     doxygen = shutil.which("doxygen")
     if doxygen is None:
@@ -104,17 +90,12 @@ def _run_doxygen() -> None:
             "  or build in the container, which already has it:\n"
             "    docker compose -f docker/compose.yml run --rm dev make docs"
         )
-    # Doxygen creates OUTPUT_DIRECTORY but not its parents, and _build is
-    # usually absent on a clean checkout.
+    # Doxygen creates OUTPUT_DIRECTORY but not its parents.
     DOXYGEN_XML.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run([doxygen, "Doxyfile"], cwd=DOCS_DIR, check=False)
     if result.returncode != 0:
-        # The Doxyfile sets WARN_AS_ERROR = FAIL_ON_WARNINGS, so this is
-        # usually a documentation defect in a header rather than a broken
-        # Doxyfile: an undocumented parameter, an unknown command, a reference
-        # that does not resolve. Doxygen has already printed the file and line
-        # above; re-raising with a bare CalledProcessError traceback would bury
-        # it under a Sphinx stack trace.
+        # Doxygen has already printed the file and line; a CalledProcessError
+        # traceback would bury it under a Sphinx stack trace.
         raise RuntimeError(
             f"doxygen exited {result.returncode}; the C++ headers above have a "
             "documentation defect. Fix the header -- an undocumented parameter "
@@ -143,10 +124,8 @@ extensions = [
     "cpp_autolink",  # docs/_ext: links qualified names inside code blocks
 ]
 
-# A name under one of these prefixes that is spelled in a code block and has
-# no reference entry is a warning, and the build runs with -W.  That is the
-# extensibility guarantee: showing a new helper in a documented region fails
-# the build until the helper is documented.
+# A pjrt::/cjfc:: name in a code block with no reference entry fails the
+# build, so a new helper shown on a page must be documented.
 cpp_autolink_strict_prefixes = ["pjrt", "cjfc"]
 cpp_autolink_ignore = [
     r"^pjrt::detail::",
@@ -175,42 +154,32 @@ myst_enable_extensions = [
 # Anchors down to h3, so a guide can link to a subsection of another guide.
 myst_heading_anchors = 3
 
-# Every pinned version, spelled once. Use as {{ jax_version }} in any page.
-#
-# MyST does not substitute inside inline code, so `{{ xla_commit }}` renders as
-# those eight literal characters on the built page -- silently, because it is
-# valid markdown. Commit hashes and branch names want code formatting, so every
-# value also gets a <key>_code variant that carries its own backticks:
-# {{ xla_commit_code }}. tests/test_docs_sync.py fails a backtick-wrapped
-# substitution so the quiet version cannot come back.
+# {{ jax_version }} in any page. MyST does not substitute inside inline code,
+# so every value also has a <key>_code variant carrying its own backticks;
+# tests/test_docs_sync.py rejects a backtick-wrapped substitution.
 myst_substitutions = dict(_versions)
 myst_substitutions.update({f"{k}_code": f"`{v}`" for k, v in _versions.items()})
 
-# CHANGELOG.md and CONTRIBUTING.md are included from the repository root, where
-# their heading levels are the levels of a standalone document rather than of a
-# page inside this tree. The resulting "non-consecutive header level" warnings
-# are structural and expected; the alternative is to duplicate both files.
+# CHANGELOG.md and CONTRIBUTING.md are included from the repository root with a
+# standalone document's heading levels; the "non-consecutive header level"
+# warning is structural.
 suppress_warnings = ["myst.header"]
 
 # -- Python API -------------------------------------------------------------
 
 autodoc_member_order = "bysource"
 autodoc_typehints = "description"
-# Stub pages are written by hand and checked in; nothing is generated into the
-# source tree at build time.
+# Stub pages are hand-written; nothing is generated into the source tree.
 autosummary_generate = False
 
 napoleon_google_docstring = False
 napoleon_numpy_docstring = True
-# The return type is already in the signature and in the typehints; repeating
-# it as a ":rtype:" line adds a row that says the same thing twice.
+# The return type is already in the signature.
 napoleon_use_rtype = False
 
-# nitpicky mode turns every parameter type in a NumPy-style docstring into a
-# cross-reference that has to resolve. Without preprocessing, "int, optional"
-# is split on the comma and "optional" is looked up as a class; with it,
-# Napoleon recognises the qualifier and leaves it as prose. The aliases give
-# the short spellings the docstrings use the full names the domain indexes.
+# Under nitpicky every docstring type must resolve: without preprocessing,
+# "int, optional" looks up "optional" as a class. The aliases map the short
+# spellings the docstrings use to the names the domain indexes.
 napoleon_preprocess_types = True
 napoleon_type_aliases = {
     "Any": "typing.Any",
@@ -225,9 +194,8 @@ napoleon_type_aliases = {
 
 breathe_projects = {"pjrt_exec": str(DOXYGEN_XML)}
 breathe_default_project = "pjrt_exec"
-# Empty on purpose: every page names the members it documents. A class that
-# grows a member does not silently grow the page, and a member that is dropped
-# is a build failure instead of a quiet disappearance.
+# Empty on purpose: every page names the members it documents, so a dropped
+# member is a build failure rather than a quiet disappearance.
 breathe_default_members = ()
 breathe_show_include = False
 
@@ -241,28 +209,21 @@ intersphinx_mapping = {
     "numpy": ("https://numpy.org/doc/stable/", None),
     "jax": ("https://docs.jax.dev/en/latest/", None),
 }
-# An inventory that cannot be fetched is a warning, and -W turns that into a
-# failed build -- so a CI run can fail on someone else's outage. The mitigation
-# if that starts happening is to vendor the objects.inv files under
-# docs/_inventory/ and point the second element of each tuple at the local
-# copy; the fetch then never leaves the machine.
+# An unreachable inventory is a warning, hence a failed build under -W. If
+# someone else's outage starts failing CI, vendor the objects.inv files and
+# point the second element of each tuple at the local copy.
 intersphinx_timeout = 10
 
 # The Linux Foundation's real-time wiki answers 403 to anything that is not a
-# browser, so linkcheck would fail on a page that is there. Everything else
-# is checked.
+# browser.
 linkcheck_ignore = [
     r"https://wiki\.linuxfoundation\.org/realtime/.*",
 ]
 
-# nitpicky mode makes an unresolved cross-reference a warning, and -W makes
-# that a failed build: a {cpp:func} or {doc} that has stopped pointing at
-# anything is caught here rather than found by a reader.
-#
-# The ignore list is everything Breathe legitimately emits a reference for and
-# this site does not document: the PJRT C API structs, libstdc++, nlohmann,
-# and the namespaces themselves, which Breathe names as identifiers in the
-# declarations it renders but never declares as targets.
+# A dead cross-reference fails the build. The ignore list is what Breathe
+# emits references for and this site does not document: the PJRT C API,
+# libstdc++, nlohmann, and the namespaces themselves, which Breathe names in
+# declarations but never declares as targets.
 nitpicky = True
 nitpick_ignore_regex = [
     ("cpp:identifier", r"^PJRT_.*"),
@@ -281,16 +242,13 @@ html_title = "call_jax_from_cpp"
 html_baseurl = "https://jozbee.github.io/call_jax_from_cpp/"
 html_static_path = ["_static"]
 html_css_files = ["style.css"]
-# The favicon follows the browser's colour scheme on its own (a media query
-# inside the SVG); the sidebar logo cannot, because the site's theme toggle
-# sets data-theme rather than the OS preference, so it is two files.
+# One favicon: the SVG carries a media query. Two logos: the theme toggle sets
+# data-theme rather than the OS preference, so a media query cannot follow it.
 html_favicon = "_static/favicon.svg"
-# The project is released under the Unlicense -- it is in the public domain --
-# so a copyright line in the footer would be a false claim.
+# Unlicense: a copyright line in the footer would be a false claim.
 html_show_copyright = False
 
-# Only keys the theme actually knows: an unknown one warns, and -W makes that
-# fatal.
+# Only keys the theme knows: an unknown one warns, and -W makes that fatal.
 html_theme_options = {
     "repository_url": "https://github.com/jozbee/call_jax_from_cpp",
     "repository_branch": "main",

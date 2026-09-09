@@ -1,20 +1,14 @@
 """``tools/``: the host audit, the plugin probe and the configuration sweep.
 
-``rt_check.sh`` exits non-zero when anything about the host is worth fixing,
-which is its whole purpose -- and on an ordinary developer machine (powersave
-governor, no isolcpus, SMT on) plenty is.  Its exit code is therefore
-recorded and not asserted.  What is asserted is that it ran and printed every
-section, because those sections are the provenance a latency number has to be
-quoted with.
-
-``plugin_probe`` answers the one question that cannot be answered by
-experiment: this XLA version validates create-option names and fails client
-creation on anything it does not recognise, so "try it and see" is not
-available.  A plugin built from this project's fork advertises
-``supports_synchronous_execution``; a stock one does not, and the runtime
-then reports ``SyncMode::Accepted`` rather than ``Inline``.  Against a stock
-plugin the inline assertion skips: it would be a statement about which
-plugin is installed, not about this code.
+``rt_check.sh`` exits non-zero when anything on the host is worth fixing,
+and on an ordinary developer machine plenty is, so its exit code is recorded
+and not asserted; what is asserted is that every section printed, because
+those sections are the provenance a latency number is quoted with.
+``plugin_probe`` answers what cannot be found by experiment: this XLA
+validates create-option names and fails client creation on an unknown one.
+A plugin built from the fork advertises ``supports_synchronous_execution``;
+against a stock one the inline assertion skips, since it would be a
+statement about which plugin is installed, not about this code.
 """
 
 from __future__ import annotations
@@ -49,9 +43,8 @@ MATRIX_CONFIGS = [
     "sync_t1_rt",
 ]
 
-#: Iterations and rounds for the sweep.  Far too small to mean anything as a
-#: measurement, which is right: what is under test is that every
-#: configuration ran and wrote a well-formed row, not what the numbers were.
+#: Far too small to mean anything as a measurement, which is right: what is
+#: under test is that every configuration wrote a well-formed row.
 MATRIX_ITERATIONS = 20
 MATRIX_ROUNDS = 1
 
@@ -71,12 +64,7 @@ def rt_check(run, repo):
 
 
 def test_rt_check_runs(rt_check):
-    """It produced its report.
-
-    The exit code is deliberately not asserted: a non-zero one means the
-    host has something worth fixing, which is a true statement about the
-    machine rather than a failure of the script.
-    """
+    """It produced its report; the exit code is a fact about the machine."""
     assert "=== real-time host audit ===" in rt_check.stdout
 
 
@@ -116,12 +104,8 @@ def test_probe_reports_the_sync_mode(probe):
 
 
 def test_probe_lists_the_attributes(probe):
-    """The attribute list is the plugin's own answer about what it accepts.
-
-    Counted against ``num_attributes`` rather than merely non-empty: a probe
-    that printed a count it did not then list would be reporting a surface
-    nobody can see.
-    """
+    """Counted against ``num_attributes``, not merely non-empty: a count
+    that is not then listed is a surface nobody can see."""
     _, reported = probe
     listed = [key for key in reported if key.startswith("attribute[")]
     assert listed
@@ -129,10 +113,8 @@ def test_probe_lists_the_attributes(probe):
 
 
 def test_the_forked_plugin_executes_inline(probe):
-    """Against this project's fork, execution really is inline.
-
-    Skipped against a stock plugin, which advertises no such option.
-    """
+    """Against this project's fork, execution really is inline.  Skipped
+    against a stock plugin, which advertises no such option."""
     _, reported = probe
     if SYNC_ATTRIBUTE not in reported:
         pytest.skip(
@@ -150,14 +132,10 @@ def test_the_forked_plugin_executes_inline(probe):
 def test_run_matrix_writes_a_row_per_configuration(
     run, repo, build, plugin, tmp_path
 ):
-    """A tiny sweep: one CSV row per configuration, plus the header.
-
-    The sweep interleaves configurations in short rounds rather than running
-    each to completion, because a sequential A/B drifts by a few percent as
-    the CPU heats up -- the same order as the differences being measured.
-    That structure is what this test checks is intact; the numbers it
-    produces at twenty iterations are not a measurement of anything.
-    """
+    """One CSV row per configuration per round, plus the header.  The sweep
+    interleaves configurations in short rounds because a sequential A/B
+    drifts with CPU temperature by the same order as the effect measured;
+    that structure is what is checked, not the numbers."""
     sweep = tool(repo, "tools/run_matrix.sh")
     csv_path = tmp_path / "matrix.csv"
     result = run(

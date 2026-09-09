@@ -1,10 +1,8 @@
 {
   "name": "call_jax_from_cpp",
-  // Goes through docker/compose.yml rather than building the Dockerfile
-  // directly, so a VS Code session gets the same real-time privileges as
-  // `docker compose run dev`: SCHED_FIFO needs CAP_SYS_NICE plus an rtprio
-  // limit, and mlockall needs an unlimited memlock. A plain devcontainer build
-  // has neither, and every rt helper then reports [skip].
+  // Through docker/compose.yml so a VS Code session gets the real-time
+  // privileges `docker compose run dev` gets (CAP_SYS_NICE, rtprio, memlock);
+  // a plain devcontainer build has none, and every rt helper reports [skip].
   "dockerComposeFile": ["../docker/compose.yml"],
   "service": "dev",
   "workspaceFolder": "/workspace",

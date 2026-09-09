@@ -1,14 +1,9 @@
 """The ``small`` preset of the 02_trajopt workload still traces.
 
-``default`` is exercised by every other test in the suite -- it is the
-workload the benchmark, example 04 and the shape-pinning tests all describe.
-``small`` is exported by nobody, so without this it would break silently and
-be discovered by whoever reached for it on a slow machine.
-
-Lowering rather than compiling: what can go wrong at a different size is the
-tracing -- a shape that no longer broadcasts, an actuator row index that
-collides, a horizon a warm start cannot shift -- and lowering catches all of
-it without paying for a second XLA compilation.
+``default`` is exercised by every other test in the suite; ``small`` is
+exported by nobody, so without this it would break silently.  Lowering
+rather than compiling: what can go wrong at a different size is the tracing,
+and lowering catches all of it without a second XLA compilation.
 """
 
 from __future__ import annotations
@@ -30,19 +25,15 @@ SCRIPT = Path(__file__).resolve().parents[2] / "examples/02_trajopt/export.py"
 
 @pytest.fixture(scope="module")
 def export_module():
-    """``examples/02_trajopt/export.py``, loaded under a name of its own.
-
-    By path rather than by ``import export``: three scripts in this repository
-    are called ``export.py``, and whichever one reached ``sys.modules`` first
-    would answer for all of them.
-    """
+    """``examples/02_trajopt/export.py``, loaded under a name of its own:
+    several scripts here are called ``export.py``, and whichever reached
+    ``sys.modules`` first would answer for all of them."""
     pytest.importorskip("jax2exec", reason="the script imports the exporter")
     spec = importlib.util.spec_from_file_location("trajopt_export", SCRIPT)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    # Registered before it runs: ``dataclasses`` resolves the string
-    # annotations ``from __future__ import annotations`` leaves behind through
-    # ``sys.modules``, and a module that is not there cannot define ``Preset``.
+    # Registered before it runs: dataclasses resolves the string annotations
+    # through sys.modules, and a module that is not there cannot define one.
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
@@ -54,12 +45,9 @@ def small(export_module):
 
 
 def test_the_default_preset_is_the_one_everything_else_pins(export_module):
-    """24 masses, 6 actuators, a 50-step horizon, 5 iterations.
-
-    Spelled out here rather than read from the preset, because the point is
-    that these four numbers cannot move: ``x_ref`` is ``f64[50,48]`` in three
-    other tests, and every recorded latency figure describes this size.
-    """
+    """24 masses, 6 actuators, a 50-step horizon, 5 iterations -- spelled out,
+    because ``x_ref`` is ``f64[50,48]`` in three other tests and every
+    recorded latency figure describes this size."""
     preset = export_module.PRESETS["default"]
     assert (preset.nq, preset.nu, preset.h, preset.n_iters) == (24, 6, 50, 5)
 
@@ -92,12 +80,8 @@ def test_small_lowers(small):
 
 def test_every_actuator_drives_a_different_mass(small):
     """``b_act`` has one 1 per column, on distinct rows.
-
     ``rint(linspace(0, nq - 1, nu))`` can collide when ``nu`` approaches
-    ``nq``, and a duplicated row would silently give two actuators the same
-    authority -- a weaker problem, not a broken one, which is the kind of
-    change that goes unnoticed.
-    """
+    ``nq``, and a duplicated row would silently weaken the problem."""
     rows = [int(column.argmax()) for column in small.b_act.T]
     assert small.b_act.sum() == small.nu
     assert len(set(rows)) == small.nu
