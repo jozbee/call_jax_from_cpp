@@ -3,25 +3,19 @@
  * @brief What the host is willing to give a real-time loop, and the steps that
  *        ask for it.
  *
- * `pjrt::rt` provides the hardening primitives; this is the layer above them:
- * it reads the settings the host was booted with, decides which CPU the loop
- * should run on, applies the primitives in an order that will not shoot the
- * process in the foot, and reports every step instead of failing.  A control
- * process that refuses to start because it could not get `SCHED_FIFO` is worse
- * than one that starts and says so.
+ * `pjrt::rt` provides the hardening primitives; this is the layer above them.
+ * It reads the settings the host was booted with, chooses the loop's CPU,
+ * applies the primitives in the one safe order, and reports every step instead
+ * of failing: a control process that refuses to start because it could not get
+ * `SCHED_FIFO` is worse than one that starts and says so.
  *
- * The audit is deliberately the same vocabulary as `tools/rt_check.sh`, which
- * asks the same questions from the shell: isolated CPUs, `nohz_full`, the
- * scaling governor, transparent hugepages, SMT, `RLIMIT_RTPRIO`,
- * `RLIMIT_MEMLOCK`, `/dev/cpu_dma_latency`.  A report from a run and a report
- * from the script should be readable side by side.
- *
- * Nothing here is required for correct results.  It is required for *believable
- * latency numbers*: the first thing to check when a p99.9 looks wrong is
- * whether any of this took effect, which is why every example prints it.
+ * The audit uses the same vocabulary as `tools/rt_check.sh`, so a report from
+ * a run and one from the script read side by side.  None of it is required
+ * for correct results, only for believable latency numbers, which is why every
+ * example prints it.
  *
  * Linux only in substance; elsewhere every field reads "unavailable" and every
- * step skips, so the examples still build and run on a development machine.
+ * step skips, so the examples still build on a development machine.
  */
 #pragma once
 
@@ -60,63 +54,55 @@ namespace cjfc {
  * @brief The host settings that decide whether a bounded computation finishes
  *        on time.
  *
- * Read-only: detecting this changes nothing.  Unreadable values are
- * `"unavailable"` or -1 rather than an exception, because a container that
- * hides half of `/sys` is a normal place to run, not an error.
+ * Unreadable values are `"unavailable"` or -1 rather than an exception: a
+ * container that hides half of `/sys` is a normal place to run, not an error.
  */
 struct HostEnv {
   /// `uname -r`, or "unavailable".
   std::string kernel;
 
-  /// Whether this is a PREEMPT_RT kernel, from `/sys/kernel/realtime` or the
-  /// `uname` version string.
+  /// PREEMPT_RT, from `/sys/kernel/realtime` or the `uname` version string.
   bool preempt_rt = false;
 
-  /// `/.dockerenv` exists, or `$CJFC_IN_CONTAINER` is set.  Worth reporting
-  /// because the capability and rlimit answers below usually differ inside one.
+  /// `/.dockerenv` exists, or `$CJFC_IN_CONTAINER` is set.  The capability and
+  /// rlimit answers below usually differ inside one.
   bool in_container = false;
 
   /// Online CPUs, or -1.
   int cpus_online = -1;
 
-  /// `isolcpus=` as the kernel reports it in
-  /// `/sys/devices/system/cpu/isolated`.  Empty when the host was booted
-  /// without it, which is the common case and the reason `choose_cpu` has to
-  /// explain itself.
+  /// `isolcpus=` as `/sys/devices/system/cpu/isolated` reports it.  Empty on a
+  /// host booted without it, which is why `choose_cpu` explains itself.
   std::vector<int> isolated;
 
   /// `/sys/devices/system/cpu/nohz_full`: the CPUs the timer tick leaves alone.
   std::vector<int> nohz_full;
 
-  /// This thread's affinity mask.  The intersection with `isolated` is what can
-  /// actually be pinned to; a mask narrowed by `taskset` or a container's
-  /// cpuset makes an otherwise reasonable `--cpu 3` impossible.
+  /// This thread's affinity mask.  Its intersection with `isolated` is what can
+  /// be pinned to; `taskset` or a container's cpuset narrows it.
   std::vector<int> affinity;
 
   /// `scaling_governor` for cpu0.  Anything but "performance" means the clock
   /// can change under the measurement.
   std::string governor;
 
-  /// The selected transparent-hugepage mode ("always", "madvise", "never"),
-  /// unbracketed.  `khugepaged` stalls faulting threads under "always".
+  /// The selected transparent-hugepage mode, unbracketed.  `khugepaged` stalls
+  /// faulting threads under "always".
   std::string thp;
 
-  /// `/sys/devices/system/cpu/smt/control`: "on", "off", "notsupported".  A
-  /// sibling hyperthread steals from the loop's core.
+  /// `/sys/devices/system/cpu/smt/control`: "on", "off", "notsupported".
   std::string smt;
 
-  /// `RLIMIT_RTPRIO` soft limit; -1 for unlimited.  0 means `SCHED_FIFO` is not
-  /// available to this process.
+  /// `RLIMIT_RTPRIO` soft limit; -1 for unlimited.  0 means no `SCHED_FIFO`.
   long rlimit_rtprio = -1;
 
   /// `RLIMIT_MEMLOCK` soft limit in bytes; -1 for unlimited, which is what
   /// `mlockall` wants.
   long rlimit_memlock = -1;
 
-  /// `/proc/sys/kernel/sched_rt_runtime_us`: the microseconds per period a
-  /// real-time thread may run before the kernel throttles it.  -1 is both the
-  /// "throttling disabled" value the file itself holds and what is reported
-  /// when it cannot be read.
+  /// `/proc/sys/kernel/sched_rt_runtime_us`: microseconds per period a
+  /// real-time thread may run before it is throttled.  -1 is both the file's
+  /// own "disabled" value and what an unreadable file reports.
   long rt_runtime_us = -1;
 
   /// Whether `/dev/cpu_dma_latency` can be opened for writing, i.e. whether
@@ -127,49 +113,49 @@ struct HostEnv {
   double loadavg5 = -1.0;   ///< Five-minute load average, or -1.
   double loadavg15 = -1.0;  ///< Fifteen-minute load average, or -1.
 
-  /// `loadavg1 > 1.0`.  A latency number measured while this is true is not
-  /// noisy, it is wrong: the same configuration measured during a build
-  /// reported p50 2.4x high and max/p50 4.4 instead of 1.1.
+  /// `loadavg1 > 1.0`.  A number measured while this is true is not noisy, it
+  /// is wrong; `docs/developer/measurement.md` has the figures.
   bool busy = false;
 };
 
 /**
  * @brief Expand a kernel CPU list -- `"2-5,8"` -> `{2,3,4,5,8}`.
  *
- * Handles the two ways these files say "nothing": empty, and the literal
- * `"(null)"` that `nohz_full` prints when it is unset.  Anything unparseable is
- * skipped rather than throwing; this is diagnostic input, and a strange
- * `/sys` file should not take down a control process.
+ * Empty and the literal `"(null)"` that `nohz_full` prints when unset both
+ * mean "nothing".  Anything unparseable is skipped rather than thrown: this is
+ * diagnostic input, and a strange `/sys` file should not take down a control
+ * process.
  */
-inline std::vector<int> parse_cpulist(std::string text) {
+inline std::vector<int> parse_cpulist(const std::string& text) {
   std::vector<int> cpus;
   if (text == "(null)") {
     return cpus;
   }
   std::size_t pos = 0;
   while (pos < text.size()) {
-    const std::size_t comma = text.find(',', pos);
-    std::string item =
-        text.substr(pos, comma == std::string::npos ? std::string::npos
-                                                    : comma - pos);
-    pos = comma == std::string::npos ? text.size() : comma + 1;
+    std::size_t end = text.find(',', pos);
+    if (end == std::string::npos) {
+      end = text.size();
+    }
+    const std::string item = text.substr(pos, end - pos);
+    pos = end + 1;
 
     const std::size_t dash = item.find('-');
     try {
       if (dash == std::string::npos) {
         cpus.push_back(std::stoi(item));
-      } else {
-        const int lo = std::stoi(item.substr(0, dash));
-        const int hi = std::stoi(item.substr(dash + 1));
-        // A malformed range must not turn into a multi-gigabyte vector.
-        if (hi >= lo && hi - lo < 4096) {
-          for (int cpu = lo; cpu <= hi; ++cpu) {
-            cpus.push_back(cpu);
-          }
+        continue;
+      }
+      const int lo = std::stoi(item.substr(0, dash));
+      const int hi = std::stoi(item.substr(dash + 1));
+      // A malformed range must not turn into a multi-gigabyte vector.
+      if (hi >= lo && hi - lo < 4096) {
+        for (int cpu = lo; cpu <= hi; ++cpu) {
+          cpus.push_back(cpu);
         }
       }
     } catch (const std::exception&) {
-      continue;  // not a number: this file is not what we thought it was
+      continue;
     }
   }
   return cpus;
@@ -180,8 +166,8 @@ inline bool contains_cpu(const std::vector<int>& cpus, int cpu) {
   return std::find(cpus.begin(), cpus.end(), cpu) != cpus.end();
 }
 
-/// @brief Every CPU in @p mask except @p cpu -- the set to corral XLA's worker
-///        threads onto once the loop has claimed one core.
+/// @brief Every CPU in @p mask except @p cpu: where XLA's worker threads go
+///        once the loop has claimed one core.
 inline std::vector<int> cpus_except(const std::vector<int>& mask, int cpu) {
   std::vector<int> rest;
   rest.reserve(mask.size());
@@ -196,22 +182,16 @@ inline std::vector<int> cpus_except(const std::vector<int>& mask, int cpu) {
 /**
  * @brief Pick the CPU the loop should run on, and say why.
  *
- * @param env   The host audit this decision is read out of: which CPUs are
- *              isolated, and which are `nohz_full`.
- * @param spec  `"auto"` to choose one, `"none"` to stay unpinned, or a CPU
- *              number.
- * @param why   Filled in with the reason, in every case including success.  It
- *              is the detail line of the pinning step, and the answer to "why
- *              is this thing not pinned" without a second run.
- * @return The CPU to pin to, or -1 to leave the thread where the scheduler puts
- *         it.
+ * `"auto"` prefers a CPU that is both isolated and `nohz_full`, falls back to
+ * merely isolated, and otherwise stays unpinned: pinning to a CPU the rest of
+ * the system also uses trades one source of jitter for another, so an
+ * unhardened host is left alone unless the caller insists with a number.
  *
- * `"auto"` prefers a CPU that is both isolated and `nohz_full` -- isolation
- * keeps other work off it, `nohz_full` keeps the timer tick off it, and the
- * combination is what a tick-free core actually requires.  It falls back to
- * merely isolated, and then gives up: pinning to a CPU the rest of the system
- * is also using trades one source of jitter for another, so an unhardened host
- * is left alone unless the caller insists with an explicit number.
+ * @param env   The host audit: which CPUs are isolated and `nohz_full`.
+ * @param spec  `"auto"`, `"none"`, or a CPU number.
+ * @param why   The reason, filled in on success too; it becomes the detail
+ *              line of the pinning step.
+ * @return The CPU to pin to, or -1 to leave the thread where it is.
  */
 inline int choose_cpu(const HostEnv& env, const std::string& spec,
                       std::string& why) {
@@ -233,10 +213,8 @@ inline int choose_cpu(const HostEnv& env, const std::string& spec,
         return cpu;
       }
     }
-    // An affinity mask that is already a single CPU means somebody pinned this
-    // process before it started -- `taskset`, a cpuset, a container's
-    // --cpuset-cpus. Reporting that as a skipped step reads like a failure
-    // when the job is in fact already done, so name the CPU instead.
+    // A single-CPU affinity mask means somebody pinned this process before it
+    // started (`taskset`, a cpuset): report the CPU rather than a skip.
     if (env.affinity.size() == 1) {
       why = "already pinned before launch (affinity is a single cpu)";
       return env.affinity.front();
@@ -266,13 +244,12 @@ inline int choose_cpu(const HostEnv& env, const std::string& spec,
 
 /// @brief One hardening step and what became of it.
 struct Step {
-  std::string name;   ///< The helper that was asked, e.g. "lock_memory".
-  bool ok = false;    ///< Whether it took effect.
-  std::string detail; ///< What it did, or why it did not.
+  std::string name;    ///< The helper that was asked, e.g. "lock_memory".
+  bool ok = false;     ///< Whether it took effect.
+  std::string detail;  ///< What it did, or why it did not.
 };
 
-/// @brief Print one step as `  [ok  ] name: detail`, or `  [skip] ...` when it
-///        did not take effect.
+/// @brief Print one step as `  [ok  ] name: detail` or `  [skip] name: detail`.
 inline void print_step(const Step& step) {
   std::printf("  [%s] %s%s%s\n", step.ok ? "ok  " : "skip", step.name.c_str(),
               step.detail.empty() ? "" : ": ", step.detail.c_str());
@@ -281,28 +258,24 @@ inline void print_step(const Step& step) {
 /**
  * @brief Holds `/dev/cpu_dma_latency` open at 0 microseconds.
  *
- * The kernel applies the constraint for exactly as long as the file descriptor
- * stays open and drops it the moment it closes -- writing 0 and closing the
- * file achieves nothing, which is a mistake that is very easy to make and
- * impossible to see in the numbers except as the multi-millisecond outlier it
- * was supposed to prevent.  So this object owns the descriptor and the caller
- * keeps it alive for the whole run.
- *
- * Needs write access to the device, which normally means root.  Without it,
- * `acquire()` returns a skipped step and the run continues.
+ * The kernel applies the constraint only while the descriptor is open, so
+ * writing 0 and closing the file achieves nothing.  This object owns the
+ * descriptor and the caller keeps it alive for the whole run.  Needs write
+ * access to the device, normally root; without it `acquire()` returns a
+ * skipped step and the run continues.
  */
 class DmaLatencyHold {
  public:
   DmaLatencyHold() = default;
 
-  /// Releases the constraint: deep C-states become available again.
+  /// Releases the constraint.
   ~DmaLatencyHold() { release(); }
 
   DmaLatencyHold(const DmaLatencyHold&) = delete;
   DmaLatencyHold& operator=(const DmaLatencyHold&) = delete;
 
-  /// @brief Open the device and write a 0 microsecond latency target, keeping
-  ///        the descriptor.
+  /// @brief Open the device and write a 0 microsecond target, keeping the
+  ///        descriptor.
   Step acquire() {
 #if defined(__linux__)
     if (fd_ >= 0) {
@@ -346,11 +319,9 @@ class DmaLatencyHold {
 };
 
 /**
- * @brief Page faults and context switches, for the thread where that is
- *        available.
+ * @brief Page faults and context switches, per thread where that exists.
  *
- * The counters that matter in a loop that claims to be allocation-free: a
- * major fault is a disk read in the middle of a control cycle, and an
+ * A major fault is a disk read in the middle of a control cycle; an
  * involuntary context switch is the scheduler taking the core away.  Take one
  * before the loop and one after, and subtract.
  */
@@ -360,18 +331,19 @@ struct Rusage {
   long nvcsw = -1;   ///< Voluntary context switches: the thread waited.
   long nivcsw = -1;  ///< Involuntary ones: the thread was preempted.
 
-  /**
-   * @brief Sample the counters now.
-   *
-   * Scoped to the calling thread where `RUSAGE_THREAD` exists, so XLA's pool
-   * threads do not contribute; `scope()` says which was used, and the numbers
-   * mean something different in each case.
-   */
+  /// @brief Sample the counters now.  Scoped to the calling thread where
+  ///        `RUSAGE_THREAD` exists, so XLA's pool threads do not contribute;
+  ///        `scope()` says which.
   static Rusage now() noexcept {
     Rusage r;
 #if CJFC_HAVE_RUSAGE
+#if defined(RUSAGE_THREAD)
+    constexpr int who = RUSAGE_THREAD;
+#else
+    constexpr int who = RUSAGE_SELF;
+#endif
     rusage ru{};
-    if (getrusage(kWho, &ru) == 0) {
+    if (getrusage(who, &ru) == 0) {
       r.minflt = static_cast<long>(ru.ru_minflt);
       r.majflt = static_cast<long>(ru.ru_majflt);
       r.nvcsw = static_cast<long>(ru.ru_nvcsw);
@@ -392,7 +364,7 @@ struct Rusage {
 #endif
   }
 
-  /// @brief Field-wise difference, for reporting what one loop cost.
+  /// @brief Field-wise difference: what one loop cost.
   Rusage operator-(const Rusage& before) const noexcept {
     Rusage d;
     d.minflt = minflt - before.minflt;
@@ -401,21 +373,12 @@ struct Rusage {
     d.nivcsw = nivcsw - before.nivcsw;
     return d;
   }
-
-#if CJFC_HAVE_RUSAGE
- private:
-#if defined(RUSAGE_THREAD)
-  static constexpr int kWho = RUSAGE_THREAD;
-#else
-  static constexpr int kWho = RUSAGE_SELF;
-#endif
-#endif
 };
 
 #if defined(__linux__)
 namespace detail {
 
-/// First line of @p path, or an empty string when it cannot be read.
+/// First line of @p path, or empty when it cannot be read.
 inline std::string read_first_line(const char* path) {
   std::ifstream file(path);
   std::string line;
@@ -425,8 +388,7 @@ inline std::string read_first_line(const char* path) {
   return std::string();
 }
 
-/// First line of @p path, or "unavailable" -- the spelling the report uses for
-/// a value this host does not expose.
+/// First line of @p path, or "unavailable", the report's spelling for it.
 inline std::string read_line_or_unavailable(const char* path) {
   const std::string line = read_first_line(path);
   return line.empty() ? std::string("unavailable") : line;
@@ -441,9 +403,8 @@ inline long rlimit_soft(int resource) {
   return static_cast<long>(limit.rlim_cur);
 }
 
-/// The bracketed choice out of a sysfs multiple-choice line -- "always
-/// [madvise] never" is the mode plus the menu, and only the mode is a fact
-/// about this host.
+/// The bracketed choice out of a sysfs menu line: "always [madvise] never" is
+/// the mode plus the menu, and only the mode is a fact about this host.
 inline std::string bracketed_choice(const std::string& line) {
   const std::size_t open = line.find('[');
   const std::size_t close = line.find(']', open + 1);
@@ -464,8 +425,8 @@ inline HostEnv detect_host_env() {
     env.kernel = uts.release;
     // Mainline stamps PREEMPT_RT into the version string; the sysfs file below
     // is the authority when it exists.
-    env.preempt_rt = std::string(uts.version).find("PREEMPT_RT") !=
-                     std::string::npos;
+    env.preempt_rt =
+        std::string(uts.version).find("PREEMPT_RT") != std::string::npos;
   } else {
     env.kernel = "unavailable";
   }
@@ -516,8 +477,8 @@ inline HostEnv detect_host_env() {
     }
   }
 
-  // Opening it changes nothing; only writing to a descriptor that stays open
-  // does.  @see DmaLatencyHold.
+  // Opening changes nothing; only a write to a descriptor that stays open
+  // does (see DmaLatencyHold).
   const int dma_fd = ::open("/dev/cpu_dma_latency", O_RDWR | O_CLOEXEC);
   if (dma_fd >= 0) {
     env.cpu_dma_latency_writable = true;
@@ -533,11 +494,10 @@ inline HostEnv detect_host_env() {
   return env;
 }
 
-#else  // Not Linux: report honestly rather than approximately.
+#else  // Not Linux.
 
-/// @brief Everything unavailable: none of these settings exist on this
-///        platform, and reporting a plausible-looking value would be worse than
-///        reporting none.
+/// @brief Everything unavailable: a plausible-looking value would be worse
+///        than none.
 inline HostEnv detect_host_env() {
   HostEnv env;
   env.kernel = "unavailable";
@@ -552,9 +512,9 @@ inline HostEnv detect_host_env() {
 /**
  * @brief What a program wants asked for on its behalf.
  *
- * `rt_priority` is 0 by default -- `SCHED_FIFO` is opt-in because a real-time
+ * `rt_priority` defaults to 0: `SCHED_FIFO` is opt-in because a real-time
  * thread that misbehaves takes the machine with it, and because a run that
- * quietly got it and a run that quietly did not are indistinguishable in the
+ * quietly got it and one that quietly did not are indistinguishable in the
  * output unless the request was explicit.
  */
 struct HardeningOptions {
@@ -568,41 +528,27 @@ struct HardeningOptions {
 
 // docs: begin rt-harden-impl
 /**
- * @brief Apply the hardening steps, in the one order that is safe, and report
+ * @brief Apply the hardening steps in the one order that is safe, and report
  *        each.
  *
- * Never fails: every step that does not take effect becomes a skipped `Step`
- * with the reason in it, and the program runs anyway.  An unprivileged run on a
- * stock kernel is expected to skip most of this and is still a correct run --
- * it is just not a run to quote tail numbers from.
+ * Never fails: a step that does not take effect becomes a skipped `Step` with
+ * the reason in it, and the program runs anyway.  The order matters:
+ * `harden_malloc` before anything allocates in bulk, `corral_xla_threads`
+ * after the `Runtime` exists because XLA's pools are created with the client,
+ * and `set_realtime_priority` last so that loading and warm-up never run at
+ * real-time priority.  `docs/developer/realtime-notes.md` has each step.
  *
- * The order is not arbitrary:
- *
- *   1. `harden_malloc` before anything allocates in bulk, so the heap it
- *      configures is the heap the rest of startup grows.
- *   2. `lock_memory`, which prefaults and locks what exists by then.
- *   3. `pin_current_thread`, so the loop owns one core.
- *   4. `corral_xla_threads`, which needs the `Runtime` to exist -- XLA's pools
- *      are created with the client, so call this after loading, not before.
- *   5. `cpu_dma_latency`, held for the process lifetime by @p dma.
- *   6. `set_realtime_priority` **last**, so that loading, warm-up and every
- *      allocation that comes with them do not run at real-time priority where
- *      a long operation would starve the rest of the machine.
- *
- * @param env          The host audit.  A step whose precondition is absent
- *                     here is reported as skipped rather than attempted.
- * @param options      Which of the six steps to run.  Priority and the
- *                     C-state hold are off by default, because both need a
- *                     privilege an ordinary run does not have.
- * @param dma          Kept alive by the caller; closing it releases the C-state
- *                     constraint.
- * @param chosen_cpu   Set to the CPU that was pinned to, or -1.  Optional.
- * @return One `Step` per helper, in the order above.
+ * @param env         The host audit; a step whose precondition is absent here
+ *                    is reported as skipped rather than attempted.
+ * @param options     Which of the six steps to run.
+ * @param dma         Kept alive by the caller; closing it releases the C-state
+ *                    constraint.
+ * @param chosen_cpu  Set to the CPU pinned to, or -1.  Optional.
+ * @return One `Step` per helper, in the order applied.
  */
 inline std::vector<Step> apply_hardening(const HostEnv& env,
                                          const HardeningOptions& options,
-                                         DmaLatencyHold& dma,
-                                         int* chosen_cpu) {
+                                         DmaLatencyHold& dma, int* chosen_cpu) {
   auto from_status = [](const char* name, const pjrt::rt::Status& status) {
     return Step{name, status.ok, status.detail};
   };

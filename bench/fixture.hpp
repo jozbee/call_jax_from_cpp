@@ -3,15 +3,11 @@
  * @brief Reference cases: what JAX computed, and what the C++ path has to
  *        reproduce.
  *
- * A C++ call path that runs is not the same as a C++ call path that is right,
- * and a benchmark that reports a fast wrong answer is worse than no benchmark.
- * These files are the ground truth: `jax2exec.reference.write_reference_cases`
- * runs the exported function under JAX and freezes, per case, every input
- * followed by every output as raw bytes.
- *
- * The layout is the dumbest thing that works -- no header, no padding, no
- * length prefixes, C order, native width, little-endian, a scalar occupying
- * exactly one element -- because the reader already knows every shape and
+ * A benchmark that reports a fast wrong answer is worse than no benchmark.
+ * `jax2exec.reference.write_reference_cases` runs the exported function under
+ * JAX and freezes, per case, every input followed by every output as raw
+ * bytes: no header, no padding, C order, native width, little-endian, a
+ * scalar occupying one element.  The reader already knows every shape and
  * dtype from the manifest, and anything cleverer is one more thing that can
  * disagree between the two languages.
  *
@@ -25,17 +21,12 @@
  *     "tolerance": {"float64": 1e-6, "float32": 1e-4} }
  * @endcode
  *
- * Two properties are worth stating outright, because both are places where a
- * check that looks like a check silently is not one:
- *
- *   - **A NaN is a mismatch, counted separately.**  Every comparison against
- *     NaN is false, so a running maximum of the relative error absorbs one
- *     without ever exceeding a tolerance.  The exporter refuses to freeze a
- *     non-finite reference for the same reason; this is the other half of that
- *     rule, on the side that reads the file.
- *   - **A stale fixture is an error, not a buffer overrun.**  Every arena is
- *     filled through `load_inputs`, which re-checks the dtype and the byte
- *     count against the loaded `Function` before it copies anything.
+ * Two places where a check that looks like a check silently is not one.  A
+ * NaN is a mismatch, counted separately: every comparison against NaN is
+ * false, so a running maximum of the relative error absorbs one without ever
+ * exceeding a tolerance.  And a stale fixture is an error, not a buffer
+ * overrun: `load_inputs` re-checks every dtype and byte count against the
+ * loaded `Function` before it copies anything.
  */
 #pragma once
 
@@ -57,65 +48,45 @@
 
 namespace bench {
 
-/// @brief One input or output, exactly as the manifest describes it.
 struct ArraySpec {
-  /// The JAX argument or result name, matching the sidecar's.
   std::string name;
 
-  /// NumPy dtype name -- "float64", "int32", "bool" -- kept as the manifest
-  /// spelled it, so an error message can quote the file rather than a
-  /// re-rendering of it.
+  /// Kept as the manifest spelled it, so an error message can quote the file
+  /// rather than a re-rendering of it.
   std::string dtype;
 
-  /// The exact JAX shape, row-major.  Empty for a scalar.
-  std::vector<std::size_t> shape;
-
-  /// Product of `shape`; 1 for a scalar, never 0 unless a dimension is.
   std::size_t numel = 0;
 
-  /// `numel * itemsize(dtype)`: the length of every `memcpy` and every
-  /// comparison this fixture performs.
   std::size_t nbytes = 0;
 };
 
-/// @brief One frozen case: the inputs to feed, and the outputs to expect.
-///
-/// Bytes rather than values.  The reader is handed one arena per array and
-/// copies into or compares against it, and the element type is a property of
-/// the manifest rather than of the storage.
+/// One frozen case, as bytes: the element type is a property of the manifest,
+/// not of the storage.
 struct Case {
   std::vector<std::vector<std::byte>> inputs;
   std::vector<std::vector<std::byte>> outputs;
 };
 
-/**
- * @brief A manifest and its cases, loaded once and read from the call loop.
- *
- * Construction does all the I/O and all the parsing.  After that, `compare`
- * and `load_inputs` allocate nothing: `load_inputs` in particular runs inside
- * the timed region, because a control loop writes fresh inputs every step and
- * a benchmark that skips that copy is measuring something no caller does.
- */
+/// A manifest and its cases, loaded once.  Construction does all the I/O and
+/// parsing; after it, `compare` and `load_inputs` allocate nothing, because
+/// `load_inputs` runs inside the timed loop.
 class Fixture {
  public:
-  /// The one manifest schema this reader understands.
   static constexpr int kSchema = 2;
 
   /**
    * @brief Read `<dir>/<name>_cases.json` and every `.bin` it names.
    *
-   * @throws std::runtime_error when a file is missing or unreadable, when the
-   *         schema is not @ref kSchema, when a dtype is one this project has
-   *         no arena for, or when a case file's length disagrees with the
-   *         manifest.
+   * @throws std::runtime_error when a file is missing or unreadable, the
+   *         schema is not @ref kSchema, a dtype has no arena in this project,
+   *         or a case file's length disagrees with the manifest.
    */
   Fixture(const std::string& dir, const std::string& name)
       : manifest_path_(dir + "/" + name + "_cases.json") {
     const nlohmann::json meta = read_json(manifest_path_);
 
-    // Read the schema before anything else: on a manifest from an older
-    // exporter every other field below would fail with a message about a
-    // missing key, which sends the reader looking in the wrong place.
+    // The schema first: on an older manifest every other field would fail
+    // with a "missing key" message that sends the reader to the wrong place.
     const int schema = meta.value("schema", 0);
     if (schema != kSchema) {
       throw std::runtime_error(
@@ -126,7 +97,6 @@ class Fixture {
           " only; regenerate the fixture with examples/02_trajopt/export.py");
     }
 
-    name_ = meta.value("name", name);
     inputs_ = read_specs(meta, "inputs", "input", input_types_);
     outputs_ = read_specs(meta, "outputs", "output", output_types_);
     read_tolerance(meta);
@@ -141,41 +111,17 @@ class Fixture {
     }
   }
 
-  /// @brief The function these cases belong to, from the manifest.
-  const std::string& name() const { return name_; }
-
-  /// @brief The manifest that was read, for error messages that need to name
-  ///        the file the reader should go and look at.
-  const std::string& manifest_path() const { return manifest_path_; }
-
-  /// @brief How many reference cases were frozen.
   std::size_t num_cases() const { return cases_.size(); }
 
-  /// @brief The inputs, in call order.
-  const std::vector<ArraySpec>& inputs() const { return inputs_; }
-
-  /// @brief The outputs, in call order.
-  const std::vector<ArraySpec>& outputs() const { return outputs_; }
-
-  /// @brief The result of checking one call's outputs against a frozen case.
-  ///
   /// Three numbers rather than one because they mean different things: a
   /// relative error just over tolerance is a reassociation difference, an
-  /// exact mismatch in an integer output is a logic error, and a NaN is
-  /// neither -- it is the failure mode that a max-of-relative-errors check
-  /// cannot see at all.
+  /// exact mismatch in an integer output is a logic error, and a NaN is the
+  /// failure a max-of-relative-errors check cannot see at all.
   struct Comparison {
-    /// Largest relative error over every floating element of every output.
     double max_rel_err = 0.0;
-
-    /// Elements of integer and bool outputs that differ bit for bit.
     std::size_t exact_mismatches = 0;
-
     /// Floating elements where either side is NaN.  Always a failure.
     std::size_t nan_count = 0;
-
-    /// Whether this run agrees with the reference: no NaN, no exact mismatch,
-    /// and every floating element within its own dtype's tolerance.
     bool ok = false;
   };
 
@@ -186,12 +132,10 @@ class Fixture {
    *               `Function::output_raw` hands back.
    *
    * Floating outputs are judged against the manifest's per-dtype tolerance
-   * with an absolute floor in the denominator (1e-12 for float64, 1e-6 for
-   * float32), so a reference value of exactly zero does not turn a
-   * one-ULP difference into an infinite relative error.  The floor is a
-   * denominator floor and not a free pass: garbage where the reference has a
-   * zero still fails.  Integer and bool outputs are compared exactly, since
-   * there is no such thing as a rounding difference in an index.
+   * with a floor in the denominator, so a reference value of exactly zero
+   * does not turn a one-ULP difference into an infinite relative error.  It
+   * is a denominator floor and not a free pass: garbage where the reference
+   * has a zero still fails.  Integer and bool outputs are compared exactly.
    *
    * @throws std::runtime_error when @p case_index is out of range or
    *         @p actual does not have one pointer per output.
@@ -236,12 +180,10 @@ class Fixture {
   /**
    * @brief Copy case @p case_index's inputs into @p function's arenas.
    *
-   * Called from inside the timed region on purpose.  Every check it makes is
-   * an integer comparison against values resolved at load: the dtype and byte
-   * count of each array, re-checked every call because getting them wrong is a
-   * write past the end of an input arena or a read past the end of an output
-   * one, and a fixture regenerated for a different signature is exactly how
-   * that happens.
+   * Runs inside the timed region.  Every check is an integer comparison
+   * against values resolved at load, made on every call because getting one
+   * wrong is a write past the end of an input arena, and a fixture
+   * regenerated for a different signature is exactly how that happens.
    *
    * @throws std::runtime_error when the function and the manifest disagree, or
    *         when @p case_index is out of range.
@@ -260,13 +202,10 @@ class Fixture {
                   inputs_[i].nbytes);
     }
 
-    // Outputs are checked here too, even though nothing is written to them,
-    // because `compare()` reads `numel` elements straight out of the pointers
-    // the caller hands it. Those come from the `Function`'s arenas, sized from
-    // the artifact; if the manifest declares a larger array than the artifact
-    // produces, the comparison reads past the end. The two are separate
-    // command-line options (`--assets-dir` and `--artifacts-dir`), so one
-    // wrong flag is enough to pair a manifest with a different export.
+    // Outputs too, although nothing is written to them: `compare()` reads
+    // `numel` elements out of arenas sized from the artifact, and
+    // `--assets-dir` and `--artifacts-dir` are separate flags, so one wrong
+    // flag pairs a manifest with a different export.
     if (function.num_outputs() != outputs_.size()) {
       mismatched_arity(function);
     }
@@ -279,13 +218,11 @@ class Fixture {
   }
 
  private:
-  /// Denominator floor for float64, small enough that it only takes effect
-  /// against a reference value that is itself essentially zero.
+  /// Denominator floors, small enough to take effect only against a reference
+  /// value that is itself essentially zero at that type's epsilon.
   static constexpr double kFloorF64 = 1e-12;
-  /// The same for float32, scaled to that type's much coarser epsilon.
   static constexpr double kFloorF32 = 1e-6;
 
-  /// Read a whole JSON file, naming the file when it is missing or malformed.
   /// nlohmann's own messages say what is wrong but not where, and "parse error
   /// at line 3" is unactionable without the path.
   static nlohmann::json read_json(const std::string& path) {
@@ -304,8 +241,6 @@ class Fixture {
     }
   }
 
-  /// Turn one `inputs`/`outputs` array into specs, resolving each dtype to the
-  /// enum the `Function` will be checked against.
   std::vector<ArraySpec> read_specs(const nlohmann::json& meta, const char* key,
                                     const char* kind,
                                     std::vector<pjrt::DType>& types) const {
@@ -330,9 +265,9 @@ class Fixture {
             "supports (bool, int8..int64, uint8..uint64, float32, float64)");
       }
 
-      spec.shape = entry.at("shape").get<std::vector<std::size_t>>();
       spec.numel = 1;
-      for (const std::size_t dimension : spec.shape) {
+      for (const std::size_t dimension :
+           entry.at("shape").get<std::vector<std::size_t>>()) {
         spec.numel *= dimension;
       }
       spec.nbytes = spec.numel * pjrt::itemsize(*dtype);
@@ -345,8 +280,7 @@ class Fixture {
   }
 
   /// The manifest's tolerances, defaulting to `jax2exec.reference`'s own.
-  /// float32 gets more room because XLA is free to fuse and reassociate, and
-  /// the reference path and the executable do not have to do it the same way.
+  /// float32 gets more room because XLA is free to fuse and reassociate.
   void read_tolerance(const nlohmann::json& meta) {
     const auto tolerance = meta.find("tolerance");
     if (tolerance == meta.end() || !tolerance->is_object()) {
@@ -356,10 +290,8 @@ class Fixture {
     tolerance_f32_ = tolerance->value("float32", tolerance_f32_);
   }
 
-  /// Read one case file, whole, after checking its length against what the
-  /// manifest says it should be.  Checking the total up front turns "short
-  /// read" into an error that names both byte counts, which is the difference
-  /// between "the fixture is stale" and a mystery.
+  /// The length is checked up front so that a short read is an error naming
+  /// both byte counts -- "the fixture is stale" -- rather than a mystery.
   Case read_case(const std::string& path) const {
     const std::size_t input_bytes = total_bytes(inputs_);
     const std::size_t output_bytes = total_bytes(outputs_);
@@ -389,8 +321,6 @@ class Fixture {
     return reference;
   }
 
-  /// Sum of the arena sizes of one group, which is also its span in a case
-  /// file.
   static std::size_t total_bytes(const std::vector<ArraySpec>& specs) {
     std::size_t total = 0;
     for (const ArraySpec& spec : specs) {
@@ -399,7 +329,6 @@ class Fixture {
     return total;
   }
 
-  /// Read one group of arrays out of an open case file, in call order.
   static void read_group(std::ifstream& file, const std::string& path,
                          const std::vector<ArraySpec>& specs, const char* kind,
                          std::vector<std::vector<std::byte>>& into) {
@@ -422,8 +351,6 @@ class Fixture {
     }
   }
 
-  /// Bounds-checked case lookup.  On the `load_inputs` path this is one
-  /// comparison per call; the message is built only when it fails.
   const Case& case_at(std::size_t case_index) const {
     if (case_index >= cases_.size()) {
       out_of_range(case_index);
@@ -431,13 +358,8 @@ class Fixture {
     return cases_[case_index];
   }
 
-  /**
-   * Compare one floating output element by element.
-   *
-   * Equality is tested first, which is both the common answer and the only way
-   * to give a pair of matching infinities the right verdict: their difference
-   * is a NaN, and this is a comparison where a NaN must never pass.
-   */
+  /// Equality is tested first: it is the common answer, and the only way to
+  /// pass a pair of matching infinities, whose difference is a NaN.
   template <class T>
   static void compare_floating(const std::vector<std::byte>& want_bytes,
                                const void* got_raw, std::size_t numel,
@@ -467,10 +389,9 @@ class Fixture {
     }
   }
 
-  /// Compare one integer or bool output exactly.  The whole array goes through
-  /// one `memcmp`; only when that fails is the per-element loop entered, to
-  /// say how much of the output is wrong -- one bad element and a completely
-  /// wrong array are different bugs.
+  /// One `memcmp` for the whole array; the per-element loop runs only when it
+  /// fails, because one bad element and a wholly wrong array are different
+  /// bugs.
   static void compare_exact(const std::vector<std::byte>& want, const void* got,
                             const ArraySpec& spec, pjrt::DType dtype,
                             Comparison& result) {
@@ -488,10 +409,8 @@ class Fixture {
     result.ok = false;
   }
 
-  // Out of line and [[noreturn]] on purpose: these build strings, and
-  // load_inputs runs inside the timed loop.  Keeping the message off the hot
-  // path is the difference between two integer comparisons per input and a
-  // stack frame per input.
+  // Out of line and [[noreturn]]: these build strings, and load_inputs runs
+  // inside the timed loop, where a check must stay two integer comparisons.
   [[noreturn]] void out_of_range(std::size_t case_index) const {
     throw std::runtime_error("case " + std::to_string(case_index) + ": " +
                              manifest_path_ + " has " +
@@ -519,8 +438,6 @@ class Fixture {
         " bytes; the fixture and the artifact came from different exports");
   }
 
-  /// The same for an output, whose mismatch is a read past the end of an arena
-  /// rather than a write past it, and so is quieter and worth naming exactly.
   [[noreturn]] void mismatched_output(std::size_t i,
                                       const pjrt::Function& function) const {
     const ArraySpec& spec = outputs_[i];
@@ -535,12 +452,10 @@ class Fixture {
   }
 
   std::string manifest_path_;
-  std::string name_;
   std::vector<ArraySpec> inputs_;
   std::vector<ArraySpec> outputs_;
 
-  // The dtypes again, resolved once, because the per-call check in
-  // load_inputs has to be an enum comparison rather than a string one.
+  // Resolved once, so the per-call check is an enum compare, not a string one.
   std::vector<pjrt::DType> input_types_;
   std::vector<pjrt::DType> output_types_;
 

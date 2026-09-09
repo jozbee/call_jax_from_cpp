@@ -2,49 +2,36 @@
  * path.
  *
  * Grepping the source for `malloc` proves nothing about what the linked binary
- * does at run time -- OpenBLAS, libm, and the C++ runtime are all free to
- * allocate behind the caller's back. This library interposes the allocator and
- * counts calls between an arm and a disarm marker, so a test can wrap exactly
- * the region it cares about (the steady-state calls, after warm-up).
+ * does at run time. This library interposes the allocator and counts calls
+ * between an arm and a disarm marker, so a test can wrap exactly the region it
+ * cares about.
  *
  * Build:  cc -shared -fPIC -O2 -o malloc_guard.so malloc_guard.c -ldl
  * Use:    LD_PRELOAD=./malloc_guard.so ./driver ...            (ELF)
  *         DYLD_INSERT_LIBRARIES=./malloc_guard.so ./driver ...  (Mach-O)
  *
- * The two platforms interpose differently and both halves are here:
+ * The two platforms interpose differently and both halves are here. On ELF,
+ * defining `malloc` in a preloaded object shadows libc's, and the real one is
+ * reached through dlsym(RTLD_NEXT); dlsym may itself allocate while
+ * resolving, which would recurse forever, so allocations made during that
+ * window come from a static arena, recognised by address and skipped on free.
+ * On Mach-O the two-level namespace makes shadowing by name a no-op, so
+ * dyld's __DATA,__interpose table is used instead; dyld does not apply it to
+ * the image that declares it, so the replacements call malloc/free directly.
  *
- *   ELF     defining `malloc` in a preloaded object shadows libc's, and the
- *           real one is reached through dlsym(RTLD_NEXT). dlsym may itself
- *           allocate while resolving, which would recurse forever, so
- *           allocations made during that window come from a static arena and
- *           are recognised (by address) and ignored on free.
- *
- *   Mach-O  the two-level namespace makes shadowing by name a no-op, so dyld's
- *           __DATA,__interpose table is used instead. dyld does not apply the
- *           interposition to the image that declares it, so the replacements
- *           call malloc/free directly and no bootstrap arena is needed.
- *
- * The program under test does not link against this library. It looks the
- * markers up with dlsym(RTLD_DEFAULT, ...) and skips them when absent, so the
- * same binary runs with and without the preload.
- *
- * WHY A PLAIN COUNT IS NOT ENOUGH. A whole-process "zero allocations while
- * armed" gate is unachievable: XLA's thunk runtime allocates roughly 15,400
- * times per call, inside the plugin, and that allocator is not reachable
- * through the PJRT C API. What *is* checkable is that the wrapper adds none of
- * its own. So every armed allocation is attributed to the module containing
- * its return address:
+ * A whole-process zero is unachievable -- XLA's thunk runtime allocates
+ * thousands of times per call inside the plugin -- so every armed allocation
+ * is attributed to the module containing its return address:
  *
  *   CLS_SELF     the main executable, or a module matching $PJRT_GUARD_SELF
  *                (default "libpjrt_exec") -- the number that must stay at zero
  *   CLS_PLUGIN   inside libpjrt_c_api_cpu_plugin
  *   CLS_RUNTIME  libc, libstdc++, LAPACK, the thread pool, everything else
  *
- * The C++ operator new family is interposed too, under its Itanium-mangled
- * names. Without that, an inlined std::vector growth would be charged to
- * libstdc++ rather than to the module that grew the vector, which is exactly
- * the attribution the gate depends on. operator delete is deliberately left
- * alone: libstdc++ routes it to free, which is already interposed.
+ * The C++ operator new family is interposed too, under its mangled names, so
+ * that an inlined std::vector growth is charged to the module that grew the
+ * vector rather than to libstdc++. operator delete is left alone: libstdc++
+ * routes it to free, which is already interposed.
  *
  * Classification is ELF-only. On Apple the counts are still correct;
  * pjrt_guard_classified() reports 0 and the class counters stay 0.
@@ -75,10 +62,8 @@ static unsigned long g_allocs;
 static unsigned long g_frees;
 static unsigned long g_class[CLS_COUNT];
 
-/* Counted whether armed or not, from the first relocation onwards. Its only
- * job is to make a zero armed count believable: if the process made thousands
- * of allocations in total and none while armed, the interposer is clearly
- * live and the call path is clearly clean. A zero here would instead mean the
+/* Counted whether armed or not. Thousands in total with none while armed
+ * means the interposer is live and the path is clean; zero in total means the
  * preload never took effect. */
 static unsigned long g_total_allocs;
 
@@ -94,15 +79,13 @@ struct guard_range {
   int cls;
 };
 
-/* Comfortably more than the ~60 objects a plugin process maps. Overflow is not
- * an error: the surplus ranges simply classify as CLS_RUNTIME. */
+/* Overflow is not an error: the surplus ranges classify as CLS_RUNTIME. */
 #define GUARD_MAX_RANGES 512
 
 static struct guard_range g_ranges[GUARD_MAX_RANGES];
 
-/* Published only once the table is complete. An allocation racing with a
- * rebuild reads 0 and classifies as CLS_RUNTIME rather than indexing a
- * half-written entry. */
+/* Published only once the table is complete, so a racing allocation
+ * classifies as CLS_RUNTIME rather than indexing a half-written entry. */
 static size_t g_nranges;
 
 static int guard_range_class(const char *name) {
@@ -131,8 +114,7 @@ static int guard_phdr_cb(struct dl_phdr_info *info, size_t size, void *data) {
   cls = guard_range_class(info->dlpi_name);
   for (i = 0; i < info->dlpi_phnum; ++i) {
     const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
-    /* Only executable segments can hold a return address, and skipping the
-     * data segments keeps the table small enough to search cheaply. */
+    /* Only executable segments can hold a return address. */
     if (ph->p_type != PT_LOAD || (ph->p_flags & PF_X) == 0) {
       continue;
     }
@@ -148,14 +130,12 @@ static int guard_phdr_cb(struct dl_phdr_info *info, size_t size, void *data) {
 }
 
 /* Called from pjrt_guard_arm(), never from an interposed function:
- * dl_iterate_phdr takes the loader lock, which must not happen inside the
- * region being timed. */
+ * dl_iterate_phdr takes the loader lock, and the timed region must not. */
 static void guard_build_ranges(void) {
   size_t n = 0;
   size_t i;
   __atomic_store_n(&g_nranges, (size_t)0, __ATOMIC_RELEASE);
   dl_iterate_phdr(guard_phdr_cb, &n);
-  /* Insertion sort: a few dozen entries, and it runs once per arm. */
   for (i = 1; i < n; ++i) {
     struct guard_range key = g_ranges[i];
     size_t j = i;
@@ -209,8 +189,7 @@ static void count_free(void) {
 #if defined(__APPLE__)
 
 /* dyld rebinds every other image's references to `replacee` so they land on
- * `replacement`; this image keeps the originals, which is what lets the
- * replacements below call malloc and free by name. */
+ * `replacement`; this image keeps the originals. */
 #define PJRT_INTERPOSE(replacement, replacee)                            \
   __attribute__((used, section("__DATA,__interpose"))) static struct {      \
     const void *replacement;                                                \
@@ -368,127 +347,80 @@ void *aligned_alloc(size_t align, size_t n) {
 }
 
 /* --- operator new family ------------------------------------------------- *
- *
- * Charged to the caller, not to libstdc++, which is the whole point: a
- * std::vector that grows inside an inlined header is otherwise indistinguish-
- * able from libstdc++ allocating on its own behalf. These call real_malloc
- * directly rather than the malloc above, so one `new` counts once.
- *
- * The mangled names are identical on x86_64 and aarch64 (both LP64, so size_t
- * mangles to `m`). The nothrow_t and align_val_t parameters are declared as
- * plain machine words: their values are never read, only their argument slots
- * have to match.
- */
+ * These call real_malloc directly, so one `new` counts once. The mangled names
+ * are the same on x86_64 and aarch64 (LP64: size_t mangles to `m`); nothrow_t
+ * and align_val_t are declared as plain words, since only the slots matter. */
 
-static void *guard_new_raw(size_t n) {
-  /* operator new(0) must still return a distinct, freeable pointer. */
-  if (n == 0) n = 1;
-  return real_malloc(n);
+/* operator new(0) must still return a distinct, freeable pointer. */
+static void *guard_new(size_t n, const void *ra) {
+  if (resolving) return boot_alloc(n ? n : 1);
+  if (!real_malloc) resolve();
+  count_alloc(ra);
+  return real_malloc(n ? n : 1);
 }
 
-static void *guard_new_aligned(size_t n, size_t align) {
+static void *guard_new_aligned(size_t n, size_t align, const void *ra) {
   void *p = NULL;
+  if (!real_posix_memalign) resolve();
+  count_alloc(ra);
   if (n == 0) n = 1;
-  /* posix_memalign rejects alignments below sizeof(void *); over-aligning is
-   * harmless and keeps the memory freeable with plain free(). */
+  /* posix_memalign rejects alignments below sizeof(void *); over-aligning
+   * keeps the memory freeable with plain free(). */
   if (align < sizeof(void *)) align = sizeof(void *);
   if (real_posix_memalign(&p, align, n) != 0) return NULL;
   return p;
 }
 
-/* operator new(size_t) */
-void *_Znwm(size_t n) {
-  const void *ra = __builtin_return_address(0);
-  void *p;
-  if (resolving) {
-    p = boot_alloc(n ? n : 1);
-    if (p == NULL) abort();
-    return p;
-  }
-  if (!real_malloc) resolve();
-  count_alloc(ra);
-  p = guard_new_raw(n);
-  /* The throwing forms must not return null, and C cannot throw bad_alloc. */
+/* The throwing forms must not return null, and C cannot throw bad_alloc. */
+static void *or_abort(void *p) {
   if (p == NULL) abort();
   return p;
+}
+
+/* operator new(size_t) */
+void *_Znwm(size_t n) {
+  return or_abort(guard_new(n, __builtin_return_address(0)));
 }
 
 /* operator new[](size_t) */
 void *_Znam(size_t n) {
-  const void *ra = __builtin_return_address(0);
-  void *p;
-  if (resolving) {
-    p = boot_alloc(n ? n : 1);
-    if (p == NULL) abort();
-    return p;
-  }
-  if (!real_malloc) resolve();
-  count_alloc(ra);
-  p = guard_new_raw(n);
-  if (p == NULL) abort();
-  return p;
+  return or_abort(guard_new(n, __builtin_return_address(0)));
 }
 
 /* operator new(size_t, const std::nothrow_t &) */
 void *_ZnwmRKSt9nothrow_t(size_t n, const void *tag) {
-  const void *ra = __builtin_return_address(0);
   (void)tag;
-  if (resolving) return boot_alloc(n ? n : 1);
-  if (!real_malloc) resolve();
-  count_alloc(ra);
-  return guard_new_raw(n);
+  return guard_new(n, __builtin_return_address(0));
 }
 
 /* operator new[](size_t, const std::nothrow_t &) */
 void *_ZnamRKSt9nothrow_t(size_t n, const void *tag) {
-  const void *ra = __builtin_return_address(0);
   (void)tag;
-  if (resolving) return boot_alloc(n ? n : 1);
-  if (!real_malloc) resolve();
-  count_alloc(ra);
-  return guard_new_raw(n);
+  return guard_new(n, __builtin_return_address(0));
 }
 
 /* operator new(size_t, std::align_val_t) */
 void *_ZnwmSt11align_val_t(size_t n, size_t align) {
-  const void *ra = __builtin_return_address(0);
-  void *p;
-  if (!real_posix_memalign) resolve();
-  count_alloc(ra);
-  p = guard_new_aligned(n, align);
-  if (p == NULL) abort();
-  return p;
+  return or_abort(guard_new_aligned(n, align, __builtin_return_address(0)));
 }
 
 /* operator new[](size_t, std::align_val_t) */
 void *_ZnamSt11align_val_t(size_t n, size_t align) {
-  const void *ra = __builtin_return_address(0);
-  void *p;
-  if (!real_posix_memalign) resolve();
-  count_alloc(ra);
-  p = guard_new_aligned(n, align);
-  if (p == NULL) abort();
-  return p;
+  return or_abort(guard_new_aligned(n, align, __builtin_return_address(0)));
 }
 
 /* operator new(size_t, std::align_val_t, const std::nothrow_t &) */
 void *_ZnwmSt11align_val_tRKSt9nothrow_t(size_t n, size_t align,
                                          const void *tag) {
-  const void *ra = __builtin_return_address(0);
   (void)tag;
-  if (!real_posix_memalign) resolve();
-  count_alloc(ra);
-  return guard_new_aligned(n, align);
+  return guard_new_aligned(n, align, __builtin_return_address(0));
 }
 
 /* operator new[](size_t, std::align_val_t, const std::nothrow_t &) */
 void *_ZnamSt11align_val_tRKSt9nothrow_t(size_t n, size_t align,
                                          const void *tag) {
-  const void *ra = __builtin_return_address(0);
   (void)tag;
-  if (!real_posix_memalign) resolve();
-  count_alloc(ra);
-  return guard_new_aligned(n, align);
+  return guard_new_aligned(n, align, __builtin_return_address(0));
 }
 
 #endif
@@ -497,8 +429,8 @@ void *_ZnamSt11align_val_tRKSt9nothrow_t(size_t n, size_t align,
 
 void pjrt_guard_arm(void) {
 #if PJRT_GUARD_CLASSIFY
-  /* Before arming: dl_iterate_phdr takes the loader lock, and a freshly
-   * dlopened plugin has to be in the table before its allocations arrive. */
+  /* Before arming, so a freshly dlopened plugin is in the table before its
+   * allocations arrive. */
   guard_build_ranges();
 #endif
   g_allocs = 0;
@@ -517,15 +449,13 @@ unsigned long pjrt_guard_free_count(void) { return g_frees; }
 
 unsigned long pjrt_guard_total_alloc_count(void) { return g_total_allocs; }
 
-/* Armed allocations charged to one CLS_* class; 0 for an unknown class, and 0
- * everywhere when classification is unavailable. */
+/* 0 for an unknown class, or everywhere when classification is unavailable. */
 unsigned long pjrt_guard_alloc_count_class(int cls) {
   if (cls < 0 || cls >= CLS_COUNT) return 0;
   return g_class[cls];
 }
 
-/* Whether the class counters mean anything: false on Apple, and false before
- * the first arm(), which is when the module ranges get built. */
+/* False on Apple, and before the first arm(), which builds the ranges. */
 int pjrt_guard_classified(void) {
 #if PJRT_GUARD_CLASSIFY
   return __atomic_load_n(&g_nranges, __ATOMIC_ACQUIRE) > 0;
@@ -534,6 +464,5 @@ int pjrt_guard_classified(void) {
 #endif
 }
 
-/* Proves the interposer is actually live, so a test can tell "zero allocations"
- * apart from "the preload silently did nothing". */
+/* Tells "zero allocations" from "the preload silently did nothing". */
 int pjrt_guard_present(void) { return 1; }

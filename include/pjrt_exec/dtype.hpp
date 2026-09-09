@@ -2,18 +2,11 @@
  * @file dtype.hpp
  * @brief The element types this project supports, and their PJRT spellings.
  *
- * XLA has many more element types than a float64 control loop needs, and the
- * ones left out -- F16, BF16, complex, the FP8 families, the sub-byte integers
- * -- have no C++ storage type this API could hand back.  `DType` is therefore
- * a closed set of eleven: exactly those that map onto a C++ scalar, spelled
- * the way NumPy spells them so the JSON sidecar the exporter writes can be
- * read back without a translation table.
- *
- * Conversion runs both ways.  `to_pjrt` is total.  `from_pjrt` is partial and
- * returns `std::nullopt` for everything outside the set, which is how the
- * loader notices an executable it cannot represent instead of handing the
- * caller a pointer to bytes it would misread; `pjrt_type_name` then names the
- * offending type in the error message.
+ * `DType` is a closed set of eleven: exactly the XLA element types that map
+ * onto a C++ scalar, spelled the way NumPy spells them so the sidecar reads
+ * back without a translation table.  `to_pjrt` is total; `from_pjrt` is
+ * partial, which is how the loader notices an executable it cannot represent
+ * instead of handing the caller a pointer to bytes it would misread.
  *
  * Header-only and free of runtime state.
  */
@@ -32,13 +25,9 @@ namespace pjrt {
 /**
  * @brief An element type shared by JAX, NumPy, PJRT and C++.
  *
- * `Bool` is one byte holding 0 or 1 -- PJRT's `PRED`, the same storage as
- * NumPy's `bool_` and as C++ `bool` on every platform this builds for.  Any
- * other byte value is *undefined* for XLA rather than merely truthy: it does
- * not normalize the byte, so a stray 2 can make a predicate read as both true
- * and false within one computation.  That is why
- * `FunctionOptions::check_values` audits bool arenas instead of trusting the
- * caller to have written a clean 0 or 1.
+ * `Bool` is one byte holding 0 or 1, PJRT's `PRED`.  XLA does not normalize
+ * the byte, so any other value is undefined rather than truthy; that is why
+ * `FunctionOptions::check_values` audits bool arenas.
  */
 enum class DType : std::uint8_t {
   Bool,
@@ -86,8 +75,8 @@ constexpr std::size_t itemsize(DType dtype) noexcept {
 /**
  * @brief The NumPy name: `"bool"`, `"int8"` ... `"float64"`.
  *
- * These are the strings the sidecar carries, so this is also the inverse of
- * `parse_dtype` and the vocabulary of the dtype-mismatch error messages.
+ * The strings the sidecar carries, so also the inverse of `parse_dtype` and
+ * the vocabulary of the dtype-mismatch messages.
  */
 constexpr const char* dtype_name(DType dtype) noexcept {
   switch (dtype) {
@@ -120,10 +109,8 @@ constexpr const char* dtype_name(DType dtype) noexcept {
 /**
  * @brief Parse a NumPy dtype name, exactly as `dtype_name` writes it.
  *
- * Deliberately strict: no aliases, no `"float"`/`"double"`, no byte-order
- * prefixes.  A sidecar written by this project's exporter always uses the
- * canonical name, so anything else is a sidecar worth rejecting rather than
- * guessing at.
+ * Strict: no aliases, no byte-order prefixes.  The exporter always writes the
+ * canonical name, so anything else is a sidecar worth rejecting.
  */
 inline std::optional<DType> parse_dtype(std::string_view name) noexcept {
   constexpr DType kAll[] = {DType::Bool,    DType::Int8,   DType::Int16,
@@ -147,9 +134,8 @@ constexpr bool is_floating(DType dtype) noexcept {
 /**
  * @brief The PJRT enumerator for a `DType`.
  *
- * The eleven enumerators involved (`PRED`, `S8`..`S64`, `U8`..`U64`, `F32`,
- * `F64`) hold the same values in PJRT C API 0.90 and 0.114, so an artifact
- * described against one header loads against the other.
+ * The eleven enumerators hold the same values in PJRT C API 0.90 and 0.114,
+ * so an artifact described against one header loads against the other.
  */
 constexpr PJRT_Buffer_Type to_pjrt(DType dtype) noexcept {
   switch (dtype) {
@@ -182,12 +168,9 @@ constexpr PJRT_Buffer_Type to_pjrt(DType dtype) noexcept {
 /**
  * @brief The `DType` for a PJRT enumerator, or `std::nullopt` if unsupported.
  *
- * Everything outside the eleven -- F16, BF16, C64, C128, the F8/F6/F4
- * families, S4/U4/S2/U2/S1/U1, TOKEN, INVALID -- returns `std::nullopt`, which
- * the loader turns into a `LoadError` naming the type.  The `default` here is
- * the conservative answer for element types XLA has not invented yet;
- * `pjrt_type_name` is the exhaustive switch, so re-vendoring a header that
- * adds a type produces a `-Wswitch` warning there and forces a decision.
+ * The `default` is the conservative answer for element types XLA has not
+ * invented yet; `pjrt_type_name`'s exhaustive switch is where `-Wswitch`
+ * forces a decision when a re-vendored header adds one.
  */
 inline std::optional<DType> from_pjrt(PJRT_Buffer_Type type) noexcept {
   switch (type) {
@@ -221,10 +204,8 @@ inline std::optional<DType> from_pjrt(PJRT_Buffer_Type type) noexcept {
 /**
  * @brief The XLA spelling of any PJRT element type, supported or not.
  *
- * Exists so that "output 2 has element type BF16, which pjrt_exec does not
- * support" can name what it found.  Covers the whole enum on purpose: when a
- * re-vendored header adds an element type, this switch is where the compiler
- * says so.
+ * So that a `LoadError` can name the type it refused.  Covers the whole enum,
+ * no `default`, so a re-vendored header that adds a type is a warning here.
  */
 inline const char* pjrt_type_name(PJRT_Buffer_Type type) noexcept {
   switch (type) {
@@ -302,8 +283,7 @@ inline const char* pjrt_type_name(PJRT_Buffer_Type type) noexcept {
 
 namespace detail {
 
-/// Map an integer's width and signedness onto a `DType`.  Split out so the
-/// partial specialization below stays a one-liner.
+/// Width and signedness to a `DType`, for the integer `dtype_of` below.
 constexpr DType integral_dtype(std::size_t size, bool is_signed) noexcept {
   if (is_signed) {
     return size == 1   ? DType::Int8
@@ -323,22 +303,16 @@ constexpr DType integral_dtype(std::size_t size, bool is_signed) noexcept {
  * @brief The `DType` a C++ scalar type stores, for the typed accessors.
  *
  * Declared and never defined, so `Function::input<T>()` with an unsupported
- * `T` fails to compile with the offending type named in the diagnostic
- * ("implicit instantiation of undefined template 'pjrt::dtype_of<std::string>'
- * ") rather than at run time or, worse, not at all.
+ * `T` fails to compile with the offending type named in the diagnostic.
  *
- * Integers map by width and signedness, so `long`, `long long` and
- * `std::int64_t` all land on `DType::Int64` whatever the platform calls them.
- * Plain `char` is a distinct type from both `signed char` and `unsigned char`
- * and maps by whatever signedness this platform gives it -- x86-64 Linux
- * signed, aarch64 Linux unsigned -- so an artifact's dtype would follow the
- * compiler rather than the artifact.  Write `std::int8_t` / `std::uint8_t` in
- * calling code and let the mismatch check do its job.
+ * Integers map by width and signedness.  Write `std::int8_t` / `std::uint8_t`
+ * in calling code rather than plain `char`, whose signedness follows the
+ * platform and would make the artifact's dtype follow the compiler.
  */
 template <class T, class = void>
 struct dtype_of;
 
-/// `bool` is one byte holding 0 or 1, matching PJRT `PRED`.
+/// One byte holding 0 or 1, matching PJRT `PRED`.
 template <>
 struct dtype_of<bool> {
   static constexpr DType value = DType::Bool;
@@ -356,12 +330,12 @@ struct dtype_of<double> {
   static constexpr DType value = DType::Float64;
 };
 
-/// Every integer type except `bool`, keyed on width and signedness rather than
-/// on spelling, so the typedef a caller happens to use does not matter.
+/// Every integer type except `bool`, keyed on width and signedness so the
+/// typedef a caller happens to use does not matter.
 template <class T>
-struct dtype_of<
-    T, std::enable_if_t<std::is_integral_v<T> &&
-                        !std::is_same_v<std::remove_cv_t<T>, bool>>> {
+struct dtype_of<T,
+                std::enable_if_t<std::is_integral_v<T> &&
+                                 !std::is_same_v<std::remove_cv_t<T>, bool>>> {
   static_assert(sizeof(T) == 1 || sizeof(T) == 2 || sizeof(T) == 4 ||
                     sizeof(T) == 8,
                 "no PJRT element type for an integer of this width");

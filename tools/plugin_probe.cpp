@@ -2,22 +2,18 @@
  * @file plugin_probe.cpp
  * @brief Report what a PJRT CPU plugin is and what it accepts.
  *
- * The create-option surface of a PJRT plugin is not discoverable by
- * experiment: this XLA version validates option names and fails client
- * creation on anything it does not recognise, so "try it and see" is not
- * available. `PJRT_Plugin_Attributes` is what a caller can ask before
- * committing, and this probe prints the answer.
- *
- * Use it after building or downloading a plugin, and as the verification step
- * in docs/developer/bumping-jax.md. A plugin built from this project's XLA
- * fork advertises `supports_synchronous_execution`; a stock one does not, and
- * the runtime then reports SyncMode::Accepted rather than Inline.
+ * The create-option surface of a plugin is not discoverable by experiment:
+ * this XLA version fails client creation on any option name it does not
+ * recognise. `PJRT_Plugin_Attributes` is what a caller can ask before
+ * committing, and this probe prints the answer. A plugin built from this
+ * project's XLA fork advertises `supports_synchronous_execution`; a stock one
+ * does not, and the runtime then reports SyncMode::Accepted, not Inline.
  *
  *   build/bin/plugin_probe [path/to/libpjrt_c_api_cpu_plugin.so] [--view]
  *
- * `--view` additionally probes PJRT_Client_CreateViewOfDeviceBuffer, whose
- * availability on CPU has already changed once. Documentation that says what a
- * plugin does is worth exactly as much as the probe that re-checks it.
+ * `--view` also probes PJRT_Client_CreateViewOfDeviceBuffer, whose
+ * availability on CPU has already changed once; the findings are in
+ * docs/developer/runtime-internals.md.
  *
  * Exits 0 when a client could be created, 1 otherwise.
  */
@@ -29,11 +25,8 @@
 
 #include "pjrt_exec/runtime.hpp"
 
-/// Probe PJRT_Client_CreateViewOfDeviceBuffer, which the CPU plugin was once
-/// documented as not implementing. It does implement it: the view aliases the
-/// caller's pointer and observes writes made after it exists. Note the header
-/// calls `on_delete_callback` optional while the implementation throws
-/// `std::bad_function_call` on a null one.
+/// The header calls `on_delete_callback` optional; the implementation throws
+/// `std::bad_function_call` on a null one, so a no-op is passed.
 void probe_view(pjrt::Runtime& runtime) {
   const PJRT_Api* api = runtime.api();
   std::printf("view_supported=%d\n",

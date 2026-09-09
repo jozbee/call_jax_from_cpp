@@ -3,23 +3,19 @@
  * @brief A unit test of `pjrt_exec/latency.hpp`, with no PJRT anywhere in it.
  *
  * The recorder is where every number this project publishes comes from, so it
- * is worth testing against arithmetic rather than against a run.  Nothing here
- * loads a plugin, calls a function, or measures anything real: the samples are
- * written by hand and the percentiles are known in advance.  That is what
- * makes this the one test in the suite that cannot be flaky, and the first one
- * to run when a tail number looks wrong -- if this fails, the numbers were
- * never about the code under test.
+ * is tested against arithmetic rather than against a run: the samples are
+ * written by hand and the percentiles are known in advance.  It is the first
+ * test to run when a tail number looks wrong -- if this fails, the numbers
+ * were never about the code under test.
  *
- * Each check prints its own name, and the first failure exits 1 naming itself.
- * Bare `assert` was the obvious spelling and does neither: it aborts with a
- * file and a line rather than a statement of what was being tested, and it
- * disappears entirely under `-DNDEBUG`, which is exactly the build a release
- * CI would run.
+ * Each check prints its own name, and the first failure exits 1 naming
+ * itself.  Bare `assert` would abort with a file and a line instead, and
+ * disappears under `-DNDEBUG`, which is the build a release CI would run.
  *
  *     test_latency [--tmpdir <dir>]
  *
- * `--tmpdir` says where the CSV round trip may write; the default is the
- * system temporary directory.  The file is removed on success.
+ * `--tmpdir` says where the CSV round trip may write; the file is removed on
+ * success.
  */
 #include <algorithm>
 #include <cmath>
@@ -33,19 +29,16 @@
 #include <string>
 #include <vector>
 
-// For getpid(), so two copies of this test running at once cannot collide on
-// the CSV file. The rest of the project is POSIX-only for far larger reasons.
+// getpid(), so two copies running at once cannot collide on the CSV file.
 #include <unistd.h>
 
 #include "pjrt_exec/latency.hpp"
 
 namespace {
 
-/// Checks run so far, printed at the end so a truncated run is visible as a
-/// short count rather than as a pass.
+/// Printed at the end, so a truncated run shows as a short count, not a pass.
 int g_checks = 0;
 
-/// @brief Report one check by name; exit 1 on the first failure.
 /// @param detail Printed only on failure, where the numbers are the diagnosis.
 void check(bool ok, const std::string& what, const std::string& detail = {}) {
   ++g_checks;
@@ -62,17 +55,14 @@ void check(bool ok, const std::string& what, const std::string& detail = {}) {
   std::exit(1);
 }
 
-/// A number, at enough precision to diagnose a near miss.
 std::string number(double value) {
   char text[32];
   std::snprintf(text, sizeof text, "%.12g", value);
   return text;
 }
 
-/// @brief Check @p got against @p want to a relative tolerance.
-/// @param tolerance Relative for values above 1, absolute below it, so a
-///                  microsecond figure near zero is not held to an impossible
-///                  standard.
+/// @param tolerance Relative above 1, absolute below it, so a microsecond
+///                  figure near zero is not held to an impossible standard.
 void check_close(double got, double want, const std::string& what,
                  double tolerance = 1e-9) {
   const double allowed = tolerance * std::max(1.0, std::fabs(want));
@@ -80,13 +70,8 @@ void check_close(double got, double want, const std::string& what,
         "got " + number(got) + ", want " + number(want));
 }
 
-/////////////////////////////
-// percentiles and moments //
-/////////////////////////////
-
-/// A recorder holding 1..101 ns.  101 samples so that the median, p90 and p99
-/// all land exactly on a sample and the interpolation can be checked where it
-/// must return a sample untouched, as well as where it must not.
+/// 1..101 ns: 101 samples so that the median, p90 and p99 land exactly on a
+/// sample, and the interpolation is checked where it must return one untouched.
 pjrt::LatencyRecorder ramp() {
   pjrt::LatencyRecorder recorder(101);
   for (std::int64_t ns = 1; ns <= 101; ++ns) {
@@ -114,37 +99,29 @@ void test_ramp() {
   check(s.min_us == 1.0 * 1e-3, "ramp: min is the first sample");
   check(s.max_us == 101.0 * 1e-3, "ramp: max is the last sample");
 
-  // rank = 0.50 * (101 - 1) = 50, an integer, so the interpolation weight on
-  // the neighbour is exactly zero and p50 is the middle sample itself. Bit
-  // equality is the claim; the sample is spelled the way the recorder spells
-  // it, ns * 1e-3, because that is what it has to equal.
+  // rank = 0.50 * (101 - 1) = 50, an integer, so p50 is the middle sample
+  // itself.  Bit equality is the claim, spelled as the recorder spells it.
   check(s.p50_us == 51.0 * 1e-3, "ramp: p50 is exactly the middle sample",
         "got " + number(s.p50_us));
   check(s.p90_us == 91.0 * 1e-3, "ramp: p90 is exactly sample 91");
   check(s.p99_us == 100.0 * 1e-3, "ramp: p99 is exactly sample 100");
 
-  // rank = 0.999 * 100 = 99.9 falls between the 100th and 101st samples, so
-  // p99.9 is a value that is in no sample: nearest-rank would return 100 or
-  // 101 ns and disagree with NumPy, which the analysis scripts use.
+  // rank = 99.9 falls between two samples, so p99.9 is a value in no sample;
+  // nearest-rank would disagree with NumPy, which the analysis scripts use.
   check_close(s.p999_us, 0.1009, "ramp: p99.9 interpolates between samples");
   check(s.p999_us > 100.0 * 1e-3 && s.p999_us < 101.0 * 1e-3,
         "ramp: p99.9 lies strictly between its two neighbours");
   check_close(s.p9999_us, 0.10099, "ramp: p99.99 interpolates as well");
 
   check_close(s.mean_us, 51.0 * 1e-3, "ramp: mean is 51 ns");
-  // Population standard deviation of 1..n is sqrt((n^2 - 1) / 12); for n = 101
-  // that is sqrt(850) ns. The sample standard deviation would be 29.30 ns, so
-  // this check also pins down which of the two the header promises.
+  // Population stddev of 1..n is sqrt((n^2 - 1) / 12); the sample one would
+  // be 29.30 ns, so this pins down which of the two the header promises.
   check_close(s.stddev_us, std::sqrt(850.0) * 1e-3,
               "ramp: stddev is the population one, sqrt(850) ns");
 
   check_close(s.max_over_p50, s.max_us / s.p50_us, "ramp: max/p50");
   check_close(s.p999_over_p50, s.p999_us / s.p50_us, "ramp: p99.9/p50");
 }
-
-////////////////////////
-// capacity behaviour //
-////////////////////////
 
 void test_capacity() {
   pjrt::LatencyRecorder recorder(4);
@@ -158,8 +135,7 @@ void test_capacity() {
         "capacity: the other six are counted as "
         "dropped");
   check(recorder.capacity() == 4, "capacity: capacity is unchanged");
-  // The whole point of dropping: growing would allocate in the middle of the
-  // run being measured. A reallocation would move the storage.
+  // The point of dropping: growing would allocate inside the measured run.
   check(recorder.data() == storage,
         "capacity: recording past the end does not reallocate");
   check(recorder.data()[0] == 0 && recorder.data()[3] == 3,
@@ -176,15 +152,10 @@ void test_capacity() {
         "capacity: clear() keeps the storage");
 }
 
-////////////////////
-// signed samples //
-////////////////////
-
 void test_signed_samples() {
   pjrt::LatencyRecorder recorder(4);
   // Period jitter is scheduled-minus-actual and is negative whenever a cycle
-  // runs early, so half the samples of a healthy real-time loop look like
-  // this.
+  // runs early, so half the samples of a healthy real-time loop look so.
   recorder.record(-500);
   recorder.record(-1);
   recorder.record(0);
@@ -208,12 +179,8 @@ void test_signed_samples() {
   check(bins[1].count == 1, "signed: the positive sample is in the second");
 }
 
-///////////////
-// histogram //
-///////////////
-
-/// 500, 1000, 1500, 2000 and 5000 ns: two in one bucket, one each in two more,
-/// and a gap, so an off-by-one in the bucket search cannot pass.
+/// Two in one bucket, one each in two more, and a gap, so an off-by-one in
+/// the bucket search cannot pass.
 pjrt::LatencyRecorder spread() {
   pjrt::LatencyRecorder recorder(8);
   recorder.record(500);
@@ -224,8 +191,7 @@ pjrt::LatencyRecorder spread() {
   return recorder;
 }
 
-/// The counts must always sum to the number of samples: every bucket edge
-/// question is really the question of whether a sample went missing.
+/// Every bucket-edge question is really whether a sample went missing.
 void check_total(const pjrt::HistogramBin* bins, std::size_t n,
                  std::size_t expected, const std::string& what) {
   std::size_t total = 0;
@@ -251,8 +217,7 @@ void test_histogram() {
         "histogram: bucket 2 is [2000, 4000)");
   check(bins[3].lo_ns == 4000 && bins[3].hi_ns == 8000,
         "histogram: bucket 3 is [4000, 8000)");
-  // Half-open [lo, hi): 1000 belongs to bucket 1, not bucket 0, and 2000 to
-  // bucket 2, not bucket 1.
+  // Half-open [lo, hi): 1000 belongs to bucket 1, and 2000 to bucket 2.
   check(bins[0].count == 1 && bins[1].count == 2 && bins[2].count == 1 &&
             bins[3].count == 1,
         "histogram: samples land on the low side of each edge");
@@ -286,15 +251,11 @@ void test_histogram() {
         "histogram: a bucket budget of 0 writes nothing");
 }
 
-//////////////////
-// ratio guards //
-//////////////////
-
 void test_ratio_guards() {
   pjrt::LatencyRecorder recorder(4);
   for (int i = 0; i < 4; ++i) {
-    // A run whose calls are all faster than the clock's resolution: p50 is 0
-    // and the ratios would be 0/0 and x/0 if they were taken at face value.
+    // Every call faster than the clock's resolution: p50 is 0, and the
+    // ratios taken at face value would be 0/0 and x/0.
     recorder.record(0);
   }
   const pjrt::LatencySummary s = recorder.summary();
@@ -305,13 +266,9 @@ void test_ratio_guards() {
         "ratios: the guard leaves a finite number behind");
 }
 
-//////////////
-// CSV rows //
-//////////////
-
-/// Split one CSV line into fields, undoing RFC 4180 quoting.  Deliberately not
-/// shared with the writer: a round trip through the writer's own escaping
-/// routine would agree with itself no matter what either of them did.
+/// Split one CSV line, undoing RFC 4180 quoting.  Not shared with the writer:
+/// a round trip through the writer's own escaping would agree with itself no
+/// matter what either of them did.
 std::vector<std::string> split_csv(const std::string& line) {
   std::vector<std::string> fields;
   std::string field;
@@ -350,8 +307,8 @@ std::vector<std::string> read_lines(const std::filesystem::path& path) {
   return lines;
 }
 
-/// 1..10 us.  Microsecond-scale on purpose: the row is written with `%.3f`, and
-/// a nanosecond-scale run would round to three zeros and round trip trivially.
+/// 1..10 us.  Microsecond-scale because the row is written with `%.3f`, and a
+/// nanosecond-scale run would round to three zeros and round trip trivially.
 pjrt::LatencyRecorder decade() {
   pjrt::LatencyRecorder recorder(10);
   for (std::int64_t us = 1; us <= 10; ++us) {
@@ -386,15 +343,13 @@ void test_csv(const std::filesystem::path& directory) {
         "header " + std::to_string(header.size()) + ", row " +
             std::to_string(row.size()));
   check(row[0] == "round trip", "csv: the label round trips");
-  // The config carries $XLA_FLAGS verbatim in a real run, and a flag list is
-  // entitled to contain a comma. Unquoted, it would shift every later column
-  // and silently misattribute the numbers.
+  // The config carries $XLA_FLAGS verbatim, and a flag list may contain a
+  // comma; unquoted, it would shift every later column.
   check(row[1] == "one,two",
         "csv: a comma in the config does not split the "
         "row");
   check(row[2] == "10" && row[3] == "0", "csv: count and dropped");
-  // The tolerances are the printed precision: %.3f for the microsecond
-  // columns, %.4f for the two ratios.
+  // The tolerances are the printed precision: %.3f, and %.4f for the ratios.
   check_close(std::stod(row[4]), s.mean_us, "csv: mean_us", 5e-4);
   check_close(std::stod(row[7]), s.p50_us, "csv: p50_us", 5e-4);
   check_close(std::stod(row[10]), s.p999_us, "csv: p999_us", 5e-4);
@@ -402,8 +357,7 @@ void test_csv(const std::filesystem::path& directory) {
   check_close(std::stod(row[13]), s.max_over_p50, "csv: max_over_p50", 5e-5);
   check_close(std::stod(row[14]), s.p999_over_p50, "csv: p999_over_p50", 5e-5);
 
-  // Appending is what makes an interleaved A/B sweep possible, so a second row
-  // must not bring a second header with it.
+  // Appending is what makes an interleaved A/B sweep possible.
   check(recorder.write_csv_row(path.c_str(), "say \"hi\"", "two") == true,
         "csv: a second row is appended");
   lines = read_lines(path);
@@ -422,16 +376,11 @@ void test_csv(const std::filesystem::path& directory) {
   std::filesystem::remove(path, ignored);
 }
 
-////////////////////
-// timing helpers //
-////////////////////
-
 void test_timing_helpers() {
   pjrt::LatencyRecorder recorder(2);
 
-  // No threshold on the duration anywhere here: this checks the plumbing, and
-  // a test that asserted a call took less than some number of nanoseconds
-  // would fail on a busy machine for no reason.
+  // No threshold on the duration: this checks the plumbing, and a bound on
+  // nanoseconds would fail on a busy machine for no reason.
   const std::int64_t returned = recorder.time([] {});
   check(recorder.size() == 1, "time(): records exactly one sample");
   check(returned >= 0, "time(): a steady clock never runs backwards");

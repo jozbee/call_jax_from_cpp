@@ -3,16 +3,10 @@
  * @brief The smallest real-time loop worth running: hardening, a period, a
  *        call, two recorders.
  *
- * Self-contained on purpose.  It includes the library and nothing else -- no
- * `examples/common/` header -- so the file can be copied into another program
- * without dragging a helper layer along with it.  Example 04 is this same loop
- * with a host audit, four recorders, an allocation census and a JSON report
- * around it; all of that is measurement, and none of it changes the loop.
- *
- * It runs the artifact `examples/01_basic/export.py` writes:
- * `fun(A, b) -> (x, r)` solves a dense linear system and returns the residual
- * norm alongside the solution, which is what makes a wrong answer visible here
- * without a second implementation to compare against.
+ * Self-contained: the library and nothing else, so the file can be copied
+ * without a helper layer.  Example 04 is this loop with the measurement
+ * attached.  It runs the artifact `examples/01_basic/export.py` writes, whose
+ * residual output is what makes a wrong answer visible here.
  *
  *     example_03_minimal [artifact] [period_us] [cycles] [cpu]
  */
@@ -34,8 +28,7 @@ namespace {
 
 constexpr std::int64_t kNsPerSec = 1000 * 1000 * 1000;
 
-/// `CLOCK_MONOTONIC` as nanoseconds.  Monotonic, so an NTP step during a run
-/// cannot appear as a spectacular outlier that never happened.
+/// `CLOCK_MONOTONIC` as nanoseconds: NTP cannot move it mid-run.
 std::int64_t now_ns() {
   timespec t;
   clock_gettime(CLOCK_MONOTONIC, &t);
@@ -43,12 +36,9 @@ std::int64_t now_ns() {
          static_cast<std::int64_t>(t.tv_nsec);
 }
 
-/// @brief Sleep until the absolute time @p target_ns; returns 0 or `EINTR`.
-///
-/// Absolute rather than relative: a relative sleep adds each wake-up's lateness
-/// to the next period, so the loop drifts by exactly the quantity it is
-/// measuring.  A target already in the past returns at once, which is how a
-/// loop catches up after an overrun instead of skipping a cycle.
+/// Sleep until the absolute time @p target_ns; returns 0 or `EINTR`.  Absolute,
+/// because a relative sleep adds each wake-up's lateness to the next period; a
+/// target already in the past returns at once, so the loop catches up.
 int sleep_until(std::int64_t target_ns) {
   timespec target;
   target.tv_sec = static_cast<time_t>(target_ns / kNsPerSec);
@@ -56,8 +46,7 @@ int sleep_until(std::int64_t target_ns) {
 #ifdef __linux__
   return clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &target, nullptr);
 #else
-  // No absolute monotonic sleep here (macOS): good enough to run the example,
-  // not good enough to quote a jitter number from.
+  // No absolute monotonic sleep here (macOS): fine to run, not to quote from.
   const std::int64_t remaining_ns = target_ns - now_ns();
   if (remaining_ns <= 0) {
     return 0;
@@ -69,8 +58,7 @@ int sleep_until(std::int64_t target_ns) {
 #endif
 }
 
-/// Every online CPU except @p cpu -- where XLA's pools are sent so that they
-/// cannot wake up on the core the loop is using.
+/// Every online CPU except @p cpu: where XLA's pools are sent.
 std::vector<int> cpus_except(int cpu) {
   std::vector<int> cpus;
   const int online = static_cast<int>(std::thread::hardware_concurrency());
@@ -99,8 +87,7 @@ int main(int argc, char** argv) {
 
   try {
     // docs: begin minimal-setup
-    // Before the Runtime, so that the heap the rest of startup grows is already
-    // the hardened one: no trims, no mmaps, no second arena.
+    // Before the Runtime, so the heap startup grows is the hardened one.
     print("harden_malloc", pjrt::rt::harden_malloc());
 
     pjrt::RuntimeOptions runtime_options;
@@ -118,11 +105,8 @@ int main(int argc, char** argv) {
       print("corral_xla_threads",
             pjrt::rt::corral_xla_threads(cpus_except(cpu)));
     }
-    // /dev/cpu_dma_latency is not held here: it needs root.  The helper that
-    // does is `cjfc::DmaLatencyHold`, in examples/common/rt_env.hpp.
-    //
-    // Priority last: loading and warm-up must not run at SCHED_FIFO, where a
-    // long operation would starve the rest of the machine.
+    // Not held here: /dev/cpu_dma_latency needs root; see cjfc::DmaLatencyHold.
+    // Priority last: loading and warm-up must not run at SCHED_FIFO.
     print("set_realtime_priority", pjrt::rt::set_realtime_priority(80));
     // docs: end minimal-setup
 
@@ -162,8 +146,7 @@ int main(int argc, char** argv) {
     std::printf("\n%s\n", pjrt::rt::describe_environment().c_str());
     std::printf("max_residual=%g x[0]=%g\n", max_residual, x[0]);
 
-    // The exit codes are the table in examples/common/report.hpp: 2 is a wrong
-    // answer, 1 is an error, 0 is a run worth reading.
+    // Exit 2 is a wrong answer, as in examples/common/report.hpp.
     return max_residual > 1e-9 ? 2 : 0;
   } catch (const std::exception& error) {
     std::fprintf(stderr, "example_03_minimal: %s\n", error.what());

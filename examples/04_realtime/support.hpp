@@ -3,11 +3,8 @@
  * @brief Everything `realtime.cpp` needs that is not the periodic loop: the
  *        flags, the host audit, the summaries and the two reports.
  *
- * Split out so that the example itself is the sequence a control process
- * actually performs -- harden, load, warm up, arm, loop, report -- and so that
- * the loop body sits on one page.  Everything here runs before the first cycle
- * or after the last one; nothing in it may be called from inside the window the
- * allocation guard is armed over.
+ * Everything here runs before the first cycle or after the last one, except
+ * `Deadlines::observe`, which the loop calls and which does not allocate.
  */
 #pragma once
 
@@ -30,22 +27,17 @@
 
 namespace rt {
 
-/// Sample budget for a run that was told to go until SIGINT.  A million cycles
-/// is 2.8 hours at 100 Hz; past that the recorders count drops rather than
-/// growing, because growing would allocate inside the window being measured.
+/// Sample budget for a run that goes until SIGINT: 2.8 hours at 100 Hz, after
+/// which the recorders drop rather than grow.
 constexpr std::size_t kUnboundedCapacity = 1000000;
 
-/// The clock for everything timed outside the loop.  Not
-/// `high_resolution_clock`, which is an alias for the wall clock on some
-/// standard libraries.
+/// Not `high_resolution_clock`, which is the wall clock on some libraries.
 using Clock = std::chrono::steady_clock;
 
-/// @brief Milliseconds since @p t0.
 inline double ms_since(Clock::time_point t0) {
   return std::chrono::duration<double, std::milli>(Clock::now() - t0).count();
 }
 
-/// @brief Microseconds since @p t0.
 inline double us_since(Clock::time_point t0) {
   return std::chrono::duration<double, std::micro>(Clock::now() - t0).count();
 }
@@ -83,11 +75,8 @@ const char* const kUsage =
     "exit: 0 ok, 1 error, 2 wrong answer, 3 the loop allocated,\n"
     "      4 an allocation gate was required but nothing was measured\n";
 
-/// @brief Parse @p argv against the flags `kUsage` documents.
-///
-/// The known-flag list lives here rather than at the call site because it and
-/// the usage text are one statement: a flag added to one and not the other is
-/// either undocumented or refused.
+/// The flag list lives next to `kUsage`: a flag added to one and not the
+/// other is either undocumented or refused.
 inline cjfc::Cli make_cli(int argc, char** argv) {
   return cjfc::Cli(
       argc, argv,
@@ -97,15 +86,8 @@ inline cjfc::Cli make_cli(int argc, char** argv) {
       kUsage);
 }
 
-/// @brief What the loop asks the operating system for, before any flag is read.
-///
-/// Everything on, at the priority the usage text documents; `--rt-priority 0`
-/// is how a caller opts out of `SCHED_FIFO` rather than a separate flag.
-inline cjfc::HardeningOptions default_hardening() {
-  cjfc::HardeningOptions hardening;
-  hardening.rt_priority = 80;
-  return hardening;
-}
+/// The `SCHED_FIFO` priority the loop asks for; `--rt-priority 0` opts out.
+constexpr int kDefaultRtPriority = 80;
 
 /// Everything the command line can say, resolved once at startup.
 struct Options {
@@ -114,7 +96,7 @@ struct Options {
   std::size_t iterations = 3000;  ///< 0 runs until SIGINT.
   std::size_t warmup = 200;
   int threads = 1;
-  cjfc::HardeningOptions hardening = default_hardening();
+  cjfc::HardeningOptions hardening;
   std::string json_path;
   std::string samples_path;
   std::string alloc_gate = "self";
@@ -123,9 +105,8 @@ struct Options {
   bool quiet = false;
 };
 
-/// One of @p allowed, or a `std::runtime_error` naming the flag and what it
-/// takes.  A mistyped `--alloc-gate slef` that silently disabled the gate would
-/// be a green run that checked nothing.
+/// One of @p allowed, or a `std::runtime_error`: a mistyped `--alloc-gate slef`
+/// that silently disabled the gate would be a green run that checked nothing.
 inline std::string enum_flag(const cjfc::Cli& cli, const char* name,
                              const char* fallback,
                              std::initializer_list<const char*> allowed) {
@@ -146,8 +127,7 @@ inline std::string enum_flag(const cjfc::Cli& cli, const char* name,
                            ", got '" + value + "'");
 }
 
-/// Read the command line into `Options`, rejecting values the program cannot
-/// honour rather than rounding them into something it can.
+/// Reject a value the program cannot honour rather than round it.
 inline Options parse_options(const cjfc::Cli& cli) {
   Options options;
   options.artifact = cli.get("artifact", options.artifact);
@@ -156,8 +136,8 @@ inline Options parse_options(const cjfc::Cli& cli) {
   options.warmup = cli.get_size("warmup", options.warmup);
   options.threads = static_cast<int>(cli.get_long("threads", options.threads));
   options.hardening.cpu = cli.get("cpu", options.hardening.cpu);
-  options.hardening.rt_priority = static_cast<int>(
-      cli.get_long("rt-priority", options.hardening.rt_priority));
+  options.hardening.rt_priority =
+      static_cast<int>(cli.get_long("rt-priority", kDefaultRtPriority));
   options.hardening.malloc_tune = !cli.flag("no-malloc-tune");
   options.hardening.mlock = !cli.flag("no-mlock");
   options.hardening.corral = !cli.flag("no-corral");
@@ -174,8 +154,8 @@ inline Options parse_options(const cjfc::Cli& cli) {
   if (options.period_us == 0) {
     throw std::runtime_error("'--period-us' must be at least 1");
   }
-  // 99 is the ceiling POSIX guarantees, and a priority above the kernel's own
-  // migration and watchdog threads is how a machine stops responding.
+  // 99 is the POSIX ceiling; above the kernel's own migration and watchdog
+  // threads is how a machine stops responding.
   if (options.hardening.rt_priority < 0 || options.hardening.rt_priority > 99) {
     throw std::runtime_error("'--rt-priority' must be between 0 and 99, got " +
                              std::to_string(options.hardening.rt_priority));
@@ -188,7 +168,7 @@ inline Options parse_options(const cjfc::Cli& cli) {
 
 // ---------------------------------------------------------- the host audit
 
-/// @brief A CPU set the way the kernel spells one: `2-5,8`, or `(none)`.
+/// A CPU set the way the kernel spells one: `2-5,8`, or `(none)`.
 inline std::string cpulist(const std::vector<int>& cpus) {
   if (cpus.empty()) {
     return "(none)";
@@ -211,13 +191,11 @@ inline std::string cpulist(const std::vector<int>& cpus) {
   return text;
 }
 
-/// @brief An rlimit soft limit, where -1 means the kernel imposes none.
+/// An rlimit soft limit, where -1 means the kernel imposes none.
 inline std::string rlimit_text(long value) {
   return value < 0 ? std::string("unlimited") : std::to_string(value);
 }
 
-/// @brief Print the host audit: the settings that decide whether any number
-///        below it is worth reading.  Silent under `--quiet`.
 inline void print_host(const Options& options, const cjfc::HostEnv& env) {
   if (options.quiet) {
     return;
@@ -242,10 +220,8 @@ inline void print_host(const Options& options, const cjfc::HostEnv& env) {
               env.loadavg15);
 }
 
-/// @brief Say on stderr that this host cannot produce a usable tail number.
-///
-/// stderr, so it survives `--json` piping and `--quiet` both: a tail number
-/// from a busy machine is not noisy, it is wrong.
+/// stderr, so it survives `--json` and `--quiet` both: a number from a busy
+/// machine is wrong, not noisy.
 inline void warn_if_busy(const cjfc::HostEnv& env) {
   if (env.busy) {
     std::fprintf(stderr,
@@ -255,7 +231,6 @@ inline void warn_if_busy(const cjfc::HostEnv& env) {
   }
 }
 
-/// @brief Print what the client is.  Silent under `--quiet`.
 inline void print_runtime(const Options& options,
                           const pjrt::Runtime& runtime) {
   if (options.quiet) {
@@ -264,8 +239,6 @@ inline void print_runtime(const Options& options,
   std::printf("\n=== runtime ===\n  %s\n", runtime.describe().c_str());
 }
 
-/// @brief Print what each hardening step did, and why when it could not.
-///        Silent under `--quiet`.
 inline void print_steps(const Options& options,
                         const std::vector<cjfc::Step>& steps) {
   if (options.quiet) {
@@ -297,18 +270,14 @@ struct Recorders {
       : compute(capacity), cycle(capacity), wake(capacity), jitter(capacity) {}
 };
 
-/// What the loop counts about its own schedule, incremented in the loop body
-/// and read once it has stopped.
+/// What the loop counts about its own schedule.
 struct Deadlines {
   std::size_t missed = 0;
   std::int64_t worst_overrun_ns = 0;
   std::size_t step_errors = 0;
 
-  /// @brief Count one cycle, whose work finished @p overrun_ns after its
-  ///        deadline.  A non-positive overrun made it.
-  ///
-  /// Two integers and a compare: this is called from inside the armed window,
-  /// so it may not allocate, and does not.
+  /// Count one cycle that finished @p overrun_ns after its deadline.  Called
+  /// from inside the armed window: two integers and a compare, no allocation.
   void observe(std::int64_t overrun_ns) {
     if (overrun_ns > 0) {
       ++missed;
@@ -317,13 +286,9 @@ struct Deadlines {
   }
 };
 
-/**
- * @brief The whole run, summarized once the loop is over.
- *
- * The derived numbers are accessors rather than fields so that the printed
- * report and the JSON cannot drift apart: there is one definition of
- * utilization, and both readers use it.
- */
+/// The whole run, summarized once the loop is over.  The derived numbers are
+/// accessors so that the printed report and the JSON share one definition of
+/// utilization.
 struct Results {
   pjrt::LatencySummary compute;
   pjrt::LatencySummary cycle;
@@ -361,8 +326,6 @@ struct Results {
 
 // ------------------------------------------------------------- the reports
 
-/// @brief Print the load costs, once, before the loop starts.  Silent under
-///        `--quiet`.
 inline void print_cold_start(const Options& options, const Timing& timing,
                              const std::string& detail) {
   if (options.quiet) {
@@ -377,7 +340,6 @@ inline void print_cold_start(const Options& options, const Timing& timing,
               timing.first_call_us);
 }
 
-/// @brief Print the four distributions, the schedule and the checks.
 inline void print_report(const Options& options, const Results& results,
                          const pjrt::AllocGuard& guard) {
   cjfc::print_summary("call latency (compute)", results.compute);
@@ -406,7 +368,6 @@ inline void print_report(const Options& options, const Results& results,
   std::printf("  exit code    %d\n", results.exit_code);
 }
 
-/// @brief The one line `--quiet` prints instead of the report.
 inline void print_quiet_line(const Options& options, const Results& results,
                              const pjrt::AllocGuard& guard) {
   std::printf(
@@ -417,12 +378,8 @@ inline void print_quiet_line(const Options& options, const Results& results,
       results.counters.missed, guard.allocs_self(), results.exit_code);
 }
 
-/**
- * @brief Write the JSON report.
- *
- * `hardening` is an object keyed by step name rather than an array, so a reader
- * can ask whether `lock_memory` worked without scanning a list.
- */
+/// `hardening` is keyed by step name rather than an array, so a reader can ask
+/// whether `lock_memory` worked without scanning a list.
 inline void write_report(const Options& options, const cjfc::HostEnv& env,
                          const std::vector<cjfc::Step>& steps,
                          const pjrt::Runtime& runtime,
@@ -477,8 +434,8 @@ inline void write_report(const Options& options, const cjfc::HostEnv& env,
   cjfc::write_json(options.json_path, report);
 }
 
-/// @brief `raw.csv` + `cycle` -> `raw_cycle.csv`; a path with no extension just
-///        gets the suffix appended.
+/// `raw.csv` + `cycle` -> `raw_cycle.csv`; with no extension, the suffix is
+/// appended.
 inline std::string with_suffix(const std::string& path, const char* suffix) {
   const std::size_t dot = path.find_last_of('.');
   const std::size_t slash = path.find_last_of('/');
@@ -488,10 +445,7 @@ inline std::string with_suffix(const std::string& path, const char* suffix) {
   return path.substr(0, dot) + "_" + suffix + path.substr(dot);
 }
 
-/// @brief Write every raw sample, four series to four files.
-///
-/// A summary cannot say *when* an outlier happened, and a spike on cycle 3 and
-/// a spike on cycle 30,000 have the same p99.9 and completely different causes.
+/// Four series to four files: a summary cannot say *when* an outlier happened.
 inline void write_samples(const std::string& path, const Recorders& r) {
   r.compute.write_samples(path.c_str());
   r.cycle.write_samples(with_suffix(path, "cycle").c_str());

@@ -1,17 +1,9 @@
 """Which instruction-set level this host implements.
 
-A serialized executable embeds machine code for the machine that produced it,
-so a ``.binpb`` exported on an AVX-512 box does not run on a host without it
--- and the failure arrives as a load error or an illegal instruction, not as a
-polite refusal.  The sidecar therefore records the exporting host's level, and
-the C++ loader compares it against its own before it even opens the file,
-falling back to compiling the ``.mlirbc`` when the host is weaker.
-
-That comparison only means something if both sides compute the level the same
-way, so the rules below are duplicated -- deliberately, in full -- in
-``src/pjrt_exec/isa.cpp``.  Change one and you must change the other; the
-levels are the microarchitecture levels from the x86-64 psABI, cut down to the
-flags that actually gate XLA's codegen.
+The sidecar records the exporting host's level and the C++ loader compares
+it with its own before opening a ``.binpb``.  The rules here are duplicated,
+in full, in ``src/pjrt_exec/isa.cpp``: change one and you must change the
+other.
 """
 
 from __future__ import annotations
@@ -23,46 +15,41 @@ __all__ = ["cpu_model", "host_isa_level", "isa_supports"]
 
 _CPUINFO = "/proc/cpuinfo"
 
-# The psABI microarchitecture levels, each expressed as the flags
-# /proc/cpuinfo prints for it.  LZCNT is spelled "abm" on AMD parts and
-# "lzcnt" on some Intel ones, so it is checked separately.
+# The psABI levels as /proc/cpuinfo spells them, cut down to the flags that
+# gate XLA's codegen.  LZCNT is "abm" on AMD parts and "lzcnt" on some Intel
+# ones, so it is checked on its own.
 _X86_V2 = frozenset({"sse4_2", "ssse3", "popcnt"})
 _X86_V3 = frozenset({"avx", "avx2", "bmi1", "bmi2", "fma", "f16c", "movbe"})
 _X86_V4 = frozenset({"avx512f", "avx512bw", "avx512cd", "avx512dq", "avx512vl"})
 
-# Levels within one architecture family, weakest first.  Anything absent from
-# every row -- "unknown", or a family this file does not know -- compares
-# against nothing.
+# Levels within one architecture family, weakest first.  A level absent from
+# every row compares against nothing.
 _LADDERS = (
     ("x86-64-v1", "x86-64-v2", "x86-64-v3", "x86-64-v4"),
     ("aarch64", "aarch64+sve"),
 )
 
 
-def _cpuinfo_lines() -> list[str]:
-    """Read ``/proc/cpuinfo``, or return nothing where it does not exist."""
+def _cpuinfo_field(*keys: str) -> str:
+    """Return the first ``/proc/cpuinfo`` field named by one of ``keys``.
+
+    The first match is the first core's.
+    """
     try:
         with open(_CPUINFO, encoding="utf-8", errors="replace") as handle:
-            return handle.readlines()
+            for line in handle:
+                key, sep, value = line.partition(":")
+                if sep and key.strip().lower() in keys:
+                    return value.strip()
     except OSError:
-        return []
+        return ""
+    return ""
 
 
 @functools.cache
 def _cpu_flags() -> frozenset[str]:
-    """Return the flags of the first core.
-
-    Notes
-    -----
-    x86 kernels print them under ``flags``, aarch64 kernels under
-    ``Features``.  The set is cached: instruction sets do not change under a
-    running process, and both callers of this module are on a load path.
-    """
-    for line in _cpuinfo_lines():
-        key, sep, value = line.partition(":")
-        if sep and key.strip().lower() in ("flags", "features"):
-            return frozenset(value.split())
-    return frozenset()
+    """Return the first core's flags (``flags`` on x86, ``Features`` on arm)."""
+    return frozenset(_cpuinfo_field("flags", "features").split())
 
 
 def cpu_model() -> str | None:
@@ -71,18 +58,11 @@ def cpu_model() -> str | None:
     Returns
     -------
     str or None
-        The ``model name`` field of ``/proc/cpuinfo``.  aarch64 kernels
-        usually omit it, and so does every non-Linux host, in which case the
-        sidecar simply records ``null``: it is a comment for a human reading
-        an artifact, never something the loader acts on.
+        The ``model name`` field of ``/proc/cpuinfo``, which aarch64 kernels
+        and non-Linux hosts omit.  The sidecar records it for a human reader;
+        the loader never acts on it.
     """
-    for line in _cpuinfo_lines():
-        key, sep, value = line.partition(":")
-        if sep and key.strip().lower() == "model name":
-            model = value.strip()
-            if model:
-                return model
-    return None
+    return _cpuinfo_field("model name") or None
 
 
 def host_isa_level() -> str:
@@ -92,15 +72,17 @@ def host_isa_level() -> str:
     -------
     str
         ``"x86-64-v1"`` through ``"x86-64-v4"`` on x86_64, ``"aarch64"`` or
-        ``"aarch64+sve"`` on 64-bit Arm, and ``"unknown"`` anywhere else --
-        including on a host whose flags could not be read, where claiming a
-        level would be worse than admitting ignorance.
+        ``"aarch64+sve"`` on 64-bit Arm, and ``"unknown"`` anywhere else.
 
     Notes
     -----
-    Levels are tested strongest first, exactly as ``src/pjrt_exec/isa.cpp``
-    does.  A part carrying the AVX-512 set always carries the v3 set as well,
-    so the cascade needs no cumulative check to agree with the psABI.
+    Levels are tested strongest first, as ``src/pjrt_exec/isa.cpp`` does.  A
+    part with the AVX-512 set always has the v3 set as well, so the cascade
+    needs no cumulative check to agree with the psABI.
+
+    An unreadable ``/proc/cpuinfo`` gives the weakest level of the family,
+    not ``"unknown"``, so the sidecar under-claims and the loader's guard
+    cannot catch it; see ``docs/developer/open-threads.md``.
     """
     machine = platform.machine()
     flags = _cpu_flags()
@@ -135,9 +117,8 @@ def isa_supports(host: str, required: str) -> bool | None:
     -------
     bool or None
         True when ``host`` is at least ``required``, False when it is weaker,
-        and ``None`` when the two cannot be compared at all -- a different
-        architecture family, or a level this file does not know.  ``None`` is
-        not "probably fine": an aarch64 host cannot run an x86-64 ``.binpb``.
+        and ``None`` when the two cannot be compared: a different family, or
+        a level this file does not know.  ``None`` is not "probably fine".
     """
     for ladder in _LADDERS:
         if host in ladder and required in ladder:

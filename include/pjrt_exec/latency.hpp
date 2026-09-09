@@ -2,26 +2,13 @@
  * @file latency.hpp
  * @brief Fixed-capacity, allocation-free latency recorder.
  *
- * The figure of merit for this project is the tail, not the mean, so the
- * summary leads with percentiles and with the max/p50 and p99.9/p50 ratios --
- * the two numbers that say whether a control loop will miss a deadline.
- *
- * Three properties are deliberate and each was learned from a measurement that
- * went wrong:
- *
- *   - **Samples are nanoseconds, and signed.**  Quantizing to whole
- *     microseconds discards exactly the small-scale jitter being hunted.
- *     Signedness matters because the same recorder is used for period jitter
- *     (scheduled time minus actual time), which is negative whenever a cycle
- *     runs early.
- *   - **`record()` never allocates and never touches a file.**  Storage is
- *     reserved once by the constructor; recording is a store and an increment.
- *     Anything that could take a lock, fault a page, or enter the allocator
- *     belongs after the loop, which is why formatting and file writing are
- *     separate, explicitly-called members.
- *   - **A full recorder drops instead of growing.**  Growing would allocate in
- *     the middle of the run being measured, so overflow is counted and
- *     reported rather than absorbed.
+ * The figure of merit is the tail, so the summary leads with percentiles and
+ * with the max/p50 and p99.9/p50 ratios.  Samples are signed nanoseconds:
+ * whole microseconds would discard the jitter being hunted, and period jitter
+ * is negative when a cycle runs early.  Storage is reserved once, `record()`
+ * is a store and an increment, and a full recorder drops and counts rather
+ * than growing mid-run.  Everything that sorts, formats or writes a file is a
+ * separate member, called after the loop.
  *
  * @code
  *   pjrt::LatencyRecorder rec(iterations);
@@ -51,16 +38,14 @@ namespace pjrt {
 /**
  * @brief Descriptive statistics for one run, in microseconds.
  *
- * The ratios are unitless and are the headline: `max_over_p50` is the worst
- * call relative to a typical one, `p999_over_p50` is the same for the
- * one-in-a-thousand call.  Both are 0 when p50 is 0 (an empty or
- * sub-resolution run), never infinite.
+ * The two ratios are unitless and are the headline.  Both are 0 when p50 is
+ * 0 (an empty or sub-resolution run), never infinite.
  */
 struct LatencySummary {
   std::size_t count = 0;    ///< Samples the summary was computed from.
-  std::size_t dropped = 0;  ///< Samples discarded because the recorder was full.
+  std::size_t dropped = 0;  ///< Samples dropped because the recorder was full.
   double mean_us = 0.0;
-  double stddev_us = 0.0;  ///< Population standard deviation, not the sample one.
+  double stddev_us = 0.0;  ///< Population standard deviation, not sample.
   double min_us = 0.0;
   double p50_us = 0.0;
   double p90_us = 0.0;
@@ -76,11 +61,9 @@ struct LatencySummary {
 /**
  * @brief One bucket of a log-spaced latency histogram, half-open `[lo, hi)`.
  *
- * The first bucket is the underflow catch-all and carries
- * `lo_ns == INT64_MIN`, so negative samples are counted rather than lost; the
- * last carries `hi_ns == INT64_MAX` when the bucket budget ran out before the
- * largest sample.  Bucket counts therefore always sum to
- * `LatencyRecorder::size()`.
+ * Bucket 0 always carries `lo_ns == INT64_MIN`, so a negative sample is
+ * counted rather than lost; the last carries `hi_ns == INT64_MAX` when the
+ * bucket budget ran out, so counts always sum to `LatencyRecorder::size()`.
  */
 struct HistogramBin {
   std::int64_t lo_ns = 0;
@@ -98,10 +81,8 @@ class LatencyRecorder {
   /**
    * @brief Reserve room for @p capacity samples.
    *
-   * This is the only allocation the recorder performs during a run.  The
-   * sorting scratch is reserved here too, so that `summary()` does not have to
-   * allocate either -- useful when a long-running process summarizes
-   * periodically without ever leaving the real-time thread.
+   * The only allocation the recorder makes.  The sorting scratch is reserved
+   * here too, so `summary()` can run periodically on the real-time thread.
    */
   explicit LatencyRecorder(std::size_t capacity)
       : samples_(capacity), scratch_(capacity), capacity_(capacity) {}
@@ -119,9 +100,8 @@ class LatencyRecorder {
    * @brief Time @p f with `steady_clock`, record the elapsed nanoseconds, and
    *        return them.
    *
-   * `steady_clock` and not `high_resolution_clock`: the latter is an alias for
-   * the wall clock on some standard libraries, and an NTP step in the middle
-   * of a run would show up as a spectacular outlier that never happened.
+   * `steady_clock` and not `high_resolution_clock`, which can alias the wall
+   * clock and turn an NTP step into an outlier that never happened.
    */
   template <class F>
   std::int64_t time(F&& f) {
@@ -152,13 +132,9 @@ class LatencyRecorder {
   /**
    * @brief Sort a copy of the samples and describe them.
    *
-   * Percentiles interpolate linearly between the two neighbouring ranks
-   * (`rank = p * (n - 1)`), which is the definition NumPy's `percentile`
-   * defaults to; nearest-rank would quantize p99.9 to whichever single sample
-   * happens to sit at that index, and disagree with the analysis scripts.
-   *
-   * Call it after the loop.  It sorts, which is neither constant-time nor
-   * something to do between two timed calls.
+   * Percentiles interpolate between neighbouring ranks (`rank = p * (n - 1)`)
+   * as NumPy's `percentile` does, so the analysis scripts agree.  It sorts:
+   * call it after the loop, not between two timed calls.
    */
   LatencySummary summary() const {
     LatencySummary s;
@@ -204,15 +180,12 @@ class LatencyRecorder {
   /**
    * @brief Fill caller-provided storage with a log-spaced histogram.
    *
-   * Bucket 0 collects everything below @p first_bin_ns (negative samples
-   * included); each later bucket is @p factor times wider than the last.  The
-   * caller owns the storage, so this allocates nothing and can be used from a
-   * context that must not.
+   * The caller owns the storage, so this allocates nothing.
    *
    * @param bins          Storage for at least @p max_bins buckets.
    * @param max_bins      Capacity of @p bins.
    * @param factor        Width ratio between adjacent buckets; values <= 1
-   *                      are meaningless and fall back to 2.
+   *                      fall back to 2.
    * @param first_bin_ns  Upper edge of the underflow bucket; clamped to >= 1.
    * @return Number of buckets written, which is 0 when there are no samples.
    */
@@ -255,8 +228,8 @@ class LatencyRecorder {
       bins[nbins].count = 0;
       ++nbins;
     }
-    // Ran out of buckets before reaching the largest sample: the top one
-    // becomes the overflow catch-all so the counts still sum to size().
+    // Out of buckets before the largest sample: the top one becomes the
+    // overflow catch-all so the counts still sum to size().
     if (nbins == max_bins) {
       bins[nbins - 1].hi_ns = std::numeric_limits<std::int64_t>::max();
     }
@@ -275,9 +248,7 @@ class LatencyRecorder {
   /**
    * @brief Print the summary and an ASCII histogram to @p out.
    *
-   * Only buckets between the first and last non-empty one are printed: a run
-   * whose samples span three orders of magnitude would otherwise bury them in
-   * empty rows.
+   * Only buckets between the first and last non-empty one are printed.
    */
   void report(std::FILE* out, const char* label) const {
     if (out == nullptr) {
@@ -326,26 +297,19 @@ class LatencyRecorder {
     for (std::size_t i = first; i <= last; ++i) {
       peak = std::max(peak, bins[i].count);
     }
+    static const char kBar[] = "########################################";
+    const std::size_t bar_max = sizeof kBar - 1;
     std::fprintf(out, "  --- histogram (us) ---\n");
     for (std::size_t i = first; i <= last; ++i) {
       char lo[24];
       char hi[24];
       edge_label(bins[i].lo_ns, lo, sizeof lo);
       edge_label(bins[i].hi_ns, hi, sizeof hi);
-      std::size_t width =
-          peak > 0 ? (bins[i].count * 40u + peak - 1) / peak : 0;
-      if (width > 40) {
-        width = 40;
-      }
-      char bar[42];
-      // The leading space belongs to the bar, so an empty bucket does not
-      // leave a trailing blank on its row.
-      bar[0] = ' ';
-      for (std::size_t c = 0; c < width; ++c) {
-        bar[c + 1] = '#';
-      }
-      bar[width > 0 ? width + 1 : 0] = '\0';
-      std::fprintf(out, "  [%9s,%9s) %10zu%s\n", lo, hi, bins[i].count, bar);
+      const std::size_t width =
+          peak > 0 ? (bins[i].count * bar_max + peak - 1) / peak : 0;
+      // The space belongs to the bar, so an empty bucket has no trailing blank.
+      std::fprintf(out, "  [%9s,%9s) %10zu%s%.*s\n", lo, hi, bins[i].count,
+                   width > 0 ? " " : "", static_cast<int>(width), kBar);
     }
   }
 
@@ -354,15 +318,13 @@ class LatencyRecorder {
    *        the file did not already exist.
    *
    * Appending is what makes an interleaved A/B sweep possible: each short run
-   * adds a row to the same file and the comparison happens across rows, not
-   * across a long sequential run that drifts with CPU temperature.
+   * adds a row, and the comparison happens across rows rather than across one
+   * long run that drifts with CPU temperature.
    *
    * @param path CSV file to append to; created with a header if absent.
-   * @param label Name of this run, the first column. Give interleaved rounds
-   *              of the same configuration the same label so a later pass can
-   *              take the median across them.
-   * @param config Free-form description of what produced the row (API, thread
-   *               count, fixture); the row is unattributable without it.
+   * @param label Name of this run, the first column; interleaved rounds of one
+   *              configuration share a label.
+   * @param config What produced the row (API, thread count, fixture).
    * @return false when the file could not be opened.
    */
   bool write_csv_row(const char* path, const char* label,
@@ -402,9 +364,8 @@ class LatencyRecorder {
   /**
    * @brief Write every raw sample as `index,ns`, overwriting @p path.
    *
-   * Summaries hide *when* an outlier happened.  A spike on call 3 (a page the
-   * warm-up never touched) and a spike on call 30,000 (something periodic)
-   * have the same p99.9 and completely different causes.
+   * Summaries hide *when* an outlier happened, and that is usually the whole
+   * diagnosis.
    *
    * @return false when the file could not be opened.
    */
@@ -425,12 +386,8 @@ class LatencyRecorder {
   }
 
  private:
-  /**
-   * Write one CSV field, quoting it only when it would otherwise split the
-   * row.  Config strings carry `$XLA_FLAGS` verbatim, and a flag list is
-   * entitled to contain a comma; an unquoted one shifts every later column and
-   * silently misattributes the numbers.
-   */
+  /// Quote a field only when it would split the row: a config string carries
+  /// `$XLA_FLAGS` verbatim, and an unquoted comma shifts every later column.
   static void write_field(std::FILE* f, const char* text) {
     if (text == nullptr) {
       return;
@@ -462,12 +419,13 @@ class LatencyRecorder {
     return sorted[lo] * (1.0 - frac) + sorted[hi] * frac;
   }
 
-  /// Format one bucket edge in microseconds, spelling the sentinels as infinity.
+  /// Format one bucket edge in microseconds, spelling the sentinels as
+  /// infinity.
   static void edge_label(std::int64_t ns, char* buf, std::size_t len) noexcept {
     if (ns == std::numeric_limits<std::int64_t>::min()) {
-      std::snprintf(buf, len, "%s", "-inf");
+      std::snprintf(buf, len, "-inf");
     } else if (ns == std::numeric_limits<std::int64_t>::max()) {
-      std::snprintf(buf, len, "%s", "+inf");
+      std::snprintf(buf, len, "+inf");
     } else {
       std::snprintf(buf, len, "%.1f", static_cast<double>(ns) * 1e-3);
     }
@@ -485,9 +443,8 @@ class LatencyRecorder {
 /**
  * @brief Times the enclosing scope and records it on destruction.
  *
- * Preferred over a manual pair of `now()` calls around a body with several
- * exits: an early `return` or a thrown exception still records, so a run does
- * not silently lose exactly the calls that went wrong.
+ * An early `return` or a thrown exception still records, so a run does not
+ * silently lose exactly the calls that went wrong.
  */
 class ScopedLatency {
  public:

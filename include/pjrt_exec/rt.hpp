@@ -3,25 +3,25 @@
  * @brief Optional real-time hardening for the thread that runs the control
  *        loop.
  *
- * None of this changes what is computed; it changes how reliably the operating
+ * Nothing here changes what is computed, only how reliably the operating
  * system lets the computation finish on time.  Each function is independent,
- * reports whether it took effect, and is a no-op returning `false` on
- * platforms that do not provide it (macOS, mainly, where these are development
- * conveniences rather than a deployment target).
+ * reports whether it took effect, and is a no-op returning `false` on a
+ * platform that does not provide it.
  *
- * A typical control process calls, once, after loading its `Function` and
- * before entering the loop:
+ * A control process calls these once, around loading its `Function`:
  *
  * @code
- *   pjrt::rt::harden_malloc();
+ *   pjrt::rt::harden_malloc();            // before the Runtime exists
+ *   pjrt::Runtime runtime;
+ *   pjrt::Function f(runtime, "artifacts/trajopt");
  *   pjrt::rt::lock_memory();
  *   pjrt::rt::pin_current_thread(2);
- *   pjrt::rt::corral_xla_threads({3});   // keep XLA's pools off cpu 2
- *   pjrt::rt::set_realtime_priority(80);
+ *   pjrt::rt::corral_xla_threads({3});    // after: keep XLA's pools off cpu 2
+ *   pjrt::rt::set_realtime_priority(80);  // last: setup never runs real-time
  * @endcode
  *
- * The host itself has to cooperate as well -- isolated cores, a performance
- * governor, disabled deep C-states.  `tools/rt_check.sh` audits that side.
+ * The host has to cooperate as well -- isolated cores, a performance
+ * governor, deep C-states disabled.  `tools/rt_check.sh` audits that side.
  */
 #pragma once
 
@@ -50,9 +50,9 @@ Status lock_memory(std::size_t prefault_bytes = 64 * 1024 * 1024);
 /**
  * @brief Stop the allocator from returning memory to the kernel.
  *
- * Trimming the heap means the *next* allocation has to fault it back in, which
- * turns a routine call into an outlier.  Also caps the number of arenas, since
- * a control loop is single-threaded and does not benefit from per-thread ones.
+ * A trimmed heap has to be faulted back in by the *next* allocation, which
+ * turns a routine call into an outlier.  Also caps the arena count: a control
+ * loop is single-threaded and gains nothing from per-thread arenas.
  */
 Status harden_malloc();
 
@@ -65,27 +65,19 @@ Status pin_current_thread(const std::vector<int>& cpus);
 /**
  * @brief Run the calling thread under `SCHED_FIFO` at `priority`.
  *
- * Requires `CAP_SYS_NICE` (or a raised `RLIMIT_RTPRIO`); in a container, run
- * with `--cap-add=SYS_NICE --ulimit rtprio=99`.  A real-time thread that spins
- * forever will starve the machine, which is why this is opt-in and why the
- * computation being bounded matters.
+ * Needs `CAP_SYS_NICE` or a raised `RLIMIT_RTPRIO`.  Opt-in because a
+ * real-time thread that spins forever starves the machine.
  */
 Status set_realtime_priority(int priority = 80);
 
 /**
  * @brief Move XLA's worker threads onto `cpus`, away from the caller's core.
  *
- * XLA starts its pools when the client is created and puts "XLA" in the names
- * it gives those threads (`tf_XLAEigen…` at the pinned version), so they can
- * be found afterwards by walking `/proc/self/task` for a name containing it.
- * Call this after the `Runtime` exists.  With inline execution the pools
- * should be idle, and this keeps them from waking up on the core the control
- * loop is using.
- *
- * The calling thread is never moved, and threads XLA leaves unnamed -- they
- * inherit the executable's name and are indistinguishable from the caller's
- * own -- are not found, so a successful result is "every pool thread that
- * could be identified", not "every thread the plugin started".
+ * Finds them by walking `/proc/self/task` for a thread name containing "XLA",
+ * so call it after the `Runtime` exists.  The calling thread is never moved,
+ * nor are threads the plugin leaves unnamed, which are indistinguishable from
+ * the caller's own; success means "every pool thread that could be
+ * identified".
  */
 Status corral_xla_threads(const std::vector<int>& cpus);
 

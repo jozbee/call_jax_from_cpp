@@ -2,13 +2,11 @@
  * @file report.hpp
  * @brief Turning a run into a report: printed for a human, JSON for a script.
  *
- * Every example prints the same summary and, when asked, writes the same JSON.
- * That is the point of putting it here: a latency number is only comparable to
- * another one if the run that produced it is described the same way, and the
- * description has to include the things that invalidate the number -- the load
+ * Every example prints the same summary and writes the same JSON, because a
+ * latency number is only comparable to another one when the run that produced
+ * it is described the same way -- including what invalidates it: the load
  * average, the governor, whether the loop was pinned, whether execution was
- * actually inline.  A JSON report that carries the summary without the host is
- * a number without a provenance.
+ * inline.
  *
  * **Exit codes.**  The examples share one set, so a script can tell the
  * failures apart:
@@ -21,9 +19,9 @@
  * | 3 | the allocation gate failed: the steady-state path allocated |
  * | 4 | an allocation gate was required and the guard was not preloaded |
  *
- * 3 and 4 are distinct on purpose.  "The path allocated" and "nobody measured
- * whether the path allocated" look identical in a green CI log otherwise, and
- * the second one is how an allocation-free claim quietly stops being true.
+ * 3 and 4 are distinct because "the path allocated" and "nobody measured
+ * whether it did" look identical in a green CI log, and the second is how an
+ * allocation-free claim quietly stops being true.
  */
 #pragma once
 
@@ -60,8 +58,7 @@ inline constexpr int kExitError = 1;
 inline constexpr int kExitCorrectness = 2;
 /// The steady-state path allocated when it was required not to.
 inline constexpr int kExitAllocGate = 3;
-/// An allocation gate was demanded but the guard was not preloaded, so nothing
-/// was actually measured.
+/// A gate was demanded but the guard was not preloaded: nothing was measured.
 inline constexpr int kExitGuardMissing = 4;
 
 /// @brief The summary, field for field, in microseconds.
@@ -86,25 +83,27 @@ inline json summary_json(const pjrt::LatencySummary& s) {
 /**
  * @brief The histogram as an array of `{lo_us, hi_us, count}`.
  *
- * The underflow and overflow edges become `null` rather than a number: JSON has
- * no infinity, and a literal -9.2e12 microseconds in a report reads as a
- * measurement rather than as the sentinel it is.
+ * The underflow and overflow edges become `null`: JSON has no infinity, and a
+ * literal -9.2e12 microseconds reads as a measurement rather than a sentinel.
  */
 inline json histogram_json(const pjrt::HistogramBin* bins, std::size_t count) {
+  const auto edge_us = [](std::int64_t ns, std::int64_t sentinel) {
+    return ns == sentinel ? json(nullptr)
+                          : json(static_cast<double>(ns) * 1e-3);
+  };
+
   json bars = json::array();
   if (bins == nullptr) {
     return bars;
   }
   for (std::size_t i = 0; i < count; ++i) {
-    json bar;
-    bar["lo_us"] = bins[i].lo_ns == std::numeric_limits<std::int64_t>::min()
-                       ? json(nullptr)
-                       : json(static_cast<double>(bins[i].lo_ns) * 1e-3);
-    bar["hi_us"] = bins[i].hi_ns == std::numeric_limits<std::int64_t>::max()
-                       ? json(nullptr)
-                       : json(static_cast<double>(bins[i].hi_ns) * 1e-3);
-    bar["count"] = bins[i].count;
-    bars.push_back(std::move(bar));
+    bars.push_back(json{
+        {"lo_us",
+         edge_us(bins[i].lo_ns, std::numeric_limits<std::int64_t>::min())},
+        {"hi_us",
+         edge_us(bins[i].hi_ns, std::numeric_limits<std::int64_t>::max())},
+        {"count", bins[i].count},
+    });
   }
   return bars;
 }
@@ -112,20 +111,17 @@ inline json histogram_json(const pjrt::HistogramBin* bins, std::size_t count) {
 /**
  * @brief The allocation census, or an explicit statement that there is none.
  *
- * The absent case is a record, not an omission: `guard_present: false` says
- * "not measured", which is a different claim from zero allocations and must not
- * be readable as one.
+ * `guard_present: false` says "not measured", which is a different claim from
+ * zero allocations and must not be readable as one.
  */
 inline json alloc_json(const pjrt::AllocGuard& guard, std::size_t iterations) {
   if (!guard.present()) {
     return json{
         {"guard_present", false},
-        {"note",
-         "not measured; run with LD_PRELOAD=build/lib/malloc_guard.so"},
+        {"note", "not measured; run with LD_PRELOAD=build/lib/malloc_guard.so"},
     };
   }
-  const double n =
-      iterations > 0 ? static_cast<double>(iterations) : 1.0;
+  const double n = iterations > 0 ? static_cast<double>(iterations) : 1.0;
   const auto per = [n](unsigned long value) {
     return static_cast<double>(value) / n;
   };
@@ -177,8 +173,8 @@ inline json host_json(const HostEnv& env) {
 inline json steps_json(const std::vector<Step>& steps) {
   json out = json::array();
   for (const Step& step : steps) {
-    out.push_back(json{
-        {"name", step.name}, {"ok", step.ok}, {"detail", step.detail}});
+    out.push_back(
+        json{{"name", step.name}, {"ok", step.ok}, {"detail", step.detail}});
   }
   return out;
 }
@@ -186,31 +182,24 @@ inline json steps_json(const std::vector<Step>& steps) {
 /// @brief One input or output, as the loader resolved it.
 inline json spec_json(const pjrt::ArraySpec& spec) {
   return json{
-      {"name", spec.name},
-      {"dtype", pjrt::dtype_name(spec.dtype)},
-      {"shape", spec.shape},
-      {"numel", spec.numel},
-      {"nbytes", spec.nbytes},
-      {"donated", spec.donated},
+      {"name", spec.name},     {"dtype", pjrt::dtype_name(spec.dtype)},
+      {"shape", spec.shape},   {"numel", spec.numel},
+      {"nbytes", spec.nbytes}, {"donated", spec.donated},
   };
 }
 
 /**
- * @brief Everything about the plugin, the client and the loaded function that a
- *        later reader will wish had been recorded.
+ * @brief Everything about the plugin, the client and the loaded function that
+ *        a later reader will wish had been recorded.
  *
- * @param runtime        The client the run was made through; its plugin,
- *                       options and device count are recorded from here.
- * @param function       The loaded executable, read for its signature and the
- *                       kind of load that produced it.
- * @param runtime_ms     Wall time to create the `Runtime` (plugin load, client
- *                       creation, XLA's pools starting).
+ * @param runtime        The client the run was made through.
+ * @param function       The loaded executable: its signature and load kind.
+ * @param runtime_ms     Wall time to create the `Runtime`.
  * @param load_ms        Wall time to construct the `Function`, warm-up
- *                       included.  Load time only: a figure that also contains
- *                       the timed run says nothing about either.
- * @param first_call_us  The first call after warm-up, which is systematically
- *                       the slowest and is therefore worth its own field rather
- *                       than being buried in the tail.
+ *                       included and the timed run excluded.
+ * @param first_call_us  The first call after warm-up: systematically the
+ *                       slowest, so it gets its own field rather than being
+ *                       buried in the tail.
  */
 inline json runtime_json(const pjrt::Runtime& runtime,
                          const pjrt::Function& function, double runtime_ms,
@@ -275,12 +264,12 @@ inline json runtime_json(const pjrt::Runtime& runtime,
 }
 
 /**
- * @brief Print a summary in the same layout `pjrt::LatencyRecorder::report`
- *        uses, minus the histogram.
+ * @brief Print a summary in the layout `pjrt::LatencyRecorder::report` uses,
+ *        minus the histogram.
  *
- * Same layout on purpose: an example's output and the library's output end up
- * pasted into the same issue, and two spellings of p99.9 in one thread is one
- * too many.
+ * Same layout because an example's output and the library's end up pasted
+ * into the same issue, and two spellings of p99.9 in one thread is one too
+ * many.
  */
 inline void print_summary(const char* label, const pjrt::LatencySummary& s,
                           bool signed_samples = false) {
@@ -299,8 +288,8 @@ inline void print_summary(const char* label, const pjrt::LatencySummary& s,
   std::printf("  p90    %10.1f     p99    %10.1f\n", s.p90_us, s.p99_us);
   std::printf("  p99.9  %10.1f     p99.99 %10.1f\n", s.p999_us, s.p9999_us);
   std::printf("  max    %10.1f\n", s.max_us);
-  // A median near zero, which is what signed period jitter has by
-  // construction, makes these ratios arbitrarily large and meaningless.
+  // Signed period jitter has a median near zero by construction, which makes
+  // the ratios arbitrarily large and meaningless.
   if (signed_samples) {
     return;
   }
@@ -312,9 +301,9 @@ inline void print_summary(const char* label, const pjrt::LatencySummary& s,
 /**
  * @brief Write @p report to @p path, creating the directories above it.
  *
- * Reports land in `artifacts/reports/`, which is not in the repository, so the
- * first run of a fresh checkout would otherwise fail at the very end -- after
- * the measurement, which is the worst moment to lose it.
+ * `artifacts/reports/` is not in the repository, so a fresh checkout would
+ * otherwise fail at the very end -- after the measurement, the worst moment
+ * to lose it.
  *
  * @throws std::runtime_error when the directory or the file cannot be created.
  */
@@ -341,24 +330,20 @@ inline void write_json(const std::string& path, const json& report) {
 /**
  * @brief Decide what an allocation gate says about this run.
  *
- * @param guard         The guard the window was recorded into, already
- *                      disarmed.  Whether it was preloaded at all is part of
- *                      the verdict, not a precondition of asking.
- * @param gate          `"self"` gates on the wrapper's own allocations, which
- *                      is the number that must be zero; `"all"` gates on every
- *                      allocation in the armed window, including the thousands
- *                      per call inside XLA's thunk runtime, so it only makes
- *                      sense for a run that calls nothing.  Anything else
- *                      (`"none"`) gates on nothing.
+ * @param guard         The guard the window was recorded into, disarmed.
+ *                      Whether it was preloaded at all is part of the verdict.
+ * @param gate          `"self"` gates on the wrapper's own allocations, the
+ *                      number that must be zero; `"all"` gates on every
+ *                      allocation in the window, XLA's thunk runtime included,
+ *                      so it only makes sense for a run that calls nothing.
+ *                      Anything else gates on nothing.
  * @param require_guard Fail when the interposer was not preloaded, instead of
  *                      passing a test that never ran.
  * @return `kExitOk`, `kExitAllocGate` or `kExitGuardMissing`.
  *
- * When the guard is present but cannot attribute allocations to a module -- the
- * classifier needs module ranges that are not built on every platform -- the
- * `"self"` gate falls back to the total.  That is stricter than asked for and
- * will fail a run that only the plugin allocated in, which is the right way
- * round: a gate that cannot see what it is gating should complain, not pass.
+ * When the guard cannot attribute allocations to a module, the `"self"` gate
+ * falls back to the total: a gate that cannot see what it is gating should
+ * complain, not pass.
  */
 inline int alloc_gate_exit_code(const pjrt::AllocGuard& guard,
                                 const std::string& gate, bool require_guard) {

@@ -23,7 +23,7 @@ needs none of it.
 ```
 
 ```{doxygenclass} cjfc::Cli
-:members: Cli, help, program, usage, print_usage, flag, get, get_long, get_double, get_size
+:members: Cli, help, print_usage, flag, get, get_long, get_size
 ```
 
 ## `periodic.hpp`

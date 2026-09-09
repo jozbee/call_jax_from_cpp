@@ -3,10 +3,9 @@
  * @brief Load the artifact `examples/01_basic/export.py` wrote, call it once,
  *        and check the answer against arithmetic done here.
  *
- * The whole call path and nothing else: a `pjrt::Runtime`, a `pjrt::Function`,
- * a signature check, the inputs, `call()`, the outputs.  The flags, the
+ * The call path and nothing else: a `pjrt::Runtime`, a `pjrt::Function`, a
+ * signature check, the inputs, `call()`, the outputs.  The flags, the
  * `key=value` reporting and the `--debug` demonstration are in `support.hpp`.
- * `02_trajopt` and `04_realtime` add timing and hardening on top of this.
  */
 #include <cstddef>
 #include <cstdio>
@@ -40,8 +39,8 @@ int main(int argc, char** argv) {
     // docs: begin signature
     basic::print_signature(runtime, f);
 
-    // Names resolve to indices once, here, because `find_input` is a linear
-    // scan over strings.  A loop indexes; only startup looks names up.
+    // Names resolve to indices once: `find_input` is a linear scan over
+    // strings, and a loop indexes.
     const std::size_t a_index = basic::require_input(f, "A");
     const std::size_t b_index = basic::require_input(f, "b");
     basic::require_shape(f, a_index, b_index);
@@ -54,8 +53,7 @@ int main(int argc, char** argv) {
     double* A = f.input<double>(a_index);  // the arena XLA reads, not a copy
     double* b = f.input<double>(b_index);
 
-    // A fixed seed, so two runs print the same numbers and a difference in the
-    // output is a difference in the computation.
+    // Fixed seed: a difference between two runs is in the computation.
     std::mt19937_64 rng(20240517);
     for (std::size_t i = 0; i < n * n; ++i) {
       A[i] = basic::next_uniform(rng);  // row-major, as the sidecar declares

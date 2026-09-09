@@ -19,9 +19,8 @@
 #include "isa.hpp"
 #include "nlohmann/json.hpp"
 
-// The build defines this to wherever `make plugin` puts the shared object.  An
-// empty default is deliberate: a build that did not fetch a plugin should say
-// so through `LoadError`, not through a dlopen of "".
+// Set by the build to wherever `make plugin` put the shared object.  An empty
+// default fails through `LoadError` rather than through a dlopen of "".
 #ifndef PJRT_EXEC_DEFAULT_PLUGIN_PATH
 #define PJRT_EXEC_DEFAULT_PLUGIN_PATH ""
 #endif
@@ -29,48 +28,30 @@
 namespace pjrt {
 namespace {
 
-/// `xla::cpu::Align()`.  Anything below `xla::cpu::MinAlign()` makes XLA copy
-/// the host buffer instead of aliasing it, silently -- the zero-copy path
-/// disappears with no error and no log line, and only the latency changes.
+/// `xla::cpu::Align()`.  Below `xla::cpu::MinAlign()` XLA copies the host
+/// buffer instead of aliasing it, silently: only the latency changes.
 constexpr std::size_t kArenaAlignment = 64;
 
-/// The oldest PJRT C API minor version this code has ever been run against.
-/// Older plugins are refused rather than probed: the `Args` structs this file
-/// fills in have grown fields since, and a plugin that predates them reads the
-/// ones it knows and ignores the rest, which is exactly the sort of half-right
-/// behaviour that shows up later as a wrong answer.
+/// The oldest PJRT C API minor this code has been run against.  Older plugins
+/// are refused: the `Args` structs have grown fields since, and a plugin that
+/// reads only the ones it knows is half-right in ways that surface later.
 constexpr int kOldestSupportedApiMinor = 90;
 
-/// Default serialized `CompileOptionsProto` for the `.mlirbc` fallback.
+/// Default serialized `CompileOptionsProto` for the `.mlirbc` fallback:
+/// `{executable_build_options {device_ordinal: -1, num_replicas: 1,
+/// num_partitions: 1, use_shardy_partitioner: true}}`, field numbers from
+/// `xla/pjrt/proto/compile_options.proto`.  Regenerate by building the proto
+/// in Python and printing `SerializeToString()`.
 ///
 /// Never pass empty compile options: `ExecutableBuildOptionsFromProto` copies
-/// `num_replicas` and `num_partitions` straight out of the proto, including
-/// when they are absent and therefore zero, and a build with zero replicas
-/// fails deep inside the compiler.
-///
-/// The bytes encode `{executable_build_options {device_ordinal: -1,
-/// num_replicas: 1, num_partitions: 1, use_shardy_partitioner: true}}`:
-///
-///   1a 12                          field 3 (executable_build_options), wire
-///                                  type 2 (length-delimited), 18 bytes
-///     08 ff ff ff ff ff ff ff ff ff 01   field 1 (device_ordinal), varint,
-///                                  -1 sign-extended to 64 bits
-///     20 01                        field 4 (num_replicas) = 1
-///     28 01                        field 5 (num_partitions) = 1
-///     98 01 01                     field 19 (use_shardy_partitioner) = true
-///                                  (key 152 = (19 << 3) | 0, itself a varint)
-///
-/// To regenerate: build the CompileOptionsProto in Python and print
-/// `SerializeToString()`.  Field numbers come from
-/// `xla/pjrt/proto/compile_options.proto`.
+/// `num_replicas` and `num_partitions` out of the proto even when they are
+/// absent, and a build with zero replicas fails deep inside the compiler.
 constexpr unsigned char kDefaultCompileOptions[] = {
-    0x1a, 0x12, 0x08, 0xff, 0xff, 0xff, 0xff, 0xff,
-    0xff, 0xff, 0xff, 0xff, 0x01, 0x20, 0x01, 0x28,
-    0x01, 0x98, 0x01, 0x01};
+    0x1a, 0x12, 0x08, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+    0xff, 0xff, 0x01, 0x20, 0x01, 0x28, 0x01, 0x98, 0x01, 0x01};
 
-// Create-option names.  String literals so the `const char*` a PJRT_NamedValue
-// holds stays valid however the option vector is shuffled during the
-// drop-and-retry loop.
+// String literals: a `PJRT_NamedValue` keeps only the pointer, and the option
+// vector is erased from during the drop-and-retry loop.
 constexpr const char* kOptionAsynchronous = "asynchronous";
 constexpr const char* kOptionCpuDeviceCount = "cpu_device_count";
 constexpr const char* kOptionMaxInflight = "max_inflight_computations";
@@ -78,9 +59,7 @@ constexpr const char* kOptionMaxInflight = "max_inflight_computations";
 constexpr const char* kAttrSynchronous = "supports_synchronous_execution";
 constexpr const char* kAttrMaxInflight = "supports_max_inflight_computations";
 
-/// The element types `DType` covers, named the way an error message should
-/// name them.  One string rather than eleven so the two messages that list
-/// them cannot drift apart.
+/// The element types `DType` covers, spelled once so the two messages agree.
 constexpr const char* kSupportedTypes =
     "bool, int8..int64, uint8..uint64, float32, float64";
 
@@ -88,10 +67,7 @@ constexpr const char* kSupportedTypes =
 // error management //
 //////////////////////
 
-/// Destroy a `PJRT_Error`, tolerating null.  Every path that inspects an error
-/// ends here; the previous version of this file did not, and leaked the error
-/// object `PJRT_Plugin_Attributes` returns on a plugin that does not implement
-/// it.
+/// Destroy a `PJRT_Error`, tolerating null.
 void destroy_error(const PJRT_Api* api, PJRT_Error* error) {
   if (error == nullptr) {
     return;
@@ -102,9 +78,8 @@ void destroy_error(const PJRT_Api* api, PJRT_Error* error) {
   api->PJRT_Error_Destroy(&args);
 }
 
-/// Copy out an error's message without consuming it.  The string PJRT hands
-/// back has the lifetime of the error, so it has to be copied before the error
-/// is destroyed.
+/// Copy out an error's message; the string PJRT returns lives only as long as
+/// the error does.
 std::string error_message(const PJRT_Api* api, PJRT_Error* error) {
   if (error == nullptr) {
     return "no error";
@@ -119,8 +94,7 @@ std::string error_message(const PJRT_Api* api, PJRT_Error* error) {
   return std::string(args.message, args.message_size);
 }
 
-/// Read an error's status code, without consuming it.  A failure to read the
-/// code is itself reported as an error object, which is destroyed here.
+/// Read an error's status code without consuming it.
 PJRT_Error_Code error_code(const PJRT_Api* api, PJRT_Error* error) {
   if (error == nullptr) {
     return PJRT_Error_Code_OK;
@@ -133,17 +107,10 @@ PJRT_Error_Code error_code(const PJRT_Api* api, PJRT_Error* error) {
   return args.code;
 }
 
-/**
- * @brief Owns a `PJRT_Error*` and destroys it.
- *
- * `pjrt::Error` consumes an error and is therefore only usable where the error
- * is about to be thrown.  Everywhere else -- a call whose failure is a
- * fallback rather than a fault, a destructor that has nowhere to throw to --
- * the error still has to be freed, and this is what frees it.
- *
- * `release()` hands ownership back for the one case that does throw:
- * `throw Error(api, holder.release())`.
- */
+/// Owns a `PJRT_Error*` and destroys it.  `pjrt::Error` consumes the error it
+/// is built from, so it only fits where the error is about to be thrown; this
+/// is for a failure that is a fallback rather than a fault.  `release()` hands
+/// the error on for the one case that does throw.
 class ErrorHolder {
  public:
   ErrorHolder(const PJRT_Api* api, PJRT_Error* error)
@@ -158,8 +125,6 @@ class ErrorHolder {
   std::string message() const { return error_message(api_, error_); }
   PJRT_Error_Code code() const { return error_code(api_, error_); }
 
-  /// Give up ownership; the caller must destroy the error or hand it to
-  /// `pjrt::Error`, which does.
   PJRT_Error* release() {
     PJRT_Error* error = error_;
     error_ = nullptr;
@@ -169,6 +134,28 @@ class ErrorHolder {
  private:
   const PJRT_Api* api_;
   PJRT_Error* error_;
+};
+
+/// Owns the `PJRT_Executable*` from `PJRT_LoadedExecutable_GetExecutable`.
+/// Everything it reports -- element types, dimensions, the fingerprint -- has
+/// the handle's lifetime, so it is copied out before scope end.
+class ExecutableHandle {
+ public:
+  ExecutableHandle(const PJRT_Api* api, PJRT_Executable* executable)
+      : api_(api), executable_(executable) {}
+  ~ExecutableHandle() {
+    PJRT_Executable_Destroy_Args args{};
+    args.struct_size = PJRT_Executable_Destroy_Args_STRUCT_SIZE;
+    args.executable = executable_;
+    destroy_error(api_, api_->PJRT_Executable_Destroy(&args));
+  }
+
+  ExecutableHandle(const ExecutableHandle&) = delete;
+  ExecutableHandle& operator=(const ExecutableHandle&) = delete;
+
+ private:
+  const PJRT_Api* api_;
+  PJRT_Executable* executable_;
 };
 
 ////////////////////////
@@ -184,15 +171,10 @@ struct ApiFunction {
 #define PJRT_EXEC_API_FN(field) \
   ApiFunction { offsetof(PJRT_Api, field), #field }
 
-/// Every PJRT entry point this translation unit dereferences.  A plugin that
-/// leaves one of them null is refused at load with the name of the first one
-/// missing, because the alternative is a null call somewhere later with no
-/// indication of which function was absent.
-///
-/// The optional ones are deliberately absent from this list:
-/// `PJRT_Executable_Fingerprint` and `PJRT_LoadedExecutable_Fingerprint` are
-/// documented as "may not be implemented by all platforms", and their absence
-/// costs a diagnostic string, not correctness.
+/// Every PJRT entry point this file dereferences.  A plugin missing one is
+/// refused at load, by name, rather than found as a null call later.  The two
+/// `*_Fingerprint` entry points are documented as optional and their absence
+/// costs a diagnostic string, so they are checked where they are used.
 constexpr ApiFunction kRequiredApiFunctions[] = {
     PJRT_EXEC_API_FN(PJRT_Error_Destroy),
     PJRT_EXEC_API_FN(PJRT_Error_Message),
@@ -225,13 +207,9 @@ constexpr ApiFunction kRequiredApiFunctions[] = {
 static_assert(sizeof(void*) == sizeof(void (*)()),
               "this file reads PJRT_Api function pointers through a void*");
 
-/// Whether the pointer at `offset` in `api` is present and non-null.
-///
-/// `struct_size` is the forwards-compatibility mechanism the PJRT C API is
-/// built on: a plugin compiled against an older header publishes a shorter
-/// table, and everything past its `struct_size` is memory that belongs to
-/// somebody else.  A field beyond the end therefore counts as absent rather
-/// than as whatever byte pattern happens to be there.
+/// Whether the pointer at `offset` in `api` is present and non-null.  A plugin
+/// built against an older header publishes a shorter table, and everything
+/// past its `struct_size` is somebody else's memory, so it counts as absent.
 bool api_fn_present(const PJRT_Api* api, std::size_t offset) {
   if (offset + sizeof(void*) > api->struct_size) {
     return false;
@@ -250,8 +228,7 @@ bool ends_with(const std::string& text, const std::string& suffix) {
          text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
-/// Read a whole file as bytes.  Returns false when it cannot be opened, which
-/// the caller reports with more context than an errno string would carry.
+/// Read a whole file as bytes; false when it cannot be opened or is empty.
 bool read_file(const std::string& path, std::string* out) {
   std::ifstream file(path, std::ios::binary);
   if (!file) {
@@ -267,18 +244,15 @@ bool file_exists(const std::string& path) {
   return static_cast<bool>(file);
 }
 
-/// Where a `Function`'s files live, derived from the `base_path` a caller
-/// passed to the constructor.
+/// Where a `Function`'s files live, from the `base_path` the caller passed.
 struct ArtifactPaths {
   std::string sidecar;    ///< `.../trajopt.json`
   std::string directory;  ///< `.../`, with its separator, or empty
   std::string stem;       ///< `trajopt`
 };
 
-/// Accept both spellings of `base_path`: a bare `artifacts/trajopt` and a
-/// fully written `artifacts/trajopt.json`.  The second exists because a shell
-/// completes file names, not stems, and the first artifact anybody types is
-/// the sidecar.
+/// Accept `artifacts/trajopt` and `artifacts/trajopt.json` alike: a shell
+/// completes file names, not stems.
 ArtifactPaths resolve_paths(const std::string& base_path) {
   ArtifactPaths paths;
   paths.sidecar =
@@ -294,8 +268,8 @@ ArtifactPaths resolve_paths(const std::string& base_path) {
   return paths;
 }
 
-/// Resolve an artifact name from the sidecar against the sidecar's own
-/// directory, so a bundle of artifacts can be moved or copied as a unit.
+/// Names in the sidecar resolve against the sidecar's own directory, so a
+/// bundle of artifacts moves as a unit.
 std::string resolve_relative(const std::string& directory,
                              const std::string& name) {
   if (name.empty() || name.front() == '/') {
@@ -323,8 +297,8 @@ nlohmann::json read_json(const std::string& path) {
 // protobuf envelope  //
 ////////////////////////
 
-/// Read one base-128 varint at `pos`, advancing it.  False on a truncated or
-/// over-long varint, which is the scanner's cue to give up rather than guess.
+/// Read one base-128 varint at `pos`, advancing it; false on a truncated or
+/// over-long one.
 bool read_varint(const std::string& data, std::size_t* pos,
                  std::uint64_t* value) {
   *value = 0;
@@ -343,21 +317,11 @@ bool read_varint(const std::string& data, std::size_t* pos,
   return false;
 }
 
-/**
- * @brief Pull the compile options back out of a serialized executable.
- *
- * A `.binpb` is an `ExecutableAndOptionsProto`: field 1 is the serialized
- * executable, field 2 the `CompileOptionsProto` it was built with.  When the
- * ISA guard sends us to the `.mlirbc` instead, compiling with those same
- * options is the closest this can get to the program the exporter tested.
- *
- * A wire-format scan rather than a protobuf dependency: two field numbers and
- * four wire types is the whole grammar needed, and linking protobuf into a
- * header-only-plus-dlopen project to read one field is a poor trade.  Wire
- * types 3 and 4 (the deprecated groups) end the scan -- they nest, this does
- * not, and a wrong answer here would be a program compiled with somebody
- * else's options.
- */
+/// Pull the `CompileOptionsProto` -- field 2 of the `ExecutableAndOptionsProto`
+/// a `.binpb` holds -- back out, so the `.mlirbc` fallback compiles with the
+/// options the exporter used.  A wire-format scan rather than a protobuf
+/// dependency: two fields and four wire types is the whole grammar.  The
+/// deprecated group wire types nest and this does not, so they end the scan.
 bool compile_options_from_envelope(const std::string& envelope,
                                    std::string* out) {
   std::size_t pos = 0;
@@ -411,7 +375,7 @@ bool compile_options_from_envelope(const std::string& envelope,
 // value checking //
 ////////////////////
 
-/// `dtype[d0,d1]`, or `dtype[]` for a scalar -- the spelling the metadata
+/// `dtype[d0,d1]`, or `dtype[]` for a scalar: the spelling the metadata
 /// mismatch messages compare in.
 std::string shape_string(DType dtype, const std::vector<std::int64_t>& dims) {
   std::string text = dtype_name(dtype);
@@ -426,69 +390,50 @@ std::string shape_string(DType dtype, const std::vector<std::int64_t>& dims) {
   return text;
 }
 
-const char* nonfinite_name(double value) {
-  if (std::isnan(value)) {
-    return "nan";
-  }
-  return value < 0 ? "-inf" : "inf";
-}
-
 [[noreturn]] void throw_nonfinite(const char* role, std::size_t index,
                                   const std::string& name, std::size_t element,
                                   double value) {
+  const char* what = std::isnan(value) ? "nan" : (value < 0 ? "-inf" : "inf");
   throw std::domain_error(std::string(role) + " " + std::to_string(index) +
                           " ('" + name + "') element " +
-                          std::to_string(element) + " is " +
-                          nonfinite_name(value));
+                          std::to_string(element) + " is " + what);
 }
 
 [[noreturn]] void throw_bad_bool(const char* role, std::size_t index,
                                  const std::string& name, std::size_t element,
                                  unsigned value) {
-  throw std::domain_error(std::string(role) + " " + std::to_string(index) +
-                          " ('" + name + "') element " +
-                          std::to_string(element) + " is " +
-                          std::to_string(value) +
-                          ", bool arenas must hold 0 or 1");
+  throw std::domain_error(
+      std::string(role) + " " + std::to_string(index) + " ('" + name +
+      "') element " + std::to_string(element) + " is " + std::to_string(value) +
+      ", bool arenas must hold 0 or 1");
 }
 
 [[noreturn]] void throw_reentered(const std::string& name) {
   throw std::logic_error("Function '" + name + "'::call() re-entered");
 }
 
-/**
- * @brief Audit one arena: no nan or inf in a float, nothing but 0 or 1 in a
- *        bool.
- *
- * The bool case is not pedantry.  XLA does not normalize a `PRED` byte, so a
- * stray 2 can make one predicate read true and another read false within a
- * single computation, and the result is a wrong answer with no failure
- * anywhere to attach a bug report to.
- *
- * Integer arenas hold no invalid bit patterns and are skipped.
- */
+/// Audit one arena: no nan or inf in a float, nothing but 0 or 1 in a bool.
+/// The bool case matters: XLA does not normalize a `PRED` byte, so a stray 2
+/// can read true in one predicate and false in another within one computation,
+/// and the wrong answer carries no failure to attach a report to.
 void scan_arena(const char* role, std::size_t index, const ArraySpec& spec,
                 const void* arena) {
+  const auto scan_floats = [&](const auto* values) {
+    for (std::size_t i = 0; i < spec.numel; ++i) {
+      if (!std::isfinite(values[i])) {
+        throw_nonfinite(role, index, spec.name, i,
+                        static_cast<double>(values[i]));
+      }
+    }
+  };
+
   switch (spec.dtype) {
-    case DType::Float64: {
-      const double* values = static_cast<const double*>(arena);
-      for (std::size_t i = 0; i < spec.numel; ++i) {
-        if (!std::isfinite(values[i])) {
-          throw_nonfinite(role, index, spec.name, i, values[i]);
-        }
-      }
+    case DType::Float64:
+      scan_floats(static_cast<const double*>(arena));
       break;
-    }
-    case DType::Float32: {
-      const float* values = static_cast<const float*>(arena);
-      for (std::size_t i = 0; i < spec.numel; ++i) {
-        if (!std::isfinite(values[i])) {
-          throw_nonfinite(role, index, spec.name, i,
-                          static_cast<double>(values[i]));
-        }
-      }
+    case DType::Float32:
+      scan_floats(static_cast<const float*>(arena));
       break;
-    }
     case DType::Bool: {
       const unsigned char* values = static_cast<const unsigned char*>(arena);
       for (std::size_t i = 0; i < spec.numel; ++i) {
@@ -507,13 +452,10 @@ void scan_arena(const char* role, std::size_t index, const ArraySpec& spec,
 // arenas  //
 /////////////
 
-/// One 64-byte-aligned, zeroed arena of at least `nbytes`.
-///
-/// Rounded up so that the tail of the last cache line belongs to us: XLA's
-/// vectorized epilogues read whole vectors, and a read that runs past the end
-/// of an exactly sized allocation is a valgrind report at best.  A zero-byte
-/// array still gets a line, because a null arena would turn every accessor
-/// into a special case.
+/// One 64-byte-aligned, zeroed arena of at least `nbytes`, rounded up to whole
+/// lines: XLA's vectorized epilogues read whole vectors, and a read past an
+/// exactly sized allocation is a valgrind report at best.  A zero-byte array
+/// still gets a line, so no accessor has to special-case a null arena.
 void* alloc_arena(std::size_t nbytes) {
   const std::size_t wanted = nbytes == 0 ? 1 : nbytes;
   const std::size_t rounded =
@@ -529,7 +471,7 @@ void* alloc_arena(std::size_t nbytes) {
 }
 
 /// Free everything a `Function` owns.  Shared by the destructor and by the
-/// constructor's failure path, which the destructor will never run for.
+/// constructor's failure path, which gets no destructor.
 void release_resources(const PJRT_Api* api,
                        std::vector<PJRT_Buffer*>* input_buffers,
                        std::vector<PJRT_Buffer*>* output_buffers,
@@ -589,9 +531,7 @@ void check_error(const PJRT_Api* api, PJRT_Error* error) {
 
 namespace {
 
-/// Where to look for the plugin, in the order a caller expects: what they
-/// asked for, then what the environment says, then what this build was
-/// configured with.
+/// What the caller asked for, then the environment, then the build's default.
 std::string resolve_plugin_path(const RuntimeOptions& options) {
   if (!options.plugin_path.empty()) {
     return options.plugin_path;
@@ -609,9 +549,7 @@ std::string resolve_plugin_path(const RuntimeOptions& options) {
       "$PJRT_CPU_PLUGIN, or run make plugin");
 }
 
-/// Render a plugin attribute for `describe()`.  Attributes are the only
-/// self-description a plugin offers, so all of them are kept, whatever their
-/// type.
+/// Render a plugin attribute for `describe()`, whatever its type.
 std::string named_value_to_string(const PJRT_NamedValue& value) {
   switch (value.type) {
     case PJRT_NamedValue_kString:
@@ -636,13 +574,10 @@ std::string named_value_to_string(const PJRT_NamedValue& value) {
   return "?";
 }
 
-/// Pull the option name out of `Unexpected option name passed to
-/// PJRT_Client_Create: <name>`.
-///
-/// The last colon rather than a fixed prefix: the plugin's message may arrive
-/// with a status prefix in front of it, and an option name never contains a
-/// colon.  An empty return means the message did not name anything this code
-/// can act on, which stops the retry loop rather than dropping a guess.
+/// The option name out of `Unexpected option name passed to
+/// PJRT_Client_Create: <name>`.  The last colon rather than a fixed prefix: a
+/// status prefix may precede the message, and a name never contains a colon.
+/// Empty when nothing usable was named, which stops the retry loop.
 std::string offending_option_name(const std::string& message) {
   const std::size_t colon = message.rfind(':');
   if (colon == std::string::npos) {
@@ -657,8 +592,7 @@ std::string offending_option_name(const std::string& message) {
   return name.substr(first, name.find_last_not_of(junk) - first + 1);
 }
 
-/// A `PJRT_NamedValue` naming a string literal, filled field by field because
-/// this struct's trailing fields have moved before.
+/// Filled field by field: this struct's trailing fields have moved before.
 PJRT_NamedValue bool_option(const char* name, bool value) {
   PJRT_NamedValue option{};
   option.struct_size = PJRT_NamedValue_STRUCT_SIZE;
@@ -685,17 +619,12 @@ PJRT_NamedValue int64_option(const char* name, std::int64_t value) {
 
 Runtime::Runtime(const RuntimeOptions& options) : options_(options) {
   load_plugin(resolve_plugin_path(options_));
-  // Before the client, not after: the attributes decide which create options
-  // are safe to send, and sending an unknown one is now fatal.
+  // Before the client: the attributes decide which create options are safe to
+  // send, and sending an unknown one is fatal.
   query_attributes();
 
-  // A constructor that throws gets no destructor, so anything already acquired
-  // has to be released here. Creating a client starts XLA's thread pools, and
-  // `create_client()` can still throw after it succeeds -- on a device count
-  // of zero, for one -- so without this a caller probing plugin paths or
-  // option combinations and catching the failure accumulates two threads and
-  // several megabytes per attempt. The plugin handle is deliberately not
-  // closed: XLA keeps process-lifetime statics behind it.
+  // A constructor that throws gets no destructor, and `create_client()` can
+  // throw after the client exists.  Each leaked client is XLA's thread pools.
   try {
     create_client();
   } catch (...) {
@@ -719,18 +648,14 @@ void Runtime::destroy_client() noexcept {
 Runtime::~Runtime() {
   destroy_client();
 
-  // `dl_handle_` is deliberately never closed.  XLA leaves statics behind the
-  // plugin boundary that live as long as the process -- LLVM's target
-  // registry, the CPU feature tables, thread-local allocator state -- and
-  // unmapping the code they point into ends the process on the next atexit
-  // handler rather than here where it could be diagnosed.
+  // `dl_handle_` is never closed: XLA keeps process-lifetime statics behind
+  // the plugin boundary, and unmapping the code they point into ends the
+  // process in the next atexit handler rather than anywhere diagnosable.
 }
 
 void Runtime::load_plugin(const std::string& path) {
-  // RTLD_NOW so an unresolved symbol is a failure here, at startup, instead of
-  // a crash on the first call that reaches it.  RTLD_LOCAL so the plugin's own
-  // copy of LLVM does not join the process's global symbol namespace and get
-  // bound to by something else.
+  // RTLD_NOW: an unresolved symbol fails here, not on the first call reaching
+  // it.  RTLD_LOCAL: the plugin's own LLVM stays out of the global namespace.
   dl_handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (dl_handle_ == nullptr) {
     const char* why = dlerror();
@@ -742,14 +667,12 @@ void Runtime::load_plugin(const std::string& path) {
   void* symbol = dlsym(dl_handle_, "GetPjrtApi");
   const char* dlsym_error = dlerror();
   if (symbol == nullptr || dlsym_error != nullptr) {
-    throw LoadError(
-        path + ": no GetPjrtApi symbol (" +
-        (dlsym_error == nullptr ? "symbol is null" : dlsym_error) +
-        "); a PJRT plugin exports exactly this one function");
+    throw LoadError(path + ": no GetPjrtApi symbol (" +
+                    (dlsym_error == nullptr ? "symbol is null" : dlsym_error) +
+                    "); a PJRT plugin exports exactly this one function");
   }
 
-  // A function pointer is not an object pointer; copying the bytes is the
-  // portable spelling of the cast POSIX guarantees works.
+  // memcpy is the portable spelling of the object-to-function pointer cast.
   const PJRT_Api* (*get_api)() = nullptr;
   std::memcpy(&get_api, &symbol, sizeof(symbol));
   api_ = get_api();
@@ -761,14 +684,12 @@ void Runtime::load_plugin(const std::string& path) {
   plugin_.api_major = api_->pjrt_api_version.major_version;
   plugin_.api_minor = api_->pjrt_api_version.minor_version;
 
-  // The major version gates ABI compatibility outright: a different major
-  // means fields have moved, and every struct in this file would be filled in
-  // at the wrong offsets.
+  // A different major means fields have moved, and every struct in this file
+  // would be filled in at the wrong offsets.
   if (plugin_.api_major != PJRT_API_MAJOR) {
     throw LoadError(path + ": PJRT C API major version " +
                     std::to_string(plugin_.api_major) +
-                    " but this build needs " +
-                    std::to_string(PJRT_API_MAJOR));
+                    " but this build needs " + std::to_string(PJRT_API_MAJOR));
   }
   if (plugin_.api_minor < kOldestSupportedApiMinor) {
     throw LoadError(path + ": PJRT C API 0." +
@@ -778,10 +699,8 @@ void Runtime::load_plugin(const std::string& path) {
                     std::to_string(kOldestSupportedApiMinor) + ")");
   }
 
-  // Checked before `PJRT_Plugin_Initialize`, which is itself in the table: a
-  // null function pointer found by calling it is a segfault with no name
-  // attached, and the whole point of the table is to name the first thing
-  // missing.
+  // Before `PJRT_Plugin_Initialize`, which is itself in the table: the point
+  // of the table is to name the first thing missing instead of segfaulting.
   for (const ApiFunction& fn : kRequiredApiFunctions) {
     if (!api_fn_present(api_, fn.offset)) {
       throw LoadError(path + ": PJRT plugin does not implement " +
@@ -800,10 +719,8 @@ void Runtime::query_attributes() {
   PJRT_Plugin_Attributes_Args args{};
   args.struct_size = PJRT_Plugin_Attributes_Args_STRUCT_SIZE;
 
-  // A plugin that cannot describe itself is not a fatal problem, it is a
-  // plugin that advertises nothing -- which is exactly the conservative state
-  // the members already hold.  The error still has to be freed, and that is
-  // what the holder is for.
+  // A plugin that cannot describe itself advertises nothing, which is the
+  // conservative state the members already hold.  Not an error.
   ErrorHolder error(api_, api_->PJRT_Plugin_Attributes(&args));
   if (error) {
     return;
@@ -823,9 +740,8 @@ void Runtime::query_attributes() {
 }
 
 void Runtime::create_client() {
-  // `DefaultThreadPoolSize()` reads this environment variable, and it reads it
-  // while the client is being created, so it has to be set first -- there is
-  // no create option and no later hook that reaches the same knob.
+  // `DefaultThreadPoolSize()` reads this while the client is being created;
+  // no create option and no later hook reaches the same knob.
   if (options_.worker_threads > 0) {
     setenv("PJRT_NPROC", std::to_string(options_.worker_threads).c_str(),
            /*overwrite=*/1);
@@ -835,14 +751,11 @@ void Runtime::create_client() {
   create_options.push_back(
       int64_option(kOptionCpuDeviceCount, options_.cpu_device_count));
   if (options_.synchronous) {
-    // The option is spelled in the negative: `asynchronous = false` is what
-    // asks for inline execution.
+    // Spelled in the negative: `asynchronous = false` asks for inline.
     create_options.push_back(bool_option(kOptionAsynchronous, false));
   }
-  // Withheld unless advertised.  As of XLA 131bf41a the CPU plugin returns
-  // InvalidArgument for a create option it does not recognize, where it used
-  // to ignore one silently, so sending this speculatively would cost the whole
-  // client rather than just the option.
+  // Withheld unless advertised: at this XLA version the CPU plugin rejects a
+  // create option it does not recognize, and that costs the whole client.
   if (options_.max_inflight_computations > 0 &&
       plugin_.advertises_max_inflight) {
     create_options.push_back(
@@ -876,17 +789,15 @@ void Runtime::create_client() {
         [&offender](const PJRT_NamedValue& option) {
           return offender == std::string(option.name, option.name_size);
         });
-    // Nothing to drop means the plugin is objecting to an option this code did
-    // not send, or naming it in a way this code cannot parse.  Either way the
-    // retry would send the same thing again, so stop and report.
+    // Nothing to drop means the plugin objects to something this code did not
+    // send or cannot parse; a retry would send the same thing again.
     if (victim == create_options.end()) {
       throw Error(api_, error.release());
     }
     if (offender == kOptionAsynchronous) {
       asynchronous_rejected = true;
     }
-    // Erasing is also what bounds the loop: an option can only be dropped
-    // once, so a plugin that keeps naming the same one runs out of matches.
+    // Erasing is what bounds the loop: an option can only be dropped once.
     create_options.erase(victim);
   }
 
@@ -897,8 +808,8 @@ void Runtime::create_client() {
   } else if (plugin_.advertises_synchronous_execution) {
     sync_mode_ = SyncMode::Inline;
   } else {
-    // The option survived creation, but this plugin does not carry the marker
-    // attribute, so "it did not complain" is the strongest claim available.
+    // Survived creation, but with no marker attribute "it did not complain"
+    // is the strongest claim available.
     sync_mode_ = SyncMode::Accepted;
   }
 
@@ -944,7 +855,7 @@ std::string Runtime::describe() const {
   switch (sync_mode_) {
     case SyncMode::Inline:
       out << "execution is inline on the calling thread (the plugin "
-             "advertises " << kAttrSynchronous << ")";
+          << "advertises " << kAttrSynchronous << ")";
       break;
     case SyncMode::Accepted:
       out << "execution is inline as far as can be told: the plugin took the `"
@@ -994,13 +905,9 @@ std::string format_ms(double milliseconds) {
   return out.str();
 }
 
-/// Parse one `inputs`/`outputs` entry of a schema 2 sidecar.
-///
-/// Everything here is cross-checked rather than trusted, because the sidecar
-/// is the only description of the *inputs* that exists -- the PJRT C API has
-/// no parameter-shape query -- and a sidecar that has drifted from its
-/// executable turns into a write past the end of an arena, discovered as
-/// corrupted output several thousand calls later.
+/// Parse one `inputs`/`outputs` entry of a schema 2 sidecar.  Everything is
+/// cross-checked rather than trusted: the PJRT C API has no parameter-shape
+/// query, and a sidecar that has drifted is a write past the end of an arena.
 ArraySpec parse_array(const std::string& sidecar_path,
                       const nlohmann::json& entry, const char* role,
                       std::size_t position, bool wants_donation) {
@@ -1013,12 +920,13 @@ ArraySpec parse_array(const std::string& sidecar_path,
   ArraySpec spec;
   spec.name = entry.value("name", std::string(role) + std::to_string(position));
 
-  if (entry.contains("index") &&
-      entry["index"].get<std::int64_t>() !=
-          static_cast<std::int64_t>(position)) {
-    throw LoadError(where + " ('" + spec.name + "') declares index " +
-                    std::to_string(entry["index"].get<std::int64_t>()) +
-                    ", but entries must be listed in executable order");
+  if (entry.contains("index")) {
+    const std::int64_t declared = entry["index"].get<std::int64_t>();
+    if (declared != static_cast<std::int64_t>(position)) {
+      throw LoadError(where + " ('" + spec.name + "') declares index " +
+                      std::to_string(declared) +
+                      ", but entries must be listed in executable order");
+    }
   }
 
   const std::string dtype_text = entry.value("dtype", std::string());
@@ -1046,10 +954,8 @@ ArraySpec parse_array(const std::string& sidecar_path,
   spec.numel = numel;
   spec.nbytes = numel * itemsize(spec.dtype);
 
-  // `numel` and `nbytes` are redundant with the shape and the dtype on
-  // purpose: they are what the loader allocates against, so a sidecar whose
-  // arithmetic disagrees with its own shape is rejected rather than
-  // reinterpreted.
+  // `numel` and `nbytes` are what the loader allocates against, so a sidecar
+  // whose arithmetic disagrees with its own shape is rejected outright.
   if (entry.contains("numel") &&
       entry["numel"].get<std::size_t>() != spec.numel) {
     throw LoadError(where + " ('" + spec.name + "') declares numel " +
@@ -1072,10 +978,9 @@ ArraySpec parse_array(const std::string& sidecar_path,
   return spec;
 }
 
-/// Widen a schema 1 `args_info`/`out_info` block into the same view the rest
-/// of the loader takes.  v1 recorded one dtype for the whole function and a
-/// flat list of sizes, where a size of 0 meant a scalar rather than an empty
-/// array -- an ambiguity schema 2 removed by writing the shape out.
+/// Widen a schema 1 `args_info`/`out_info` block.  v1 recorded one dtype for
+/// the whole function and a flat list of sizes, where 0 meant a scalar rather
+/// than an empty array; schema 2 writes the shape out instead.
 std::vector<ArraySpec> parse_v1_arrays(const std::string& sidecar_path,
                                        const nlohmann::json& info,
                                        const char* prefix) {
@@ -1114,10 +1019,8 @@ std::vector<ArraySpec> parse_v1_arrays(const std::string& sidecar_path,
   return specs;
 }
 
-/// `PJRT_Executable_Fingerprint` where the plugin has it, the deprecated
-/// `PJRT_LoadedExecutable_Fingerprint` where it does not, and an empty string
-/// where neither is implemented -- which is allowed, and costs a log line
-/// rather than a load.
+/// `PJRT_Executable_Fingerprint`, then the deprecated loaded-executable one,
+/// then empty: both are optional, and their absence costs a log line.
 std::string read_fingerprint(const PJRT_Api* api,
                              PJRT_LoadedExecutable* loaded) {
   if (api_fn_present(api, offsetof(PJRT_Api, PJRT_Executable_Fingerprint))) {
@@ -1126,26 +1029,15 @@ std::string read_fingerprint(const PJRT_Api* api,
     get.loaded_executable = loaded;
     ErrorHolder get_error(api, api->PJRT_LoadedExecutable_GetExecutable(&get));
     if (!get_error) {
+      const ExecutableHandle handle(api, get.executable);
       PJRT_Executable_Fingerprint_Args args{};
       args.struct_size = PJRT_Executable_Fingerprint_Args_STRUCT_SIZE;
       args.executable = get.executable;
       ErrorHolder error(api, api->PJRT_Executable_Fingerprint(&args));
-
-      // The string has the lifetime of the executable handle, so it is copied
-      // before that handle is destroyed, not after.
-      std::string fingerprint;
-      if (!error && args.executable_fingerprint != nullptr) {
-        fingerprint.assign(args.executable_fingerprint,
+      if (!error && args.executable_fingerprint != nullptr &&
+          args.executable_fingerprint_size > 0) {
+        return std::string(args.executable_fingerprint,
                            args.executable_fingerprint_size);
-      }
-
-      PJRT_Executable_Destroy_Args destroy{};
-      destroy.struct_size = PJRT_Executable_Destroy_Args_STRUCT_SIZE;
-      destroy.executable = get.executable;
-      destroy_error(api, api->PJRT_Executable_Destroy(&destroy));
-
-      if (!fingerprint.empty()) {
-        return fingerprint;
       }
     }
   }
@@ -1164,6 +1056,39 @@ std::string read_fingerprint(const PJRT_Api* api,
   return {};
 }
 
+/// Index of the spec named `name`, or `std::nullopt`.
+std::optional<std::size_t> index_of(const std::vector<ArraySpec>& specs,
+                                    std::string_view name) {
+  for (std::size_t i = 0; i < specs.size(); ++i) {
+    if (specs[i].name == name) {
+      return i;
+    }
+  }
+  return std::nullopt;
+}
+
+void check_index(const char* role, const std::string& function,
+                 const std::vector<ArraySpec>& specs, std::size_t i) {
+  if (i >= specs.size()) {
+    // The role prefix is built first so the distinctive tail is the throw's
+    // first literal, which is what tests/test_docs_sync.py keys on.
+    const std::string what = std::string(role) + " index " + std::to_string(i);
+    throw std::out_of_range(what + " is out of range: function '" + function +
+                            "' has " + std::to_string(specs.size()) + " " +
+                            role + "s");
+  }
+}
+
+void check_dtype(const char* role, const ArraySpec& spec, std::size_t i,
+                 DType accessed_as) {
+  if (spec.dtype != accessed_as) {
+    throw std::invalid_argument(
+        std::string(role) + " " + std::to_string(i) + " ('" + spec.name +
+        "') has dtype " + dtype_name(spec.dtype) + " but was accessed as " +
+        dtype_name(accessed_as));
+  }
+}
+
 }  // namespace
 
 Function::Function(Runtime& runtime, const std::string& base_path,
@@ -1172,8 +1097,7 @@ Function::Function(Runtime& runtime, const std::string& base_path,
       options_(options),
       debug_(options.debug),
       check_values_(options.check_values) {
-  // A constructor that throws gets no destructor, and by this point there may
-  // be an executable, a dozen PJRT buffers and two dozen arenas to give back.
+  // A constructor that throws gets no destructor.
   try {
     load_sidecar(base_path);
     load_executable(base_path);
@@ -1184,21 +1108,11 @@ Function::Function(Runtime& runtime, const std::string& base_path,
     wrap_inputs();
     output_buffers_.assign(outputs_.size(), nullptr);
 
-    // EVERY input is pinned for the life of the `Function`, including any the
-    // export marked as donated.
-    //
-    // Donation and this design are incompatible, not merely unimplemented.
-    // The input buffers are created once in `wrap_inputs()` and reused by
-    // every call; a donated buffer is consumed by the execution it is passed
-    // to, so the second call would hand XLA a buffer that has already been
-    // taken and fail with "Buffer has been deleted or donated" -- after the
-    // first call has already succeeded, which makes it look like corruption
-    // rather than a configuration error.
-    //
-    // So `ArraySpec::donated` is reporting only: it says what the export
-    // asked for, and this says what the runtime does about it. Exploiting
-    // donation would mean recreating input buffers per call, which is the
-    // per-call allocation this whole path exists to avoid.
+    // Every input is pinned for the life of the `Function`, donated or not:
+    // the buffers are created once and reused, and a donated buffer is
+    // consumed by the execution it is passed to, so the second call would
+    // fail with "Buffer has been deleted or donated".  `ArraySpec::donated`
+    // reports what the export asked for; this is what the runtime does.
     non_donatable_.reserve(inputs_.size());
     for (std::size_t i = 0; i < inputs_.size(); ++i) {
       non_donatable_.push_back(static_cast<std::int64_t>(i));
@@ -1208,15 +1122,10 @@ Function::Function(Runtime& runtime, const std::string& base_path,
         non_donatable_.empty() ? nullptr : non_donatable_.data();
     execute_options_.num_non_donatable_input_indices = non_donatable_.size();
 
-    // Warm up on zeroed arenas: faults in every page, resolves the runtime's
-    // lazy state, and lets the allocator reach the steady state the caller is
-    // about to measure.
-    //
-    // Value checking is suspended for the duration. The warm-up runs on zeros
-    // the caller never chose and throws its results away, and plenty of honest
-    // functions produce a non-finite result from an all-zero input -- solving
-    // against a zero matrix, dividing by a zero parameter. Checking here would
-    // report the runtime's own scratch data as the caller's bad input.
+    // Warm up on zeroed arenas: faults in every page and resolves the
+    // runtime's lazy state.  Value checking is off for the duration: plenty of
+    // honest functions produce a non-finite result from all-zero input, and
+    // reporting it would blame the caller for the runtime's scratch data.
     const bool check_values_during_steady_state = check_values_;
     check_values_ = false;
     for (int attempt = 1; attempt <= options_.warmup_calls; ++attempt) {
@@ -1225,8 +1134,7 @@ Function::Function(Runtime& runtime, const std::string& base_path,
       } catch (const Error& error) {
         throw LoadError(
             "warm-up call " + std::to_string(attempt) + " of " +
-            std::to_string(options_.warmup_calls) + " failed: " +
-            error.what() +
+            std::to_string(options_.warmup_calls) + " failed: " + error.what() +
             " (an input count/shape/dtype mismatch between the sidecar and "
             "the executable shows up here; the PJRT C API has no "
             "parameter-shape query)");
@@ -1246,30 +1154,19 @@ Function::~Function() {
 }
 
 std::optional<std::size_t> Function::find_input(std::string_view name) const {
-  for (std::size_t i = 0; i < inputs_.size(); ++i) {
-    if (inputs_[i].name == name) {
-      return i;
-    }
-  }
-  return std::nullopt;
+  return index_of(inputs_, name);
 }
 
 std::optional<std::size_t> Function::find_output(std::string_view name) const {
-  for (std::size_t i = 0; i < outputs_.size(); ++i) {
-    if (outputs_[i].name == name) {
-      return i;
-    }
-  }
-  return std::nullopt;
+  return index_of(outputs_, name);
 }
 
 void Function::load_sidecar(const std::string& base_path) {
   const ArtifactPaths paths = resolve_paths(base_path);
   const nlohmann::json sidecar = read_json(paths.sidecar);
 
-  // Any type error inside the sidecar arrives as a json exception; it is a
-  // malformed artifact either way, and the caller should see one exception
-  // type for "this artifact cannot be loaded".
+  // A type error inside the sidecar is a malformed artifact like any other,
+  // so the json exception becomes the one exception type a load throws.
   try {
     const int schema = sidecar.value("schema", 1);
     if (schema > 2) {
@@ -1301,13 +1198,10 @@ void Function::load_sidecar(const std::string& base_path) {
                                        /*wants_donation=*/false));
       }
 
-      // `donation.donate_argnums` is deliberately NOT merged into the
-      // per-input flags. It indexes the positional arguments handed to
-      // `jax.jit`, while `inputs_` indexes flattened pytree leaves, so one
-      // container argument before a donated one shifts every index and the
-      // merge would mark the wrong input. The per-input `donated` flag is
-      // already in leaf space, which is this loader's space, so it is the only
-      // one read here. `donate_argnums` is kept in the sidecar for the reader.
+      // `donation.donate_argnums` is not merged in: it indexes the positional
+      // arguments of `jax.jit`, while `inputs_` indexes flattened pytree
+      // leaves, and one container argument before a donated one shifts every
+      // index.  The per-input `donated` flag is already in leaf space.
     } else {
       name_ = paths.stem;
       if (!sidecar.contains("args_info") || !sidecar.contains("out_info")) {
@@ -1319,8 +1213,8 @@ void Function::load_sidecar(const std::string& base_path) {
       outputs_ = parse_v1_arrays(paths.sidecar, sidecar["out_info"], "out");
     }
   } catch (const nlohmann::json::exception& error) {
-    throw LoadError(paths.sidecar + " is not a sidecar this loader can read: " +
-                    error.what());
+    throw LoadError(paths.sidecar +
+                    " is not a sidecar this loader can read: " + error.what());
   }
 
   if (name_.empty()) {
@@ -1330,10 +1224,8 @@ void Function::load_sidecar(const std::string& base_path) {
 
 void Function::load_executable(const std::string& base_path) {
   const ArtifactPaths paths = resolve_paths(base_path);
-  // The sidecar is read a second time rather than kept on the object: the
-  // artifact file names and the exporting host's ISA level are the loader's
-  // business and nothing on the call path ever looks at them, so they do not
-  // earn a place in an object whose members a control loop walks.
+  // Read again rather than kept on the object: the artifact names and the
+  // exporting host's ISA level are the loader's business, not the call path's.
   const nlohmann::json sidecar = read_json(paths.sidecar);
 
   std::string binary_path = paths.directory + paths.stem + ".binpb";
@@ -1378,10 +1270,8 @@ void Function::load_executable(const std::string& base_path) {
     executable_ = args.loaded_executable;
   };
 
-  // Options for the fallback, in descending order of how much they are known
-  // to match what the exporter built: what the caller supplied, then what the
-  // `.binpb` was built with, then a minimal proto that at least does not ask
-  // for zero replicas.
+  // In descending order of how much they are known to match what the exporter
+  // built: the caller's, the `.binpb`'s own, then a minimal proto.
   auto fallback_compile_options = [&]() {
     if (!options_.compile_options.empty()) {
       return options_.compile_options;
@@ -1444,18 +1334,15 @@ void Function::load_executable(const std::string& base_path) {
     }
 
     case LoadPolicy::Auto: {
-      // Why the `.binpb` was passed over, in a form fit to be logged.  Empty
-      // means it was not passed over.
+      // Why the `.binpb` was passed over, fit to be logged; empty when not.
       std::string skipped;
       if (!file_exists(binary_path)) {
         skipped = binary_path + " is not present";
       } else if (options_.isa_guard && !exported_isa.empty()) {
         const std::string host = internal::host_isa_level();
         if (!internal::isa_at_least(host, exported_isa)) {
-          // Deserializing relinks machine code; it never checks whether this
-          // CPU can execute it.  Loading it anyway would be a SIGILL from
-          // inside the executable, with nothing in the backtrace pointing at
-          // the artifact.
+          // Deserializing relinks machine code without checking that this CPU
+          // can execute it; loading anyway is a SIGILL inside the executable.
           skipped = binary_path + " was exported for " + exported_isa +
                     " and this host is " + host;
         }
@@ -1467,11 +1354,9 @@ void Function::load_executable(const std::string& base_path) {
           deserialize();
           deserialized = true;
         } catch (const std::runtime_error& error) {
-          // A `.binpb` is locked to the JAX and XLA build that wrote it as
-          // well as to the machine, so a refusal here is routine after an
-          // upgrade and is worth falling back from rather than dying on.
-          skipped = binary_path + " could not be deserialized: " +
-                    error.what();
+          // A `.binpb` is also locked to the JAX and XLA build that wrote it,
+          // so a refusal here is routine after an upgrade.
+          skipped = binary_path + " could not be deserialized: " + error.what();
         }
       }
       if (deserialized) {
@@ -1501,8 +1386,8 @@ void Function::load_executable(const std::string& base_path) {
 void Function::validate_metadata() {
   const PJRT_Api* api = runtime_.api();
 
-  // Which file the mismatch should be blamed on.  Only one of the two was
-  // loaded, and naming the other would send a reader to the wrong artifact.
+  // Blame the file that was loaded; naming the other sends a reader to the
+  // wrong artifact.
   const std::string artifact =
       name_ + (load_kind_ == LoadKind::Deserialized ? ".binpb" : ".mlirbc");
   const std::string sidecar = name_ + ".json";
@@ -1511,90 +1396,71 @@ void Function::validate_metadata() {
   get.struct_size = PJRT_LoadedExecutable_GetExecutable_Args_STRUCT_SIZE;
   get.loaded_executable = executable_;
   check_error(api, api->PJRT_LoadedExecutable_GetExecutable(&get));
+  const ExecutableHandle handle(api, get.executable);
 
-  try {
-    PJRT_Executable_NumOutputs_Args count{};
-    count.struct_size = PJRT_Executable_NumOutputs_Args_STRUCT_SIZE;
-    count.executable = get.executable;
-    check_error(api, api->PJRT_Executable_NumOutputs(&count));
-    if (count.num_outputs != outputs_.size()) {
-      throw LoadError(sidecar + " declares " +
-                      std::to_string(outputs_.size()) + " outputs but " +
-                      artifact + " produces " +
-                      std::to_string(count.num_outputs));
-    }
-
-    PJRT_Executable_OutputElementTypes_Args types{};
-    types.struct_size = PJRT_Executable_OutputElementTypes_Args_STRUCT_SIZE;
-    types.executable = get.executable;
-    check_error(api, api->PJRT_Executable_OutputElementTypes(&types));
-    if (types.num_output_types != outputs_.size()) {
-      throw LoadError(artifact + " reports " +
-                      std::to_string(types.num_output_types) +
-                      " output element types for " +
-                      std::to_string(outputs_.size()) + " outputs");
-    }
-
-    PJRT_Executable_OutputDimensions_Args dimensions{};
-    dimensions.struct_size = PJRT_Executable_OutputDimensions_Args_STRUCT_SIZE;
-    dimensions.executable = get.executable;
-    // `num_outputs` carries no `// out` marker in the header and plugins have
-    // been seen to write it; setting it to the count already established makes
-    // the call correct whichever way the plugin reads it.
-    dimensions.num_outputs = outputs_.size();
-    check_error(api, api->PJRT_Executable_OutputDimensions(&dimensions));
-    if (dimensions.num_outputs != outputs_.size()) {
-      throw LoadError(artifact + " reports dimensions for " +
-                      std::to_string(dimensions.num_outputs) +
-                      " outputs but " + std::to_string(outputs_.size()) +
-                      " were expected");
-    }
-    if (!outputs_.empty() &&
-        (dimensions.dims == nullptr || dimensions.dim_sizes == nullptr)) {
-      throw LoadError(artifact + " reported no output dimensions");
-    }
-
-    // One flat list of dimensions for every output, so walking it means
-    // keeping a cursor rather than indexing.
-    std::size_t cursor = 0;
-    for (std::size_t i = 0; i < outputs_.size(); ++i) {
-      const std::optional<DType> produced = from_pjrt(types.output_types[i]);
-      if (!produced) {
-        throw LoadError("output " + std::to_string(i) +
-                        " has element type " +
-                        pjrt_type_name(types.output_types[i]) +
-                        ", which pjrt_exec does not support (supported: " +
-                        kSupportedTypes + ")");
-      }
-
-      const std::size_t rank = dimensions.dim_sizes[i];
-      const std::vector<std::int64_t> produced_shape(
-          dimensions.dims + cursor, dimensions.dims + cursor + rank);
-      cursor += rank;
-
-      const std::string declared =
-          shape_string(outputs_[i].dtype, outputs_[i].shape);
-      const std::string actual = shape_string(*produced, produced_shape);
-      if (declared != actual) {
-        throw LoadError(sidecar + " declares output " + std::to_string(i) +
-                        " as " + declared + " but " + artifact +
-                        " produces " + actual);
-      }
-    }
-  } catch (...) {
-    // The handle is ours whatever happens next; leaking it would keep the
-    // whole compiled program alive behind a failed load.
-    PJRT_Executable_Destroy_Args destroy{};
-    destroy.struct_size = PJRT_Executable_Destroy_Args_STRUCT_SIZE;
-    destroy.executable = get.executable;
-    destroy_error(api, api->PJRT_Executable_Destroy(&destroy));
-    throw;
+  PJRT_Executable_NumOutputs_Args count{};
+  count.struct_size = PJRT_Executable_NumOutputs_Args_STRUCT_SIZE;
+  count.executable = get.executable;
+  check_error(api, api->PJRT_Executable_NumOutputs(&count));
+  if (count.num_outputs != outputs_.size()) {
+    throw LoadError(sidecar + " declares " + std::to_string(outputs_.size()) +
+                    " outputs but " + artifact + " produces " +
+                    std::to_string(count.num_outputs));
   }
 
-  PJRT_Executable_Destroy_Args destroy{};
-  destroy.struct_size = PJRT_Executable_Destroy_Args_STRUCT_SIZE;
-  destroy.executable = get.executable;
-  destroy_error(api, api->PJRT_Executable_Destroy(&destroy));
+  PJRT_Executable_OutputElementTypes_Args types{};
+  types.struct_size = PJRT_Executable_OutputElementTypes_Args_STRUCT_SIZE;
+  types.executable = get.executable;
+  check_error(api, api->PJRT_Executable_OutputElementTypes(&types));
+  if (types.num_output_types != outputs_.size()) {
+    throw LoadError(artifact + " reports " +
+                    std::to_string(types.num_output_types) +
+                    " output element types for " +
+                    std::to_string(outputs_.size()) + " outputs");
+  }
+
+  PJRT_Executable_OutputDimensions_Args dimensions{};
+  dimensions.struct_size = PJRT_Executable_OutputDimensions_Args_STRUCT_SIZE;
+  dimensions.executable = get.executable;
+  // `num_outputs` has no `// out` marker in the header and plugins have been
+  // seen to write it; the established count is correct whichever way it goes.
+  dimensions.num_outputs = outputs_.size();
+  check_error(api, api->PJRT_Executable_OutputDimensions(&dimensions));
+  if (dimensions.num_outputs != outputs_.size()) {
+    throw LoadError(artifact + " reports dimensions for " +
+                    std::to_string(dimensions.num_outputs) + " outputs but " +
+                    std::to_string(outputs_.size()) + " were expected");
+  }
+  if (!outputs_.empty() &&
+      (dimensions.dims == nullptr || dimensions.dim_sizes == nullptr)) {
+    throw LoadError(artifact + " reported no output dimensions");
+  }
+
+  // One flat list of dimensions for every output, walked with a cursor.
+  std::size_t cursor = 0;
+  for (std::size_t i = 0; i < outputs_.size(); ++i) {
+    const std::optional<DType> produced = from_pjrt(types.output_types[i]);
+    if (!produced) {
+      throw LoadError("output " + std::to_string(i) + " has element type " +
+                      pjrt_type_name(types.output_types[i]) +
+                      ", which pjrt_exec does not support (supported: " +
+                      kSupportedTypes + ")");
+    }
+
+    const std::size_t rank = dimensions.dim_sizes[i];
+    const std::vector<std::int64_t> produced_shape(
+        dimensions.dims + cursor, dimensions.dims + cursor + rank);
+    cursor += rank;
+
+    const std::string declared =
+        shape_string(outputs_[i].dtype, outputs_[i].shape);
+    const std::string actual = shape_string(*produced, produced_shape);
+    if (declared != actual) {
+      throw LoadError(sidecar + " declares output " + std::to_string(i) +
+                      " as " + declared + " but " + artifact + " produces " +
+                      actual);
+    }
+  }
 }
 
 void Function::allocate_arenas() {
@@ -1621,23 +1487,18 @@ void Function::wrap_inputs() {
     args.type = to_pjrt(spec.dtype);
     args.dims = spec.shape.data();
     args.num_dims = spec.shape.size();
-    // Null strides mean a dense major-to-minor layout, which is C order for
-    // every dtype and every rank, and is what the exporter wrote.
+    // Null strides: dense major-to-minor, which is what the exporter wrote.
     args.byte_strides = nullptr;
     args.num_byte_strides = 0;
     // The buffer aliases the arena for its whole lifetime, so a call transfers
-    // nothing.  PJRT's contract asks that the host buffer not be mutated while
-    // a transfer is outstanding; this bends it by writing between calls, when
-    // nothing is in flight -- measured, deliberate, and the property the whole
-    // design rests on.
-    args.host_buffer_semantics =
-        PJRT_HostBufferSemantics_kImmutableZeroCopy;
+    // nothing.  Writing to it between calls, when nothing is in flight, bends
+    // PJRT's contract deliberately; it is the property the design rests on.
+    args.host_buffer_semantics = PJRT_HostBufferSemantics_kImmutableZeroCopy;
     args.device = runtime_.device();
     check_error(api, api->PJRT_Client_BufferFromHostBuffer(&args));
 
-    // Zero copy still produces a "done with host buffer" event, which fires
-    // when the buffer is destroyed.  Nothing waits on it, and holding it would
-    // just leak an event per input.
+    // Zero copy still yields a "done with host buffer" event, which fires on
+    // destroy.  Nothing waits on it, and holding it leaks an event per input.
     if (args.done_with_host_buffer != nullptr) {
       PJRT_Event_Destroy_Args destroy{};
       destroy.struct_size = PJRT_Event_Destroy_Args_STRUCT_SIZE;
@@ -1703,9 +1564,8 @@ void Function::call() {
   }
 
   for (std::size_t i = 0; i < output_buffers_.size(); ++i) {
-    // On CPU, device memory is ordinary memory, so the results are copied
-    // straight out of it.  `PJRT_Buffer_ToHostBuffer` would do the same copy
-    // and charge an event, an await and a second allocation for it.
+    // On CPU, device memory is ordinary memory.  `PJRT_Buffer_ToHostBuffer`
+    // would do the same copy and charge an event, an await and an allocation.
     PJRT_Buffer_OpaqueDeviceMemoryDataPointer_Args pointer{};
     pointer.struct_size =
         PJRT_Buffer_OpaqueDeviceMemoryDataPointer_Args_STRUCT_SIZE;
@@ -1728,41 +1588,21 @@ void Function::call() {
 // docs: end call_path
 
 void Function::check_input_index(std::size_t i) const {
-  if (i >= inputs_.size()) {
-    throw std::out_of_range("input index " + std::to_string(i) +
-                            " is out of range: function '" + name_ + "' has " +
-                            std::to_string(inputs_.size()) + " inputs");
-  }
+  check_index("input", name_, inputs_, i);
 }
 
 void Function::check_output_index(std::size_t i) const {
-  if (i >= outputs_.size()) {
-    throw std::out_of_range("output index " + std::to_string(i) +
-                            " is out of range: function '" + name_ + "' has " +
-                            std::to_string(outputs_.size()) + " outputs");
-  }
+  check_index("output", name_, outputs_, i);
 }
 
 void Function::check_input_access(std::size_t i, DType accessed_as) const {
   check_input_index(i);
-  const ArraySpec& spec = inputs_[i];
-  if (spec.dtype != accessed_as) {
-    throw std::invalid_argument(
-        "input " + std::to_string(i) + " ('" + spec.name + "') has dtype " +
-        dtype_name(spec.dtype) + " but was accessed as " +
-        dtype_name(accessed_as));
-  }
+  check_dtype("input", inputs_[i], i, accessed_as);
 }
 
 void Function::check_output_access(std::size_t i, DType accessed_as) const {
   check_output_index(i);
-  const ArraySpec& spec = outputs_[i];
-  if (spec.dtype != accessed_as) {
-    throw std::invalid_argument(
-        "output " + std::to_string(i) + " ('" + spec.name + "') has dtype " +
-        dtype_name(spec.dtype) + " but was accessed as " +
-        dtype_name(accessed_as));
-  }
+  check_dtype("output", outputs_[i], i, accessed_as);
 }
 
 //////////////////////

@@ -1,11 +1,9 @@
 """Export a JAX function to artifacts a C++ caller can load and run.
 
-One call produces three files in ``directory``: ``<name>.binpb``, the
-serialized PJRT executable that the C++ loader deserializes and relinks;
-``<name>.mlirbc``, StableHLO bytecode it can compile in-process instead when
-the ``.binpb`` will not run here; and ``<name>.json``, the sidecar describing
-every input and output, because the PJRT C API cannot be asked what parameters
-an executable takes.
+One call writes ``<name>.binpb``, the serialized executable; ``<name>.mlirbc``,
+StableHLO the loader compiles instead when the ``.binpb`` was built for another
+machine; and ``<name>.json``, the sidecar that is the loader's only description
+of the inputs.  Nothing reaches the disk until every check has passed.
 
 # docs: begin export
 import jax
@@ -29,11 +27,6 @@ result = export(
 )
 print(result.executable, result.sidecar)
 # docs: end export
-
-Nothing reaches the disk until every check has passed.  The exporter this
-replaces wrote the executable first and asserted afterwards, so a rejected
-function left a stale ``.binpb`` beside a sidecar describing something else --
-which the C++ side then loaded, and which failed a long way from the cause.
 """
 
 from __future__ import annotations
@@ -71,9 +64,8 @@ __all__ = [
     "jax2exec",
 ]
 
-#: The JAX release this exporter was written against and is tested on.  A
-#: different version is a warning, not a refusal: artifacts are validated by
-#: the C++ loader on the way in, and a bump usually just works.
+#: The JAX release this exporter is tested on.  A different version warns
+#: rather than refuses: the C++ loader validates artifacts on the way in.
 SUPPORTED_JAX = "0.11.0"
 
 _NAME_RE = re.compile(r"[A-Za-z0-9_.-]+")
@@ -103,8 +95,8 @@ class ExportResult:
         The sidecar contents, so a caller can assert on shapes and names
         without re-reading the file.
     compiled : Any
-        The ``jax.stages.Compiled`` the artifacts came from, kept for callers
-        that want to run the function in-process for comparison.
+        The ``jax.stages.Compiled`` the artifacts came from, for running the
+        function in-process.
     """
 
     executable: Path
@@ -133,8 +125,7 @@ def default_input_names(
     list of str
         ``provided`` when given, else the parameter names of ``fun`` when they
         line up one-to-one with the flattened inputs, else ``arg0``, ``arg1``,
-        and so on.  A pytree argument makes the counts disagree, and then
-        positional names are the only honest answer.
+        and so on.  A pytree argument makes the counts disagree.
 
     Raises
     ------
@@ -170,9 +161,8 @@ def default_input_names(
 def _key_name(key: Any) -> str | None:
     """Return the name a pytree key carries, or None when it carries none.
 
-    Dict keys and attribute names are names a caller can look an output up by
-    from C++.  Sequence indices and flattened indices are positions, and
-    ``out_0`` says that better than ``[0]`` does.
+    Dict keys and attribute names can be looked up from C++; a sequence index
+    is a position, and ``out_0`` says that better than ``[0]`` does.
     """
     if isinstance(key, jax.tree_util.DictKey) and isinstance(key.key, str):
         return key.key or None
@@ -198,10 +188,9 @@ def default_output_names(
     Returns
     -------
     list of str
-        A dict or namedtuple result names its own leaves better than any
-        scheme here could, so those get ``jax.tree_util.keystr`` of the key
-        path.  A bare array or a plain tuple carries nothing but position, so
-        those get ``out_0``, ``out_1``, and so on.
+        A dict or namedtuple result names its own leaves, so those get
+        ``jax.tree_util.keystr`` of the key path.  A bare array or a plain
+        tuple carries only position, so those get ``out_0``, ``out_1``, ...
 
     Raises
     ------
@@ -260,9 +249,8 @@ def _check_not_empty(
 ) -> None:
     """Reject zero-element arrays.
 
-    A zero-byte PJRT buffer is untested on this path: the C++ side allocates
-    an arena per array and wraps it zero-copy, and nothing establishes what
-    ``posix_memalign(64, 0)`` followed by ``BufferFromHostBuffer`` does.
+    Nothing establishes what ``posix_memalign(64, 0)`` followed by
+    ``BufferFromHostBuffer`` does on the C++ side's zero-copy arena path.
     """
     for index, leaf in enumerate(leaves):
         _dtype, shape = _leaf_spec(leaf, kind, index)
@@ -279,10 +267,9 @@ def _check_x64_trap(
 ) -> None:
     """Catch the silent float64-to-float32 narrowing.
 
-    Without ``jax_enable_x64`` JAX traces a float64 argument as float32 and
-    says nothing.  The export then succeeds, the sidecar honestly records
-    float32, and a C++ caller writing doubles into a 4-byte-per-element arena
-    walks off the end of it.
+    Without ``jax_enable_x64`` JAX traces float64 as float32 and says
+    nothing; the sidecar then honestly records float32, and a C++ caller
+    writing doubles walks off the end of the arena.
     """
     if len(requested) != len(traced):  # pragma: no cover - shapes must match
         return
@@ -300,11 +287,9 @@ def _check_x64_trap(
 def _compile_args(lowered: Any) -> dict[str, Any]:
     """Return the lowering's compile arguments, or an empty dict.
 
-    Three facts the public API does not expose live in here: which parameters
-    survived, what effects the function has, and how many devices it wants.
-    All three decide whether a C++ caller can use the result at all, so they
-    are worth reading from a private attribute -- carefully.  A JAX bump that
-    moves them costs the diagnostics below, not the export.
+    Which parameters survived, what effects the function has and how many
+    devices it wants live only in this private attribute.  A JAX bump that
+    moves it costs the diagnostics below, not the export.
     """
     compile_args = getattr(
         getattr(lowered, "_lowering", None), "compile_args", None
@@ -315,10 +300,9 @@ def _compile_args(lowered: Any) -> dict[str, Any]:
 def _check_no_effects(lowered: Any) -> None:
     """Refuse a function that needs the host mid-computation.
 
-    An ``io_callback`` or a ``debug_print`` compiles into a call back into the
-    Python process, and the C++ runtime has no Python process.  Caught here
-    rather than at ``jax.export``, which reports the same thing as an
-    unimplemented host_callback serialization several steps later.
+    An ``io_callback`` or a ``debug_print`` calls back into a Python process
+    the C++ runtime does not have.  Caught here rather than at ``jax.export``,
+    which reports it as an unimplemented serialization several steps later.
     """
     compile_args = _compile_args(lowered)
     effects = tuple(compile_args.get("ordered_effects") or ()) + tuple(
@@ -332,13 +316,12 @@ def _check_no_effects(lowered: Any) -> None:
 
 
 def _check_no_pruned_inputs(lowered: Any, names: Sequence[str]) -> None:
-    """Refuse a function XLA has silently narrowed the parameter list of.
+    """Refuse a function XLA has dropped a parameter from.
 
-    An argument that reaches no output is dropped from the executable, which
-    then takes fewer parameters than the sidecar declares.  The C++ loader
-    cannot see this -- the PJRT C API has no parameter query -- so it arrives
-    as an opaque warm-up failure.  Catch it here, where the cause is still
-    visible, and before the compile that would otherwise be wasted.
+    An argument that reaches no output is pruned, and the executable then
+    takes fewer parameters than the sidecar declares.  The loader cannot see
+    that -- the PJRT C API has no parameter query -- so it would surface as
+    an opaque warm-up failure.
     """
     kept = _compile_args(lowered).get("kept_var_idx")
     if kept is None:
@@ -366,16 +349,10 @@ def _serialized_executable(
     """Return ``(pjrt_bytes, loaded_executable, how, raw_blob)``.
 
     ``pjrt_bytes`` is what gets written; ``raw_blob`` is what jaxlib returned,
-    kept so the in-process round-trip check can be given bytes its own client
-    understands.
-
-    There is no public, stable API for the bytes of a serialized PJRT
-    executable.  This is the route ``jax.experimental.serialize_executable``
-    takes internally, which makes it the least fragile one available, but
-    ``Compiled.runtime_executable()`` is documented as debugging-only and the
-    fallback below reaches into a private attribute outright.  Both are
-    load-bearing and both are checked here rather than left to fail later; see
-    ``docs/developer/bumping-jax.md`` when a JAX bump lands on this function.
+    which is what its own client can deserialize again.  There is no public
+    API for these bytes: ``runtime_executable()`` is documented as
+    debugging-only and the fallback reads a private attribute, so both are
+    checked here rather than left to fail later.
     """
     try:
         loaded = compiled.runtime_executable()
@@ -416,26 +393,25 @@ def _serialized_executable(
             "C++ caller could load"
         )
 
-    # jaxlib wraps the PJRT bytes in an IFRT envelope, which the PJRT C API
-    # cannot parse. See jax2exec._ifrt for the format and why unwrapping is
-    # safe to attempt.
-    pjrt_bytes, how = _ifrt.unwrap(bytes(blob))
+    # jaxlib wraps the PJRT bytes in an IFRT envelope the PJRT C API cannot
+    # parse; see jax2exec._ifrt.
+    raw_blob = bytes(blob)
+    pjrt_bytes, how = _ifrt.unwrap(raw_blob)
     if not _ifrt.looks_like_pjrt_payload(pjrt_bytes):
         raise ExportError(
-            f"jax {jax.__version__} returned {len(blob)} bytes that do not "
-            "look like a serialized PJRT executable, and no envelope this "
+            f"jax {jax.__version__} returned {len(raw_blob)} bytes that do "
+            "not look like a serialized PJRT executable, and no envelope this "
             "version understands. The C++ loader would fall back to compiling "
             "the .mlirbc on every load. See docs/developer/bumping-jax.md."
         )
-    return pjrt_bytes, loaded, how, bytes(blob)
+    return pjrt_bytes, loaded, how, raw_blob
 
 
 def _export_mlir(jit_fun: Any, args: Sequence[Any]) -> tuple[bytes, int | None]:
     """Return ``(stablehlo_bytecode, calling_convention_version)``.
 
-    The bytecode is the answer to the architecture lock: a ``.binpb`` embeds
-    machine code for the exporting host, while this can be compiled in-process
-    on whatever machine actually runs the function.
+    The bytecode is what the loader compiles on a host the ``.binpb`` was not
+    built for.
     """
     try:
         exported = jax.export.export(jit_fun, platforms=("cpu",))(*args)
@@ -457,6 +433,8 @@ def _export_mlir(jit_fun: Any, args: Sequence[Any]) -> tuple[bytes, int | None]:
             "creates a single-device CPU client"
         )
 
+    # A backstop for _check_no_effects, whose private attribute a JAX bump
+    # can move.
     ordered = tuple(getattr(exported, "ordered_effects", ()) or ())
     unordered = tuple(getattr(exported, "unordered_effects", ()) or ())
     if ordered or unordered:
@@ -479,17 +457,11 @@ def _export_mlir(jit_fun: Any, args: Sequence[Any]) -> tuple[bytes, int | None]:
 def _verify_roundtrip(loaded: Any, blob: bytes) -> None:
     """Deserialize the blob once, here, where a failure is still cheap.
 
-    ``blob`` must be what jaxlib produced, NOT the unwrapped PJRT payload that
-    gets written to disk. jaxlib's client is an IFRT client and only
-    understands its own envelope, so handing it the payload reports a parse
-    failure for bytes that are in fact correct for their real consumer, the
-    PJRT C API. What this checks, then, is that the compile produced a sound
-    executable; that the written payload is well formed is checked separately
-    in :func:`_serialized_executable`, and the only complete proof is a C++
-    load, which the test suite does.
-
-    Every failure is a warning: the API is not public, and a signature change
-    here must not fail an export whose artifacts are fine.
+    ``blob`` must be what jaxlib produced, not the unwrapped payload that is
+    written to disk: jaxlib's client is an IFRT client and rejects the bare
+    PJRT bytes that are correct for the C++ loader.  Every failure is a
+    warning, because the API is not public and a signature change must not
+    fail an export whose artifacts are fine.
     """
     try:
         client = loaded.client
@@ -536,17 +508,16 @@ def export(
     fun : callable
         Anything ``jax.jit`` accepts.  It is traced once, for CPU.
     args : Sequence
-        Example arguments, positional only.  ``jax.ShapeDtypeStruct`` avoids
-        materializing data that is only used for its shape and dtype.
+        Example arguments, positional only; ``jax.ShapeDtypeStruct`` is
+        enough, since only the shape and dtype are used.
     directory : str or Path
         Where the artifacts go.  Created if missing.
     name : str
         Base name, matching ``[A-Za-z0-9_.-]+``.  The C++ side is handed this
         same path without an extension.
     donate_argnums : Iterable of int, optional
-        Passed to ``jax.jit`` and recorded in the sidecar.  Note that the C++
-        runtime wraps input arenas once and reuses them, so a donated input is
-        described faithfully but not yet exploited.
+        Passed to ``jax.jit`` and recorded in the sidecar.  The C++ runtime
+        reuses its input arenas, so donation is recorded but not exploited.
     input_names : Sequence of str or None, optional
         Names for the flattened inputs.  Defaults to the parameter names of
         ``fun`` when they line up, else ``arg0``, ``arg1``, ...
@@ -578,7 +549,6 @@ def export(
     written ``.binpb``, ``.mlirbc``, ``.json`` so that a reader never sees a
     sidecar promising artifacts that are not there yet.
     """
-    # 1. Version: warn, do not refuse. Artifacts are validated on the way in.
     if jax.__version__ != SUPPORTED_JAX:
         warnings.warn(
             f"jax2exec is tested against jax {SUPPORTED_JAX} but this is "
@@ -589,7 +559,7 @@ def export(
         )
     x64_enabled = bool(jax.config.jax_enable_x64)
 
-    # 2. Everything cheap that can refuse, before anything expensive runs.
+    # The cheap refusals come before anything is traced.
     if not _NAME_RE.fullmatch(name):
         raise ExportError(
             f"name {name!r} must match [A-Za-z0-9_.-]+; it becomes a file "
@@ -620,7 +590,6 @@ def export(
                 "overwrite=True to replace"
             )
 
-    # 3. Lower once. Keyword arguments have no place in a positional C++ call.
     donate = tuple(int(i) for i in donate_argnums)
     jit_fun = jax.jit(fun, donate_argnums=donate)
     lowered = jit_fun.lower(*args)
@@ -628,14 +597,13 @@ def export(
         raise ExportError("keyword arguments are not supported")
     _check_no_effects(lowered)
 
-    # 4. Flatten. out_info is a bare ShapeDtypeStruct for a single-array
-    #    return, so it goes through the tree utilities like everything else.
+    # A single-array return makes out_info a bare ShapeDtypeStruct;
+    # tree_leaves covers both.
     in_info = jax.tree_util.tree_leaves(lowered.args_info[0])
     out_info = jax.tree_util.tree_leaves(lowered.out_info)
     in_names = default_input_names(fun, len(in_info), input_names)
     out_names = default_output_names(lowered.out_info, len(out_info))
 
-    # 5. Refuse what the C++ side could not represent or would misread.
     _check_dtypes(in_info, in_names, "input")
     _check_dtypes(out_info, out_names, "output")
     _check_x64_trap(jax.tree_util.tree_leaves(args), in_info, in_names)
@@ -643,18 +611,14 @@ def export(
     _check_not_empty(out_info, out_names, "output")
     _check_no_pruned_inputs(lowered, in_names)
 
-    # 6. Compile and serialize.
     compiled = lowered.compile()
     blob, loaded, serialized_how, raw_blob = _serialized_executable(compiled)
 
-    # 7. The portable fallback.
     mlir_bytes: bytes | None = None
     calling_convention_version: int | None = None
     if write_mlir:
         mlir_bytes, calling_convention_version = _export_mlir(jit_fun, args)
 
-    # 8. Describe it.
-    donated_flags = [bool(getattr(info, "donated", False)) for info in in_info]
     sidecar = build_sidecar(
         name=name,
         inputs=[
@@ -663,7 +627,7 @@ def export(
                 in_names[index],
                 info.dtype,
                 info.shape,
-                donated=donated_flags[index],
+                donated=bool(getattr(info, "donated", False)),
             )
             for index, info in enumerate(in_info)
         ],
@@ -683,12 +647,10 @@ def export(
         donate_argnums=donate,
     )
 
-    # 9. Prove the blob comes back before promising it does.
     if verify:
         _verify_roundtrip(loaded, raw_blob)
 
-    # 10. Executable, bytecode, then sidecar: the sidecar is the manifest, so
-    #     it lands last and a reader that has it has everything it names.
+    # The sidecar lands last: a reader that has it has everything it names.
     atomic_write_bytes(executable_path, blob)
     if mlir_bytes is not None and mlir_path is not None:
         atomic_write_bytes(mlir_path, mlir_bytes)
@@ -696,7 +658,7 @@ def export(
 
     return ExportResult(
         executable=executable_path,
-        mlir=mlir_path if mlir_bytes is not None else None,
+        mlir=mlir_path,
         sidecar=sidecar_path,
         metadata=sidecar,
         compiled=compiled,

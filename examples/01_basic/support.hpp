@@ -4,10 +4,9 @@
  *        `key=value` reporting, the signature checks and the debug
  *        demonstration.
  *
- * Split out so that the example itself is the six steps a caller actually
- * performs -- create a runtime, load a function, check the signature, write the
- * inputs, call, read the outputs -- and nothing else.  Everything here runs at
- * startup or at exit; nothing in it belongs in a loop.
+ * Split out so that the example itself is the six steps a caller performs --
+ * create a runtime, load a function, check the signature, write the inputs,
+ * call, read the outputs -- and nothing else.  Nothing here belongs in a loop.
  */
 #pragma once
 
@@ -29,9 +28,8 @@
 
 namespace basic {
 
-/// Tolerance on `max_i |(A x - b)_i|` for a well-conditioned 4x4 system in
-/// float64.  Generous by a wide margin: the answer is either correct to about
-/// 1e-16 or wrong by an amount no tolerance would let through.
+/// Tolerance on the recomputed residual.  Generous: the answer is either right
+/// to about 1e-16 or wrong by far more than this.
 constexpr double kResidualTolerance = 1e-9;
 
 constexpr char kUsage[] =
@@ -54,7 +52,6 @@ struct Options {
   long threads = 1;
 };
 
-/// @brief Read the command line into `Options`.
 inline Options parse_options(const cjfc::Cli& cli) {
   Options options;
   options.artifact = cli.get("artifact", options.artifact);
@@ -76,7 +73,6 @@ inline std::string shape_text(const std::vector<std::int64_t>& shape) {
   return text;
 }
 
-/// One `input[i]:` or `output[i]:` line, in the order the sidecar declares.
 inline void print_spec(const char* role, std::size_t index,
                        const pjrt::ArraySpec& spec) {
   std::printf("%s[%zu]: dtype=%s shape=%s numel=%zu nbytes=%zu\n", role, index,
@@ -84,15 +80,9 @@ inline void print_spec(const char* role, std::size_t index,
               spec.numel, spec.nbytes);
 }
 
-/**
- * @brief Print what was loaded and what it takes, one fact per line.
- *
- * `load_kind`, `synchronous_supported` and `sync_mode` answer the two questions
- * every later latency number depends on: did the `.binpb` load or did the
- * `.mlirbc` fallback compile it, and is execution actually inline.  The test
- * suite parses these lines, so they are a machine interface rather than
- * decoration.
- */
+/// Print what was loaded and what it takes, one fact per line.  The test suite
+/// parses these: `load_kind` and `sync_mode` are the two facts every later
+/// latency number depends on.
 inline void print_signature(const pjrt::Runtime& runtime,
                             const pjrt::Function& f) {
   std::printf("load_kind=%s\n", cjfc::load_kind_name(f.load_kind()));
@@ -110,9 +100,8 @@ inline void print_signature(const pjrt::Runtime& runtime,
   }
 }
 
-/// @brief The index of the input called @p name.
-/// @throws std::runtime_error naming the artifact, because the remedy is to
-///         re-export it rather than to edit this file.
+/// The index of the input called @p name.  Throws naming the artifact, because
+/// the remedy is a re-export rather than an edit here.
 inline std::size_t require_input(const pjrt::Function& f, const char* name) {
   const std::optional<std::size_t> index = f.find_input(name);
   if (!index.has_value()) {
@@ -123,19 +112,11 @@ inline std::size_t require_input(const pjrt::Function& f, const char* name) {
   return *index;
 }
 
-/**
- * @brief Refuse an artifact that is not the one this example was written
- *        against.
- *
- * The typed accessors check the dtype only under `FunctionOptions::debug`, so
- * in a release build an artifact re-exported as float32 would hand back a
- * `double*` into a four-byte-per-element arena and say nothing -- the writes in
- * the call region would then run off the end of it.  Checking the signature
- * once, at startup, is what makes the hot accessor safe to leave unchecked.
- *
- * The order `n` is read out of the artifact rather than assumed, so re-
- * exporting with a larger matrix needs no change here.
- */
+/// Refuse an artifact that is not the one this example was written against.
+/// The typed accessors check the dtype only under `FunctionOptions::debug`, so
+/// in a release build a float32 re-export would hand back a `double*` into a
+/// four-byte-per-element arena and say nothing.  One check at startup is what
+/// makes the unchecked accessor safe.
 inline void require_shape(const pjrt::Function& f, std::size_t a,
                           std::size_t b) {
   const bool ok =
@@ -154,30 +135,18 @@ inline void require_shape(const pjrt::Function& f, std::size_t a,
   }
 }
 
-/**
- * @brief A uniform double in [-1, 1) drawn from @p rng.
- *
- * `std::uniform_real_distribution` is not specified to produce the same
- * sequence in two standard libraries, and this example is supposed to print
- * the same numbers under clang and gcc so that a difference in the output is a
- * difference in the computation.  `std::mt19937_64` *is* specified exactly, so
- * the mapping from its bits to a double is written out here rather than
- * delegated.
- */
+/// A uniform double in [-1, 1).  Written out rather than delegated to
+/// `std::uniform_real_distribution`, whose sequence differs between standard
+/// libraries; `std::mt19937_64` is specified exactly, so clang and gcc print
+/// the same numbers.
 inline double next_uniform(std::mt19937_64& rng) {
   // 53 bits is the whole mantissa; 0x1p-53 scales them into [0, 1).
   const double unit = static_cast<double>(rng() >> 11) * 0x1p-53;
   return 2.0 * unit - 1.0;
 }
 
-/**
- * @brief `max_i |(A x - b)_i|`, recomputed here from the arenas.
- *
- * The check that matters, and the reason it is not simply read off the output:
- * a layout or stride mistake on the C++ side produces a believable `x` and a
- * residual that is not small, while the residual the executable reported would
- * still look fine.
- */
+/// `max_i |(A x - b)_i|`, recomputed from the arenas: a layout mistake on the
+/// C++ side produces a believable `x` and a residual that is not small.
 inline double residual_inf_norm(const double* A, const double* b,
                                 const double* x, std::size_t n) {
   double worst = 0.0;
@@ -191,11 +160,8 @@ inline double residual_inf_norm(const double* A, const double* b,
   return worst;
 }
 
-/// @brief Print the solution and both residuals.
-///
-/// Two different norms on purpose: the inf norm is what C++ can compute
-/// cheaply, and `r` is the 2-norm JAX computed.  Both are near zero on a
-/// correct run, and neither is derived from the other.
+/// Print the solution and both residuals: the inf norm computed here and the
+/// 2-norm JAX computed.  Neither is derived from the other.
 inline void print_solution(const double* x, std::size_t n, double inf_norm,
                            double from_jax) {
   std::printf("x=[");
@@ -207,7 +173,6 @@ inline void print_solution(const double* x, std::size_t n, double inf_norm,
   std::printf("residual_from_jax=%.6e\n", from_jax);
 }
 
-/// @brief Report a residual the tolerance refuses, and the exit code to give.
 inline int residual_failure(double inf_norm) {
   std::fprintf(stderr,
                "residual %.6e exceeds %.1e: the solution this artifact "
@@ -217,20 +182,12 @@ inline int residual_failure(double inf_norm) {
   return 1;
 }
 
-/**
- * @brief Print what the debug checks catch, by making each mistake on purpose.
- *
- * Every one of these is a silent bug with `FunctionOptions::debug` off: an
- * out-of-range index reads past the end of a vector, a `float*` into a float64
- * arena corrupts half the matrix on the first write, and a nan in an input is
- * simply computed with.  Turned on, each is an exception naming the array by
- * index *and* by the name the exporter gave it.
- *
- * The cost of leaving them on is one branch on a member that is always in
- * cache; the cost of the last one is a walk over every arena before and after
- * every call, which is why `check_values` is separate and belongs in a test
- * rather than in a loop.
- */
+/// Print what the debug checks catch, by making each mistake on purpose.  With
+/// `FunctionOptions::debug` off each one is silent: a bad index reads past a
+/// vector, a `float*` into a float64 arena corrupts half the matrix, a nan is
+/// computed with.  `check_values` walks every arena before and after every
+/// call, which is why it is a separate switch and belongs in a test, not in a
+/// loop.
 inline void demonstrate_debug_checks(pjrt::Function& f, std::size_t a_index) {
   try {
     (void)f.input<double>(99);
@@ -244,8 +201,7 @@ inline void demonstrate_debug_checks(pjrt::Function& f, std::size_t a_index) {
     std::printf("debug_check[dtype_mismatch]: %s\n", error.what());
   }
 
-  // `check_values` audits the arenas on the way in, so this throws before the
-  // executable runs and the outputs from the good call above are untouched.
+  // The audit runs before the executable, so the good call's outputs survive.
   f.input<double>(a_index)[0] = std::numeric_limits<double>::quiet_NaN();
   try {
     f.call();

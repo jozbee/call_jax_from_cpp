@@ -4,15 +4,11 @@
  *        allocates nothing, and the numbers that decide whether it is fit to
  *        fly.
  *
- * Everything expensive happens before the loop -- the plugin, the client, the
- * executable, the arenas, the hardening, the recorders -- and the loop itself
- * is: sleep until the next deadline, write the inputs, `call()`, feed the
- * outputs back, record.  It runs the artifact `examples/02_trajopt/export.py`
- * writes, so there is no export script here; the flags, the host audit and the
- * two reports are in `support.hpp`.
- *
- * Example 03 is this loop with nothing else in it; everything here that 03
- * does not have is measurement and reporting, and optional.
+ * Everything expensive happens before the loop; the loop itself is sleep until
+ * the next deadline, write the inputs, `call()`, feed the outputs back, record.
+ * It runs the artifact `examples/02_trajopt/export.py` writes.  Example 03 is
+ * the same loop with nothing else in it; the flags, the host audit and the
+ * reports are in `support.hpp`.
  */
 #include <cerrno>
 #include <cstddef>
@@ -31,18 +27,13 @@
 
 namespace {
 
-/**
- * @brief Everything the loop touches, resolved before it starts.
- *
- * Passed by reference into `run_cycles` so that the warm-up and the timed
- * window run the *same* code over the *same* state.  Every time is an
- * `std::int64_t` of nanoseconds: arithmetic on deadlines is where a forgotten
- * `timespec` renormalization hides.
- */
+/// Everything the loop touches, resolved before it starts.  Times are
+/// `std::int64_t` nanoseconds: deadline arithmetic is where a forgotten
+/// `timespec` renormalization hides.
 struct LoopState {
   pjrt::Function* function = nullptr;
   cjfc::workload::Dims dims;
-  double* x_ref = nullptr;  ///< Resolved once; arenas do not move.
+  double* x_ref = nullptr;
   rt::Recorders* rec = nullptr;
 
   std::int64_t period_ns = 0;
@@ -54,26 +45,17 @@ struct LoopState {
   rt::Deadlines counters;
 };
 
-/**
- * @brief Run @p count cycles (or until the stop flag when @p forever), timing
- *        them into the recorders when @p record.
- *
- * Allocation-free, lock-free, single-threaded, silent.  The one branch in it is
- * on @p record, which is constant for the whole call; keeping it here rather
- * than duplicating the body is what makes the warm-up provably identical to the
- * measured loop, and gating every statistic on it is what makes the counters,
- * the four distributions and the allocation guard describe the same window.
- *
- * @return Cycles actually completed.
- */
+/// Run @p count cycles (or until the stop flag when @p forever), recording
+/// when @p record.  One body for warm-up and the measured window, so the two
+/// are identical; every statistic is gated on @p record, so the counters, the
+/// recorders and the guard describe the same cycles.  Returns cycles completed.
 // docs: begin rt-loop
 std::size_t run_cycles(LoopState& s, std::size_t count, bool forever,
                        bool record) {
   std::size_t done = 0;
   // cjfc = call_jax_from_cpp helpers
   for (std::size_t i = 0; (forever || i < count) && !cjfc::stopping(); ++i) {
-    // A target already in the past returns immediately, which is how the loop
-    // catches up after an overrun instead of skipping a cycle.
+    // A target already in the past returns at once: the loop catches up.
     s.target_ns += s.period_ns;
     while (cjfc::sleep_until(s.target_ns) == EINTR) {
       if (cjfc::stopping()) {
@@ -83,8 +65,7 @@ std::size_t run_cycles(LoopState& s, std::size_t count, bool forever,
     const std::int64_t wake_ns = cjfc::now_ns();
     if (record) {
       s.rec->wake.record(wake_ns - s.target_ns);
-      // Signed on purpose: waking early is as much a scheduling defect as
-      // waking late, and clamping would hide half of them.
+      // Signed: waking early is as much a defect as waking late.
       if (s.have_prev) {
         s.rec->jitter.record(wake_ns - s.prev_wake_ns - s.period_ns);
       }
@@ -117,8 +98,7 @@ std::size_t run_cycles(LoopState& s, std::size_t count, bool forever,
 
 int main(int argc, char** argv) {
   try {
-    // 1. Flags first, then the signal handler: a run that is going to fail on
-    //    a typo should fail before it installs anything.
+    // Flags first: a typo should fail before the signal handler is installed.
     const cjfc::Cli cli = rt::make_cli(argc, argv);
     if (cli.help()) {
       return cjfc::kExitOk;
@@ -126,13 +106,11 @@ int main(int argc, char** argv) {
     const rt::Options options = rt::parse_options(cli);
     cjfc::install_stop_handlers();
 
-    // 2. What the host is willing to give this loop.
     const cjfc::HostEnv env = cjfc::detect_host_env();
     rt::print_host(options, env);
     rt::warn_if_busy(env);
 
-    // 3. The client, once.  Creating it starts XLA's pools, which is why the
-    //    corral step below comes after this point.
+    // Creating the Runtime starts XLA's pools; the corral must come after.
     rt::Timing timing;
     const auto runtime_start = rt::Clock::now();
     pjrt::RuntimeOptions runtime_options;
@@ -143,8 +121,7 @@ int main(int argc, char** argv) {
     timing.runtime_ms = rt::ms_since(runtime_start);
     rt::print_runtime(options, runtime);
 
-    // 4. The executable and its arenas.  warmup_calls is 0 so that the first
-    //    call can be timed on its own below.
+    // warmup_calls = 0, so the cold call below can be timed on its own.
     const auto load_start = rt::Clock::now();
     pjrt::FunctionOptions function_options;
     function_options.warmup_calls = 0;
@@ -155,12 +132,8 @@ int main(int argc, char** argv) {
     cjfc::workload::init_inputs(function, dims);
 
     // docs: begin rt-harden
-    // 5. Ask the operating system for everything it will give, in the order
-    //    that cannot shoot the process in the foot: the allocator before the
-    //    heap grows, priority last so that loading and warm-up do not run at
-    //    SCHED_FIFO.  Nothing here is fatal -- an unprivileged run reports what
-    //    it did not get and continues, which is the expected result on a
-    //    developer's machine.
+    // In the one safe order: allocator first, priority last.  Nothing here is
+    // fatal: an unprivileged run reports what it did not get and continues.
     cjfc::DmaLatencyHold dma;  // holds the C-state constraint for the run
     int cpu_chosen = -1;
     const std::vector<cjfc::Step> steps =
@@ -168,7 +141,7 @@ int main(int argc, char** argv) {
     rt::print_steps(options, steps);
     // docs: end rt-harden
 
-    // 6. Everything the loop will touch, allocated here and never again.
+    // Everything the loop touches, allocated here and never again.
     rt::Recorders recorders(options.iterations != 0 ? options.iterations
                                                     : rt::kUnboundedCapacity);
     pjrt::AllocGuard guard;
@@ -180,23 +153,19 @@ int main(int argc, char** argv) {
     state.rec = &recorders;
     state.period_ns = static_cast<std::int64_t>(options.period_us) * 1000;
 
-    // 7. The cold call, alone: it carries the page faults and the lazy
-    //    initialization a steady-state number must not contain.  The warm-up
-    //    then runs the real loop body, on the real period, recording nothing.
+    // The cold call alone: it carries the faults and lazy initialization a
+    // steady-state number must not contain.  Then warm-up, recording nothing.
     const auto cold_start = rt::Clock::now();
     function.call();
     timing.first_call_us = rt::us_since(cold_start);
     rt::print_cold_start(options, timing, function.load_detail());
 
     state.target_ns = cjfc::now_ns();
-    state.prev_wake_ns = state.target_ns;
     run_cycles(state, options.warmup, /*forever=*/false, /*record=*/false);
 
     // docs: begin alloc-guard
-    // 8. The measured window, and nothing else inside it: the rusage snapshots
-    //    and the allocation census cover exactly the cycles the recorders do.
-    //    Arming over the warm-up instead would fold in the faults and lazy
-    //    initialization the warm-up exists to pay for.
+    // The measured window: rusage and the census cover exactly the cycles the
+    // recorders do.  Arming over warm-up would fold in what warm-up pays for.
     const cjfc::Rusage rusage_before = cjfc::Rusage::now();
     guard.arm();
     const std::size_t completed =
@@ -208,15 +177,11 @@ int main(int argc, char** argv) {
     // docs: end alloc-guard
 
     // docs: begin rt-report
-    // 9. Everything from here on is allowed to allocate, take locks and write
-    //    files: the loop is over.  Summarizing after the run rather than
-    //    narrating during it is the whole reason the recorder exists.
+    // The loop is over: from here on, allocating and writing files is allowed.
     rt::Results results(recorders, completed, state.counters, rusage,
                         static_cast<double>(options.period_us));
 
-    // Correctness before the allocation gate: a loop that produced the wrong
-    // answer without allocating is still broken, and the exit code should say
-    // which failure to look at first.
+    // A wrong answer outranks the allocation gate.
     results.exit_code =
         options.check && !results.step_counter_ok()
             ? cjfc::kExitCorrectness

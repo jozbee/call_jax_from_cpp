@@ -1,17 +1,14 @@
-"""``python -m jax2exec check <base>`` -- inspect an artifact set.
+"""``python -m jax2exec check <base>``: inspect an artifact set.
 
-Artifacts travel badly on purpose: a serialized executable embeds machine code
-for the host that produced it, and the sidecar is the only description of the
-inputs that the C++ loader ever sees.  This command answers the two questions
-that get asked when a load fails on a machine that is not the one that
-exported -- *what does this sidecar actually declare*, and *will this
-executable run here* -- without needing JAX installed, which on the machine
-that runs the C++ side it usually is not.
+Answers, without JAX, the two questions asked when a load fails on a machine
+that did not export: what does the sidecar declare, and will the executable
+run here.
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -72,11 +69,10 @@ def _array_rows(entries: list[dict[str, Any]]) -> list[list[str]]:
 
 
 def _check_sizes(entries: list[dict[str, Any]], kind: str) -> list[str]:
-    """Report entries whose numel or nbytes disagree with shape and dtype.
+    """Report entries whose ``numel`` or ``nbytes`` disagree with the shape.
 
-    The C++ loader allocates ``nbytes`` and reads ``numel`` elements out of
-    it, so a sidecar that has been hand-edited into disagreeing with itself is
-    a buffer overrun waiting for a caller.
+    The loader allocates ``nbytes`` and reads ``numel`` elements out of it,
+    so a sidecar that disagrees with itself is a buffer overrun.
     """
     problems = []
     for index, entry in enumerate(entries):
@@ -87,9 +83,7 @@ def _check_sizes(entries: list[dict[str, Any]], kind: str) -> list[str]:
                 f"{entry.get('dtype')}, which this loader does not support"
             )
             continue
-        numel = 1
-        for dim in entry.get("shape", []):
-            numel *= int(dim)
+        numel = math.prod(int(dim) for dim in entry.get("shape", []))
         if int(entry.get("numel", -1)) != numel:
             problems.append(
                 f"{kind} {index} ('{entry.get('name')}') declares numel "
@@ -109,11 +103,8 @@ def _check_artifacts(
 ) -> list[str]:
     """Verify the digest of every artifact the sidecar names.
 
-    Returns
-    -------
-    list of str
-        Problems found.  A missing ``.mlirbc`` is not one: it only means this
-        artifact set cannot fall back to compiling in-process.
+    A missing ``.mlirbc`` is not a problem: it only means this artifact set
+    cannot fall back to compiling in-process.
     """
     artifacts = sidecar.get("artifacts") or {}
     if not artifacts:  # a v1 sidecar names nothing; the executable is <base>
@@ -177,21 +168,19 @@ def _check_isa(sidecar: dict[str, Any], out: list[str]) -> list[str]:
         out.append(f"  host is {host}, exported on {required}: the .binpb runs")
         return []
 
+    weaker = verdict is False
+    label = "TOO WEAK" if weaker else "WRONG ARCHITECTURE"
     reason = (
-        "a weaker instruction set"
-        if verdict is False
-        else "a different architecture"
+        "a weaker instruction set" if weaker else "a different architecture"
     )
-    label = "TOO WEAK" if verdict is False else "WRONG ARCHITECTURE"
     out.append(f"  host is {host}, exported on {required}: {label}")
-    return [
-        (
-            f"this host is {host} and the executable was built for "
-            f"{required}, {reason}: the .binpb will not run here. Compile the "
-            ".mlirbc instead (the C++ loader does this on its own when "
-            "isa_guard is on), or re-export on this machine."
-        )
-    ]
+    problem = (
+        f"this host is {host} and the executable was built for "
+        f"{required}, {reason}: the .binpb will not run here. Compile the "
+        ".mlirbc instead (the C++ loader does this on its own when "
+        "isa_guard is on), or re-export on this machine."
+    )
+    return [problem]
 
 
 def _check(base_arg: str) -> int:
@@ -302,6 +291,7 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m jax2exec",
         description="Inspect artifacts exported by jax2exec.",
     )
+    # `dest` only names the subcommand in the error when none is given.
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser(
         "check",
@@ -313,7 +303,4 @@ def main(argv: list[str] | None = None) -> int:
         "(artifacts/trajopt)",
     )
 
-    args = parser.parse_args(argv)
-    if args.command == "check":
-        return _check(args.base)
-    return 2  # pragma: no cover - argparse rejects anything else
+    return _check(parser.parse_args(argv).base)

@@ -1,14 +1,7 @@
 """Freeze what a function returns, so the C++ caller can be checked against it.
 
-A C++ call path that runs is not the same as a C++ call path that is right.
-These files are the ground truth the C++ tests compare against: for each case,
-every input and every output as raw bytes in call order, plus a manifest
-saying what those bytes are and how close a match has to be.
-
-The layout is deliberately the dumbest thing that works -- no header, no
-padding, no length prefixes -- because the reader is a C++ test that already
-knows every shape and dtype from the manifest, and anything cleverer is one
-more thing that can disagree between the two languages.
+Each case is every input and every output as raw bytes in call order, plus a
+manifest saying what those bytes are and how close a match has to be.
 """
 
 from __future__ import annotations
@@ -23,10 +16,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from ._dtypes import SUPPORTED_DTYPES, dtype_name, unsupported_dtype_message
+from ._dtypes import dtype_name
 from ._sidecar import SCHEMA_VERSION, atomic_write_bytes
 from .export import (
     ExportError,
+    _check_dtypes,
     _prepare_directory,
     default_input_names,
     default_output_names,
@@ -36,7 +30,7 @@ __all__ = ["DEFAULT_TOLERANCE", "write_reference_cases"]
 
 #: Maximum relative error a C++ result may show against the frozen one.
 #: Float32 gets more room because XLA is free to fuse and reassociate, and the
-#: two paths do not have to reassociate the same way.
+#: two paths need not reassociate the same way.
 DEFAULT_TOLERANCE: Mapping[str, float] = {"float64": 1e-6, "float32": 1e-4}
 
 
@@ -57,32 +51,17 @@ def _describe(arrays: Sequence[np.ndarray], names: Sequence[str]) -> list[dict]:
     ]
 
 
-def _check_dtypes(
-    arrays: Sequence[np.ndarray], names: Sequence[str], kind: str
-) -> None:
-    """Reject an element type the C++ side has no arena for."""
-    for index, array in enumerate(arrays):
-        if dtype_name(array.dtype) not in SUPPORTED_DTYPES:
-            raise ExportError(
-                unsupported_dtype_message(
-                    kind, index, names[index], array.dtype
-                )
-            )
-
-
 def _check_finite(
     arrays: Sequence[np.ndarray], names: Sequence[str], case: int
 ) -> None:
     """Refuse to freeze a NaN or an infinity.
 
-    A reference case containing a NaN passes a max-relative-error comparison
-    silently -- every comparison against NaN is false, so nothing exceeds the
-    tolerance -- which turns the strongest test in the suite into one that
-    cannot fail.
+    Every comparison against NaN is false, so a NaN reference passes a
+    max-relative-error check silently and the strongest test cannot fail.
     """
     for index, array in enumerate(arrays):
         if array.dtype.kind != "f":
-            continue  # integers and bools have no non-finite values
+            continue
         if not np.isfinite(array).all():
             raise ExportError(
                 f"case {case} output {index} ('{names[index]}') is not "
@@ -125,9 +104,8 @@ def write_reference_cases(
     Parameters
     ----------
     fun : callable
-        The same function that was exported.  It is jitted here, so the values
-        frozen are the ones XLA computes, not the ones an eager interpreter
-        would.
+        The same function that was exported.  It is jitted here, so the
+        frozen values are the ones XLA computes.
     arg_tuples : Iterable of Sequence
         One entry per case, each a full argument tuple of concrete values.
     directory : str or Path
@@ -157,12 +135,11 @@ def write_reference_cases(
     -----
     Each ``.bin`` holds every input followed by every output, in call order,
     C order, native width, with no header and no padding; a scalar occupies
-    exactly one element.  Values are written as JAX actually traced them, so a
-    float64 argument passed without ``jax_enable_x64`` is frozen as the
-    float32 the executable will really be handed.
+    exactly one element.  Values are frozen as JAX traced them, so a float64
+    argument passed without ``jax_enable_x64`` is frozen as the float32 the
+    executable will really be handed.
     """
-    # The C++ reader memcpys these straight into its arenas, so a big-endian
-    # host would need a byte-swapping reader that nothing here provides.
+    # The C++ reader memcpys these into its arenas; nothing byte-swaps.
     assert sys.byteorder == "little", "reference cases are little-endian"
 
     out_dir = _prepare_directory(directory)
@@ -184,9 +161,7 @@ def write_reference_cases(
                 "be a sequence holding one full argument tuple"
             )
 
-        # Converting first records exactly what the executable will see: with
-        # x64 disabled a float64 argument becomes float32 here, as it does in
-        # the export.
+        # Convert first, so the frozen bytes are what the executable is handed.
         converted = jax.tree_util.tree_map(jnp.asarray, tuple(arg_tuple))
         results = jit_fun(*converted)
 
@@ -232,8 +207,7 @@ def write_reference_cases(
         "tolerance": {**DEFAULT_TOLERANCE, **(tolerance or {})},
     }
 
-    # Cases first, manifest last: the manifest is what a reader opens, and it
-    # must never name a file that is not there yet.
+    # Manifest last, so it never names a file that is not there yet.
     for file_name, payload in zip(case_files, payloads):
         atomic_write_bytes(out_dir / file_name, payload)
 

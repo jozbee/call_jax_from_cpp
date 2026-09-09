@@ -1,19 +1,9 @@
 """Export JAX functions as artifacts a C++ real-time caller can load.
 
-``export(fun, args, directory, name)`` compiles a function ahead of time and
-writes three files: the serialized PJRT executable the C++ loader
-deserializes, StableHLO bytecode it can compile instead when that executable
-was built for a different machine, and a JSON sidecar describing every input
-and output -- which is the only description of the parameters that exists,
-because the PJRT C API cannot be asked.
-
-``write_reference_cases`` freezes what the function returns, so the C++ side
-can be checked against JAX rather than merely observed to run.
-
-``python -m jax2exec check <base>`` describes an artifact set and says whether
-it will run on the host it is being inspected from.  That command deliberately
-needs no JAX: the machine running the C++ caller usually has none, so the
-imports that pull JAX in are deferred until something actually asks for them.
+``export`` writes the executable, its StableHLO fallback and the sidecar;
+``write_reference_cases`` freezes what the function returns; and
+``python -m jax2exec check <base>`` inspects an artifact set without JAX,
+which the machine running the C++ caller usually does not have.
 """
 
 from __future__ import annotations
@@ -50,8 +40,8 @@ __all__ = [
     "write_reference_cases",
 ]
 
-# Attribute -> module that defines it. Both modules import JAX, which costs a
-# second or two and, on a deployment machine, may not be installed at all.
+# Attribute -> module that defines it.  Both modules import JAX, which the
+# machine running `check` may not have.
 _LAZY = {
     "SUPPORTED_JAX": "export",
     "ExportError": "export",
@@ -65,16 +55,11 @@ _LAZY = {
 def __getattr__(name: str) -> Any:
     """Import the module defining ``name`` the first time it is asked for.
 
-    Every public name the imported submodule provides is bound, not just the
-    one that was asked for. That matters because ``export`` is both a submodule
-    and the function it defines: importing the submodule for any reason makes
-    the import system bind ``jax2exec.export`` to the *module*, which then
-    shadows this function forever. Binding the whole group puts the function
-    back on top, so ``from jax2exec import ExportError, export`` behaves the
-    same as ``from jax2exec import export, ExportError``. Before this, the
-    first spelling handed the caller a module and the second a function, and
-    an import sorter reordering those names was enough to break a working
-    program with ``TypeError: 'module' object is not callable``.
+    ``export`` is both a submodule and the function it defines.  Importing
+    the submodule for any reason -- ``reference`` imports it -- binds
+    ``jax2exec.export`` to the module, and a name bound in ``globals()``
+    never reaches this function again.  Rebinding every loaded lazy name puts
+    the function back on top whichever name was asked for first.
     """
     module_name = _LAZY.get(name)
     if module_name is None:
@@ -82,10 +67,6 @@ def __getattr__(name: str) -> Any:
 
     importlib.import_module(f".{module_name}", __name__)
 
-    # Bind every lazy name whose module is now loaded, not just the ones from
-    # the module just asked for: `reference` imports `export`, so fetching
-    # `write_reference_cases` is enough to leave the module shadowing the
-    # function. Subsequent lookups then skip this function entirely.
     for lazy_name, lazy_module in _LAZY.items():
         loaded = sys.modules.get(f"{__name__}.{lazy_module}")
         if loaded is not None and hasattr(loaded, lazy_name):

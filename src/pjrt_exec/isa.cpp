@@ -9,10 +9,8 @@
 #if defined(__aarch64__)
 #include <sys/auxv.h>
 
-// glibc puts AT_HWCAP in <sys/auxv.h> but leaves the bit definitions to the
-// kernel headers, which are not guaranteed to be installed.  The SVE bit is
-// architectural and has never moved, so define it rather than fail the build
-// on a machine missing <asm/hwcap.h>.
+// glibc leaves the AT_HWCAP bits to the kernel headers, which need not be
+// installed.  The SVE bit is architectural and has never moved.
 #ifndef HWCAP_SVE
 #define HWCAP_SVE (1UL << 22)
 #endif
@@ -21,11 +19,10 @@
 namespace pjrt::internal {
 namespace {
 
-// The levels of one architecture family, weakest first.  A level that appears
-// in no ladder -- "unknown", or a family this file has never heard of --
-// compares against nothing, which is the whole point: an aarch64 host must not
-// be talked into loading an x86-64 executable by a comparison that happens to
-// return true.
+// The levels of one family, weakest first: the x86-64 psABI levels, and SVE
+// or not on aarch64.  A level on no ladder -- "unknown", or a family this file
+// has not heard of -- compares against nothing, so an aarch64 host is never
+// talked into loading an x86-64 executable.
 constexpr const char* kX86Ladder[] = {"x86-64-v1", "x86-64-v2", "x86-64-v3",
                                       "x86-64-v4"};
 constexpr const char* kArmLadder[] = {"aarch64", "aarch64+sve"};
@@ -43,29 +40,16 @@ int rung(const char* const (&ladder)[N], const std::string& level) {
 
 #if defined(__x86_64__) || defined(_M_X64)
 
-// __builtin_cpu_supports knows a fixed set of feature names that has grown
-// over compiler releases, and an unknown name is a compile error rather than
-// a false answer: clang 18, which is what Ubuntu 24.04 and therefore the CI
-// container ship, rejects "lzcnt" and "movbe" outright.  Both bits are one
-// CPUID leaf away, so read them directly and keep the v3 test faithful to the
-// psABI instead of dropping the two features the older compiler cannot name.
-
-/// ABM/LZCNT: CPUID leaf 0x80000001, ECX bit 5.
-bool has_lzcnt() {
+// `__builtin_cpu_supports` rejects a name it does not know at compile time,
+// and clang 18 (Ubuntu 24.04, so the CI container) rejects "lzcnt" and
+// "movbe".  Both bits are one CPUID leaf away, so the v3 test stays faithful to
+// the psABI's list.
+bool cpuid_ecx_bit(unsigned int leaf, unsigned int bit) {
   unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
-  if (__get_cpuid(0x80000001u, &eax, &ebx, &ecx, &edx) == 0) {
+  if (__get_cpuid(leaf, &eax, &ebx, &ecx, &edx) == 0) {
     return false;
   }
-  return (ecx & (1u << 5)) != 0;
-}
-
-/// MOVBE: CPUID leaf 1, ECX bit 22.
-bool has_movbe() {
-  unsigned int eax = 0, ebx = 0, ecx = 0, edx = 0;
-  if (__get_cpuid(1u, &eax, &ebx, &ecx, &edx) == 0) {
-    return false;
-  }
-  return (ecx & (1u << 22)) != 0;
+  return (ecx & (1u << bit)) != 0;
 }
 
 #endif
@@ -74,16 +58,13 @@ bool has_movbe() {
 
 std::string host_isa_level() {
 #if defined(__x86_64__) || defined(_M_X64)
-  // Required before the first __builtin_cpu_supports in any translation unit
-  // whose code might run ahead of the compiler's own constructor for the CPU
-  // feature table.  Idempotent, and it costs one CPUID at load.
+  // Required before the first `__builtin_cpu_supports` in a translation unit
+  // that may run ahead of the compiler's own constructor for the feature table.
   __builtin_cpu_init();
 
-  // Tested strongest first.  A part carrying the AVX-512 set always carries
-  // the v3 set too, so the cascade agrees with the psABI without each rung
-  // re-testing the rungs below it.
-  if (__builtin_cpu_supports("avx512f") &&
-      __builtin_cpu_supports("avx512bw") &&
+  // Strongest first.  A part with the AVX-512 set always carries the v3 set,
+  // so no rung re-tests the rungs below it.
+  if (__builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
       __builtin_cpu_supports("avx512cd") &&
       __builtin_cpu_supports("avx512dq") &&
       __builtin_cpu_supports("avx512vl")) {
@@ -92,7 +73,8 @@ std::string host_isa_level() {
   if (__builtin_cpu_supports("avx") && __builtin_cpu_supports("avx2") &&
       __builtin_cpu_supports("bmi") && __builtin_cpu_supports("bmi2") &&
       __builtin_cpu_supports("fma") && __builtin_cpu_supports("f16c") &&
-      has_lzcnt() && has_movbe()) {
+      cpuid_ecx_bit(0x80000001u, 5) &&  // ABM/LZCNT
+      cpuid_ecx_bit(1u, 22)) {          // MOVBE
     return "x86-64-v3";
   }
   if (__builtin_cpu_supports("sse4.2") && __builtin_cpu_supports("ssse3") &&
@@ -102,9 +84,8 @@ std::string host_isa_level() {
   // Anything running this binary at all is at least the baseline.
   return "x86-64-v1";
 #elif defined(__aarch64__)
-  // aarch64 has no microarchitecture levels to speak of; SVE is the one
-  // difference wide enough to change what a compiler emits, so it is the one
-  // distinction the sidecar records.
+  // aarch64 has no microarchitecture levels; SVE is the one difference wide
+  // enough to change what a compiler emits, so it is the one recorded.
   return (getauxval(AT_HWCAP) & HWCAP_SVE) != 0 ? "aarch64+sve" : "aarch64";
 #else
   return "unknown";

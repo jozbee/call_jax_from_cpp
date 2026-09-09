@@ -41,7 +41,7 @@ None of it changes the loop.
 
 ## Startup, in order
 
-`main` is nine numbered steps: flags and the signal handler; the host audit;
+`main` runs in this order: flags and the signal handler; the host audit;
 the `Runtime`, whose creation starts XLA's pools; the `Function` and the
 workload's first inputs; hardening; recorders, guard and loop state; the cold
 call and the warm-up; the measured window; the report.

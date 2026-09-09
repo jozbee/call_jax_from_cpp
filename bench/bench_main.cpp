@@ -4,26 +4,18 @@
  *        reported with everything a later reader needs to believe it.
  *
  * Every change to the call path is judged by the tail statistics this binary
- * prints -- p99.9/p50 and max/p50, not the mean.  It measures exactly one
+ * prints -- p99.9/p50 and max/p50, not the mean.  It measures one
  * configuration per run and records what that configuration was, because a
  * latency number without its provenance cannot be compared with anything.
  *
- * Three traps are designed around here, each of them learned by measuring
- * wrongly first:
- *
- *   - **A busy machine does not add noise to a tail measurement, it
- *     invalidates it.**  The same configuration measured during a concurrent
- *     build reported p50 2.4x high and max/p50 4.4 instead of 1.1.  The load
- *     average is printed with the numbers and `host.busy` is in the JSON
- *     report; check it before quoting anything.
- *   - **XLA dispatch is asynchronous.**  A warm-up that does not wait on
- *     *every* output leaves a backlog that lands on the first timed call and
- *     turns a 1.2x max/p50 into a 27x one.  Every call here, warm-up included,
- *     goes through `pjrt::Function::call()`, which blocks on all outputs.
- *   - **Sequential A/B comparisons drift with CPU temperature.**  Anything
- *     comparative is run as short interleaved bursts that append to one CSV
- *     (`tools/run_matrix.sh`); this binary produces one row of that, and
- *     `--csv` is what makes the interleaving possible.
+ * Three traps shape it, each learned by measuring wrongly first; the figures
+ * are in docs/developer/measurement.md.  A busy host invalidates a tail
+ * figure rather than adding noise to it, so the load average is printed with
+ * the numbers.  XLA dispatch is asynchronous, so every call, warm-up
+ * included, goes through `pjrt::Function::call()`, which blocks on all
+ * outputs.  A sequential A/B drifts with CPU temperature, so comparisons are
+ * short interleaved bursts appending rows to one CSV (`tools/run_matrix.sh`),
+ * and this binary produces one such row.
  *
  * @code
  *   bench --fixture trajopt --iterations 20000 --csv artifacts/reports/rt.csv
@@ -80,7 +72,6 @@ constexpr char kUsage[] =
     "\n"
     "exit: 0 ok, 1 error, 2 wrong answer, 3 allocation gate, 4 guard missing";
 
-/// Everything the run was asked for, resolved from the command line once.
 struct Args {
   std::string fixture = "trajopt";
   std::string assets_dir = "artifacts";
@@ -103,11 +94,9 @@ struct Args {
   int cpu_device_count = 1;
 };
 
-/// The computation ran and produced the wrong answer.  Distinct from every
-/// other failure because a script has to tell "this build is slower" apart
-/// from "this build is broken"; it becomes exit code 2.
-class CorrectnessFailure : public std::runtime_error {
- public:
+/// A wrong answer, kept apart from every other failure so that a script can
+/// tell "this build is slower" from "this build is broken": exit code 2.
+struct CorrectnessFailure : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 
@@ -129,13 +118,14 @@ Args read_args(const cjfc::Cli& cli) {
   args.synchronous = !cli.flag("async");
   args.rt_harden = cli.flag("rt");
   args.require_guard = cli.flag("require-guard");
-  args.worker_threads = static_cast<int>(cli.get_long("threads", 1));
-  args.cpu_device_count = static_cast<int>(cli.get_long("devices", 1));
+  args.worker_threads =
+      static_cast<int>(cli.get_long("threads", args.worker_threads));
+  args.cpu_device_count =
+      static_cast<int>(cli.get_long("devices", args.cpu_device_count));
   args.label = cli.get("label", args.fixture);
 
-  // A mistyped gate that quietly gates on nothing is the exact failure
-  // report.hpp warns about: "the path allocated" and "nobody measured whether
-  // the path allocated" must not look the same in a green log.
+  // A mistyped mode must not quietly gate on nothing: "the path allocated"
+  // and "nobody measured whether it did" must not look the same in a log.
   if (args.alloc_gate != "off" && args.alloc_gate != "self" &&
       args.alloc_gate != "all") {
     throw std::runtime_error("--alloc-gate expects off, self or all, got '" +
@@ -144,14 +134,8 @@ Args read_args(const cjfc::Cli& cli) {
   return args;
 }
 
-/**
- * @brief Record the knobs that actually move the numbers.
- *
- * Call it *after* the `Runtime` is constructed: the runtime is what sets
- * `PJRT_NPROC`, and it is the runtime that knows whether the synchronous
- * option was accepted or quietly refused.  Without this string a CSV row is
- * unattributable a month later.
- */
+/// The knobs that move the numbers.  Call it after the `Runtime` exists: the
+/// runtime sets `PJRT_NPROC`, and knows whether synchronous mode was accepted.
 std::string describe_config(const Args& args, const pjrt::Runtime& runtime) {
   const auto env = [](const char* key) -> std::string {
     const char* value = std::getenv(key);
@@ -163,7 +147,6 @@ std::string describe_config(const Args& args, const pjrt::Runtime& runtime) {
          ";nproc=" + env("PJRT_NPROC") + ";xla_flags=" + env("XLA_FLAGS");
 }
 
-/// @brief One comparison, for the JSON report.
 cjfc::json comparison_json(const bench::Fixture::Comparison& comparison) {
   return cjfc::json{
       {"max_rel_err", comparison.max_rel_err},
@@ -173,30 +156,25 @@ cjfc::json comparison_json(const bench::Fixture::Comparison& comparison) {
   };
 }
 
-/// @brief Print one comparison the same way in both paths.
 void print_comparison(const bench::Fixture::Comparison& comparison) {
   std::printf("max rel err %.3e, %zu exact mismatches, %zu nan -- %s\n",
               comparison.max_rel_err, comparison.exact_mismatches,
               comparison.nan_count, comparison.ok ? "ok" : "FAIL");
 }
 
-/// Wall-clock duration in microseconds.
 double to_us(std::chrono::steady_clock::duration d) {
   return static_cast<double>(
              std::chrono::duration_cast<std::chrono::nanoseconds>(d).count()) *
          1e-3;
 }
 
-/// What the measured run cost outside the steady-state distribution.
+/// What the run cost outside the steady-state distribution.
 struct Timings {
-  /// Creating the `Runtime`: dlopen, plugin init, client creation, XLA's pools
-  /// starting.
+  /// `Runtime` construction: dlopen, client creation, XLA's pools starting.
   std::chrono::steady_clock::duration runtime{0};
-  /// Constructing the `Function`: sidecar, relink, arenas, buffers.
+  /// `Function` construction: sidecar, relink, arenas, buffers.
   std::chrono::steady_clock::duration load{0};
-  /// The first call, timed on its own.
   std::chrono::steady_clock::duration first_call{0};
-  /// The correctness gate's verdict, when it ran.
   bench::Fixture::Comparison comparison;
   bool checked = false;
 };
@@ -205,29 +183,21 @@ struct Timings {
 /**
  * @brief First call, warm-up, correctness gate, then the timed loop.
  *
- * The order is the whole point of this function:
- *
- *   1. The **first call** is timed on its own.  It carries page faults, lazy
- *      binding and whatever the runtime still initializes on demand, and a
- *      steady-state number must not include any of that -- but a control
- *      loop's first cycle really does pay it, so it is reported rather than
- *      discarded.
- *   2. **Warm-up**, every call of it blocking on all outputs.
- *   3. The **correctness gate**, before any timing.  A wrong answer must never
- *      be reported as a fast one, so this is a gate and not a warning.
- *   4. The allocation guard is armed for **exactly** the timed loop.  Arming
- *      it earlier would count warm-up's page faults and lazy initialization as
- *      allocations of the call path.
+ * The first call is timed alone.  It carries page faults and whatever the
+ * runtime still initializes on demand, which a steady-state number must
+ * exclude -- but a control loop's first cycle really pays it, so it is
+ * reported rather than discarded.  The correctness gate runs before any
+ * timing, so a wrong answer is never reported as a fast one.  The allocation
+ * guard is armed for exactly the timed loop: armed earlier, it would charge
+ * warm-up's lazy initialization to the call path.
  *
  * @throws CorrectnessFailure when the outputs disagree with the reference.
  */
 template <typename Call>
-Timings run_measured(const Args& args, const bench::Fixture& fixture,
-                     const std::vector<const void*>& output_ptrs,
-                     pjrt::AllocGuard& guard, pjrt::LatencyRecorder& recorder,
-                     Call&& one_call) {
-  Timings timings;
-
+void run_measured(const Args& args, const bench::Fixture& fixture,
+                  const std::vector<const void*>& output_ptrs,
+                  pjrt::AllocGuard& guard, pjrt::LatencyRecorder& recorder,
+                  Timings& timings, Call&& one_call) {
   const auto first_start = std::chrono::steady_clock::now();
   one_call();
   timings.first_call = std::chrono::steady_clock::now() - first_start;
@@ -253,11 +223,9 @@ Timings run_measured(const Args& args, const bench::Fixture& fixture,
       recorder.time(one_call);
     }
   }
-  return timings;
 }
 // docs: end bench_measured
 
-/// The result of the `--all-cases` sweep.
 struct Sweep {
   bool ok = true;
   cjfc::json cases = cjfc::json::array();
@@ -268,13 +236,11 @@ struct Sweep {
  * @brief Run every reference case through one `Function`, forwards then
  *        backwards.
  *
- * The steady-state path reuses one set of zero-copy input buffers for the life
- * of the `Function`, so the case that matters for correctness is *changing*
- * inputs between calls -- which a benchmark feeding the same values every time
- * never exercises.  Two passes rather than one because the reverse pass gives
- * every case a different predecessor: a buffer left stale by the previous call
- * produces the right answer for exactly one ordering, and one pass would find
- * that acceptable.
+ * The steady-state path reuses one set of input arenas for the life of the
+ * `Function`, so what matters for correctness is *changing* inputs between
+ * calls, which a benchmark feeding the same case every time never exercises.
+ * The reverse pass gives every case a different predecessor: a buffer left
+ * stale by the previous call is right for exactly one ordering.
  */
 Sweep run_all_cases(const bench::Fixture& fixture, pjrt::Function& function,
                     const std::vector<const void*>& output_ptrs) {
@@ -330,8 +296,8 @@ int main(int argc, char** argv) {
                                std::to_string(fixture.num_cases()) + " cases");
     }
 
-    // Read the host before anything is measured, and say so loudly when it is
-    // busy: the numbers below would be wrong rather than merely noisy.
+    // Read the host before anything is measured: on a busy one the numbers
+    // below are wrong, not noisy.
     const cjfc::HostEnv host = cjfc::detect_host_env();
     std::printf("fixture:    %s (case %zu of %zu)\n", args.fixture.c_str(),
                 args.case_index, fixture.num_cases());
@@ -353,8 +319,8 @@ int main(int argc, char** argv) {
     timings.runtime = runtime_end - runtime_start;
 
     pjrt::FunctionOptions function_options;
-    // Warm-up belongs to this harness, so that the first call can be timed on
-    // its own; the Function must not quietly do it too.
+    // Warm-up is this harness's job, so that the first call can be timed
+    // alone; the Function must not quietly do it too.
     function_options.warmup_calls = 0;
     const auto load_start = std::chrono::steady_clock::now();
     pjrt::Function function(runtime, args.artifacts_dir + "/" + args.fixture,
@@ -363,19 +329,16 @@ int main(int argc, char** argv) {
 
     std::printf("%s\n", runtime.describe().c_str());
 
-    // Hardening comes after the client exists: corral_xla_threads finds XLA's
-    // pools by name, and those threads are created with the client.  That
-    // costs harden_malloc its ideal position -- before the bulk of startup
-    // allocates -- and the trade is deliberate, since the pools are the larger
-    // source of jitter.
+    // After the client exists: corral_xla_threads finds XLA's pools by name,
+    // and they are created with the client.  harden_malloc would rather run
+    // before startup allocates, but the pools are the larger source of jitter.
     cjfc::DmaLatencyHold dma;
     std::vector<cjfc::Step> steps;
     if (args.rt_harden) {
       cjfc::HardeningOptions hardening;
       hardening.cpu = args.cpu;
-      // --rt is already an explicit opt-in, so it asks for SCHED_FIFO too;
-      // rt_env leaves priority at 0 by default because a real-time thread
-      // nobody asked for can take the machine with it.
+      // --rt is an explicit opt-in, so it asks for SCHED_FIFO too; rt_env
+      // defaults to 0 because an unrequested real-time thread can take the box.
       hardening.rt_priority = 80;
       int chosen_cpu = -1;
       steps = cjfc::apply_hardening(host, hardening, dma, &chosen_cpu);
@@ -424,17 +387,13 @@ int main(int argc, char** argv) {
     pjrt::AllocGuard guard;
     pjrt::LatencyRecorder recorder(args.iterations);
 
-    // The copy into the input arenas is inside the timed region on purpose: a
-    // control loop writes fresh inputs every step, so a benchmark that skips
-    // the copy is measuring something no caller does.
-    const Timings measured =
-        run_measured(args, fixture, output_ptrs, guard, recorder, [&]() {
-          fixture.load_inputs(args.case_index, function);
-          function.call();
-        });
-    timings.first_call = measured.first_call;
-    timings.comparison = measured.comparison;
-    timings.checked = measured.checked;
+    // The input copy is inside the timed region: a control loop writes fresh
+    // inputs every step, and a benchmark that skips the copy is measuring
+    // something no caller does.
+    run_measured(args, fixture, output_ptrs, guard, recorder, timings, [&]() {
+      fixture.load_inputs(args.case_index, function);
+      function.call();
+    });
 
     std::printf("\n=== cold start (microseconds) ===\n");
     std::printf("  runtime    %10.1f\n", to_us(timings.runtime));

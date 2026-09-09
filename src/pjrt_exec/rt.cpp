@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 #include <cerrno>
-#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #endif
@@ -27,9 +26,7 @@ Status errno_failure(const char* what) {
   return Status{false, std::string(what) + ": " + std::strerror(errno)};
 }
 #else
-Status unsupported() {
-  return Status{false, "not supported on this platform"};
-}
+Status unsupported() { return Status{false, "not supported on this platform"}; }
 #endif
 
 }  // namespace
@@ -40,8 +37,8 @@ Status lock_memory(std::size_t prefault_bytes) {
   if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
     return errno_failure("mlockall");
   }
-  // Grow the heap once and touch every page, so the arena the loop will use is
-  // already resident and already owned by this process.
+  // Grow the heap once and touch every page, so the loop's arena is already
+  // resident and already owned by this process.
   if (prefault_bytes > 0) {
     void* block = std::malloc(prefault_bytes);
     if (block != nullptr) {
@@ -112,11 +109,9 @@ Status corral_xla_threads(const std::vector<int>& cpus) {
     return errno_failure("opendir(/proc/self/task)");
   }
 
-  // The caller's own thread is never a candidate: it has just been pinned to
-  // the core it wants, and corralling it onto `cpus` would undo that.  Skipped
-  // by id rather than by name, because a name test cannot tell the loop thread
-  // from a pool thread if the executable is itself called something with "XLA"
-  // in it.
+  // Skip the caller's own thread, by id rather than by name: it was just
+  // pinned where it wants to be, and a name test cannot tell it from a pool
+  // thread when the executable's own name carries "XLA".
   const long self_tid = syscall(SYS_gettid);
 
   int moved = 0;
@@ -134,17 +129,9 @@ Status corral_xla_threads(const std::vector<int>& cpus) {
     if (!comm_file || !std::getline(comm_file, comm)) {
       continue;
     }
-    // Any thread whose name carries "XLA" is one of XLA's; anything else here
-    // is ours.  This was a prefix match on "XLAEigen"/"XLAPjRtCpuClient", and
-    // it rotted silently: TSL prefixes the name it sets, so at the pinned XLA
-    // version the pool threads are called "tf_XLAEigen" and the prefix match
-    // found nothing on any host.  The step then reported "no XLA worker
-    // threads found (client not created?)", which reads as "there was nothing
-    // to move" rather than as a helper that had stopped working.  A substring
-    // test survives that rename and still matches the un-prefixed names older
-    // versions used.  Verified by reading /proc/<pid>/task/*/comm of a running
-    // example 04: `--threads N` yields exactly N `tf_XLAEigen` threads,
-    // under inline and asynchronous dispatch alike.
+    // A substring test, not a prefix: TSL prefixes the names it sets, so the
+    // pool threads are "tf_XLAEigen" at the pinned version and were "XLAEigen"
+    // before it.  Verified against /proc/<pid>/task/*/comm of example 04.
     if (comm.find("XLA") == std::string::npos) {
       continue;
     }
@@ -164,26 +151,22 @@ Status corral_xla_threads(const std::vector<int>& cpus) {
 }
 
 std::string describe_environment() {
-  auto read_first_line = [](const char* path) -> std::string {
-    std::ifstream f(path);
-    std::string line;
-    if (f && std::getline(f, line)) {
-      return line;
+  const auto setting = [](const char* label, const char* path) {
+    std::ifstream file(path);
+    std::string value;
+    if (!file || !std::getline(file, value)) {
+      value = "unavailable";
     }
-    return "unavailable";
+    return std::string(label) + ": " + value + "\n";
   };
 
   std::string out;
-  out += "governor: " +
-         read_first_line(
-             "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor") +
-         "\n";
-  out += "isolated cpus: " +
-         read_first_line("/sys/devices/system/cpu/isolated") + "\n";
-  out += "nohz_full: " + read_first_line("/sys/devices/system/cpu/nohz_full") +
-         "\n";
-  out += "transparent hugepages: " +
-         read_first_line("/sys/kernel/mm/transparent_hugepage/enabled") + "\n";
+  out += setting("governor",
+                 "/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor");
+  out += setting("isolated cpus", "/sys/devices/system/cpu/isolated");
+  out += setting("nohz_full", "/sys/devices/system/cpu/nohz_full");
+  out += setting("transparent hugepages",
+                 "/sys/kernel/mm/transparent_hugepage/enabled");
 
   rlimit limit = {};
   if (getrlimit(RLIMIT_RTPRIO, &limit) == 0) {

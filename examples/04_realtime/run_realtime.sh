@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
 #
-# Launch the real-time example with whatever this host is willing to give it,
-# and say plainly what it could not.
-#
-# The audit comes FIRST, before a single number is produced: a latency figure
-# whose provenance was not written down cannot be defended three weeks later,
-# and a figure from a busy machine is not noisy, it is wrong (the same
-# configuration measured during a build reported p50 2.4x high and max/p50 4.4
-# instead of 1.1).  So this prints tools/rt_check.sh and /proc/loadavg, then
-# runs, then hands you both together.
+# Launch the real-time example with whatever this host will give it, and say
+# what it could not.  The audit (tools/rt_check.sh and /proc/loadavg) prints
+# first: a number from a busy machine is wrong, not noisy, and a figure whose
+# provenance was not written down cannot be defended later.
 #
 # Usage:
 #   examples/04_realtime/run_realtime.sh [--iterations N] [--period-us N] ...
@@ -17,27 +12,21 @@
 #
 # Environment:
 #   CPUSET    taskset -c argument, e.g. "3" or "2-3".  Unset: no taskset.
-#   CHRT      chrt -f priority, e.g. 80.  Unset: no chrt.  See the note below.
+#   CHRT      chrt -f priority, e.g. 80.  Unset: no chrt.  Prefer --rt-priority:
+#             chrt starts the whole process under SCHED_FIFO, so every thread
+#             XLA creates inherits it and the load and warm-up run at priority
+#             80, where --rt-priority promotes only the loop's thread, after
+#             the Runtime exists.  CHRT is here for a launcher that holds
+#             RLIMIT_RTPRIO when the process does not, and for comparison.
 #   NO_GUARD  set to anything to skip preloading the allocation counter.
 #   BIN       binary to run (default: build/bin/example_04_realtime)
-#   PYTHON    interpreter for the export (default: "uv run python", because uv
-#             comes from mise and is not on PATH in a non-interactive shell)
-#
-# CHRT vs --rt-priority: `chrt -f 80 ./example_04_realtime` starts the WHOLE
-# process under SCHED_FIFO, and every thread XLA creates afterwards inherits
-# that scheduling class -- including its pool threads, which then compete with
-# the control loop at real-time priority instead of yielding to it, and which
-# run the artifact load and the warm-up (unbounded work) at priority 80.  The
-# in-process `set_realtime_priority`, which the binary applies through
-# --rt-priority, runs after the Runtime exists and promotes only the calling
-# thread.  Prefer it.  CHRT is here for the case where RLIMIT_RTPRIO is granted
-# to the launcher and not to the process, and for comparing the two.
+#   PYTHON    interpreter for the export (default: "uv run python"; uv comes
+#             from mise and is not on PATH in a non-interactive shell)
 
 set -euo pipefail
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]] && [[ $# -eq 1 ]]; then
-  # The header comment is the help text; stopping at the first non-comment line
-  # means there is no line range to keep in step with edits.
+  # The header comment is the help text.
   awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"
   exit 0
 fi
@@ -54,9 +43,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 note() { echo "  [note] $*"; }
 
 # ------------------------------------------------------------------- audit
-#
-# rt_check.sh exits non-zero when anything is worth fixing, which is its whole
-# point; `|| true` keeps that from ending this script under `set -e`.
+
+# rt_check.sh exits non-zero when anything is worth fixing; keep going.
 if [[ -x tools/rt_check.sh ]]; then
   tools/rt_check.sh || true
 else
@@ -74,9 +62,8 @@ fi
 echo
 
 # ------------------------------------------------------------------ export
-#
-# Only when the artifact this example defaults to is the one being loaded: a
-# caller who passed --artifact somewhere else is managing their own.
+
+# Only for the default artifact: a caller who passed --artifact has their own.
 uses_default_artifact=1
 for arg in "$@"; do
   case "$arg" in
@@ -127,8 +114,7 @@ esac
 
 if [[ -z "${NO_GUARD:-}" ]]; then
   if [[ -f "$GUARD" ]]; then
-    # Absolute: the loader resolves a bare name against the library path, not
-    # against the working directory.
+    # Absolute: the loader resolves a bare name against the library path.
     export "$PRELOAD_VAR"="$ROOT/$GUARD"
     note "allocation census on ($PRELOAD_VAR=$ROOT/$GUARD)"
   else
@@ -144,6 +130,5 @@ echo
 echo "=== ${CMD[*]} ==="
 echo
 
-# exec, so signals reach the loop directly: this script must not sit between
-# a Ctrl-C and the handler that stops the loop and prints its report.
+# exec, so a Ctrl-C reaches the loop's handler and not this script.
 exec "${CMD[@]}"

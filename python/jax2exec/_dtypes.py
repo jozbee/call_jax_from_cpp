@@ -1,16 +1,8 @@
-"""The dtype table that the exporter, the sidecar and C++ all agree on.
+"""The dtype table that the exporter, the sidecar and the C++ loader agree on.
 
-Four facts about an element type have to line up for an artifact to be
-callable: what NumPy calls it (what the sidecar records), what PJRT calls it
-(``PJRT_Buffer_Type``), what C++ calls it (the element type of the arena the
-caller writes into), and how wide it is (``nbytes = numel * itemsize``).  They
-live in one table here so the sidecar stays readable by a loader that has no
-NumPy, and so a new dtype cannot be half-added.
-
-Every element type XLA supports but this project does not -- float16,
-bfloat16, complex64/128, int4, the float8 family, and the extended types JAX
-uses for PRNG keys -- is absent on purpose.  The exporter rejects them by name
-instead of letting a C++ caller reinterpret bytes it has no way to spell.
+The types XLA has and this project does not (float16, bfloat16, complex,
+float8, sub-byte integers, JAX's extended dtypes) are absent on purpose: the
+exporter rejects them by name rather than hand C++ bytes it cannot spell.
 """
 
 from __future__ import annotations
@@ -28,7 +20,6 @@ __all__ = [
     "DTypeInfo",
     "dtype_info",
     "dtype_name",
-    "is_supported",
     "unsupported_dtype_message",
 ]
 
@@ -43,16 +34,14 @@ class DTypeInfo:
     name : str
         The NumPy dtype name, which is what the sidecar stores.
     pjrt : str
-        The ``PJRT_Buffer_Type`` enumerator, without its ``PJRT_Buffer_Type_``
-        prefix.  These eleven have identical numeric values in PJRT C API 0.90
-        and 0.114.
+        The ``PJRT_Buffer_Type`` enumerator, without its prefix.
     cxx : str
         The C++ element type of the arena a caller reads or writes.
     itemsize : int
-        Width in bytes.  ``nbytes`` in the sidecar is ``numel * itemsize``.
+        Width in bytes; ``nbytes`` in the sidecar is ``numel * itemsize``.
     needs_x64 : bool
-        True for the 64-bit types, which JAX silently narrows to their 32-bit
-        counterparts unless ``jax_enable_x64`` is set before tracing.
+        True for the 64-bit types, which JAX narrows to 32 bits unless
+        ``jax_enable_x64`` is set before tracing.
     """
 
     name: str
@@ -82,8 +71,8 @@ SUPPORTED_DTYPES: Mapping[str, DTypeInfo] = MappingProxyType(
 # docs: end dtype-table
 
 
-#: The table's keys as they appear in error messages.  Spelled out rather than
-#: generated, because a reader of a failed export wants the short form.
+#: How an error message lists the table's keys.  Typed out, not generated,
+#: so the message stays short.
 SUPPORTED_SUMMARY = "bool, int8/16/32/64, uint8/16/32/64, float32, float64"
 
 
@@ -98,31 +87,14 @@ def dtype_name(dt: Any) -> str:
     Returns
     -------
     str
-        ``numpy.dtype(dt).name`` where that works.  JAX's extended dtypes
-        (PRNG keys, ``float0``) are not constructible as NumPy dtypes, so for
-        those the object's own name -- or its ``repr`` -- is returned, which
-        is enough for the error message that is about to be raised.
+        ``numpy.dtype(dt).name``.  JAX's extended dtypes (PRNG keys,
+        ``float0``) are not NumPy dtypes, so those return their own name,
+        which is enough for the error message about to be raised.
     """
     try:
         return np.dtype(dt).name
     except (TypeError, ValueError):
         return str(getattr(dt, "name", dt))
-
-
-def is_supported(dt: Any) -> bool:
-    """Return whether ``dt`` is in :data:`SUPPORTED_DTYPES`.
-
-    Parameters
-    ----------
-    dt : Any
-        A dtype or anything convertible to one.
-
-    Returns
-    -------
-    bool
-        True when the exporter can describe ``dt`` to a C++ caller.
-    """
-    return dtype_name(dt) in SUPPORTED_DTYPES
 
 
 def dtype_info(dt: Any) -> DTypeInfo:
@@ -141,9 +113,8 @@ def dtype_info(dt: Any) -> DTypeInfo:
     Raises
     ------
     ValueError
-        If ``dt`` is not a supported element type.  Callers with a position to
-        report should use :func:`unsupported_dtype_message` instead, which
-        names the offending argument.
+        If ``dt`` is not a supported element type.  A caller with a position
+        to report should use :func:`unsupported_dtype_message` instead.
     """
     name = dtype_name(dt)
     info = SUPPORTED_DTYPES.get(name)

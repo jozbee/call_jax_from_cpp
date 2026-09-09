@@ -1,37 +1,9 @@
-"""Unwrap the IFRT envelope that jaxlib puts around a serialized executable.
+"""Unwrap the IFRT envelope jaxlib puts around a serialized executable.
 
-Why this exists
----------------
-The C++ side loads a serialized executable through the PJRT C API, with
-``PJRT_Executable_DeserializeAndLoad``, which expects XLA's
-``ExecutableAndOptionsProto``.
-
-jaxlib no longer hands out those bytes directly. Since jaxlib moved its client
-onto IFRT, both ``client.serialize_executable(loaded)`` and
-``loaded.serialize()`` return the same thing: an IFRT envelope wrapping the
-PJRT bytes. Feeding it to the plugin fails with
-
-    PjRtCpuClient::DeserializeExecutable proto deserialization failed
-
-The envelope is a length-delimited header followed by the payload::
-
-    varint(header_length) || header_proto || pjrt_payload
-
-where the header names the serialization format and carries device and
-sharding information, and the payload is byte-for-byte the
-``ExecutableAndOptionsProto`` the PJRT C API wants. Verified at
-jaxlib 0.11.0: stripping the header makes the payload deserialize, and the
-resulting executable runs and returns correct results.
-
-This is an internal format, so everything here is defensive: the envelope is
-recognised by its own contents rather than assumed, an unrecognised blob is
-passed through unchanged (older jaxlib handed back plain PJRT bytes, and a
-future one may again), and the C++ loader keeps its ``.mlirbc`` fallback for
-the case where a future envelope slips past these checks. A bad unwrap
-therefore costs a compile at load time, never a wrong answer.
-
-See ``docs/developer/bumping-jax.md``: confirming this envelope is a step of
-every JAX bump.
+jaxlib returns ``varint(header_length) || header_proto || pjrt_payload``; the
+PJRT C API wants only the payload.  An envelope is recognised by its contents
+and anything else passes through unchanged, so a wrong guess costs a compile
+at load, never a wrong answer.  See ``docs/developer/bumping-jax.md``.
 """
 
 from __future__ import annotations
@@ -39,7 +11,7 @@ from __future__ import annotations
 # The format tag IFRT writes into the header for a PJRT-backed executable.
 _PJRT_IFRT_TAG = b"pjrt_ifrt"
 
-# Protobuf wire-format constants. Only what is needed to read the header.
+# Protobuf wire types, enough to walk the header.
 _WIRE_VARINT = 0
 _WIRE_FIXED64 = 1
 _WIRE_LENGTH_DELIMITED = 2
@@ -74,9 +46,8 @@ def _read_varint(data: bytes, offset: int) -> tuple[int, int]:
 def _header_contains_tag(header: bytes, tag: bytes) -> bool:
     """Whether any length-delimited field of ``header`` equals ``tag``.
 
-    Walking the fields rather than searching for the bytes anywhere means a
-    payload that happens to contain the same characters cannot be mistaken for
-    a header.
+    Walking the fields rather than searching for the bytes means a payload
+    that happens to contain the same characters is not mistaken for a header.
     """
     offset = 0
     while offset < len(header):
@@ -122,8 +93,8 @@ def unwrap(blob: bytes) -> tuple[bytes, str]:
     Notes
     -----
     Never raises for an unrecognised blob: it is returned unchanged, and the
-    C++ loader's ``.mlirbc`` fallback covers the case where it turns out not to
-    be loadable.
+    C++ loader's ``.mlirbc`` fallback covers the case where it turns out not
+    to be loadable.
     """
     if looks_like_pjrt_payload(blob):
         return blob, "as-is"
@@ -144,9 +115,6 @@ def unwrap(blob: bytes) -> tuple[bytes, str]:
                 "ExecutableAndOptionsProto"
             )
     except EnvelopeError:
-        # Unrecognised. Hand it back untouched rather than guessing: a wrong
-        # guess would write a file that fails at load, while passing it
-        # through at worst reproduces the behaviour of not having this module.
         return blob, "as-is"
 
     return payload, "ifrt-unwrapped"

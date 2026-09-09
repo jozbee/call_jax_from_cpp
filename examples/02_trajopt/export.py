@@ -1,51 +1,23 @@
 """Export the trajectory-optimisation workload the timing examples call.
 
-This is the public stand-in for a control workload.  The motivation for the
-whole project is nonlinear model-predictive control -- a solver that has to
-finish inside a fixed cycle, where the worst call in a million is the number
-that matters -- but no MPC code ships here.  What ships is a function with the
-*shape* of one: a nonlinear plant, a rollout over a horizon, a warm start, and
-an iteration count fixed at trace time.
+A stand-in for a model-predictive-control solver, with the *shape* of one and
+none of the meaning: a chain of ``nq`` masses with cubic springs, damping and
+dense ``tanh`` coupling, integrated with RK4 over an ``h``-step horizon by
+``lax.scan``, and ``n_iters`` warm-started gradient-descent iterations, each
+with an Armijo line search over ``N_TRIALS`` candidates.  float64, dense
+linear algebra, a reverse-mode gradient through all of it, about a
+millisecond per call.
 
-The plant is a chain of ``nq`` masses coupled by cubic springs, with viscous
-damping, a sine gravity-like restoring term, and a dense ``tanh`` coupling that
-makes every mass feel every other one.  It is integrated with RK4 over an
-``h``-step horizon by ``lax.scan``, and the controls are improved by
-``n_iters`` warm-started gradient-descent iterations, each choosing a step from
-``N_TRIALS`` backtracking candidates by an Armijo test.
+Every trip count is fixed at trace time: no ``while_loop``, no early exit.
+This function is the ruler the C++ side is measured with, and a workload
+whose cost depends on its data adds spread to ``max/p50`` that cannot be told
+apart from system jitter.  Only the results are data-dependent.
 
-Nothing about it is physically meaningful.  It exists to be *representative* --
-float64, dense linear algebra, transcendental functions, a scan, and a
-reverse-mode gradient through all of it -- and to take a millisecond or so per
-call, which is the regime a 1 kHz control loop lives in.
-
-Fixed trip counts, everywhere
------------------------------
-Every loop is unrolled or scanned with a count known at trace time.  There is
-no ``while_loop``, no convergence test that ends the solve early, and no branch
-that skips work.  That is deliberate: this function is the ruler the C++ side
-is measured with, and a workload whose *cost* depends on its data contributes
-algorithmic spread to ``max/p50`` that then cannot be told apart from system
-jitter.  Only the *results* -- the step actually chosen, ``backtracks_used``,
-``iterations_used`` -- are data-dependent.
-
-Presets
--------
 ``--preset default`` is the workload the benchmark, example 04 and the tests
-all describe; changing it invalidates every number recorded against it.
-``--preset small`` exports the same model at a quarter of the work, for a
-smoke test on a slow machine.  It is not a workload to time.
+describe; changing it invalidates every number recorded against it.
+``--preset small`` is a quarter of the work, for a smoke test, not for timing.
 
-Anything changed here has to be re-exported before it is called: a ``.binpb``
-embeds machine code for the host that produced it, and the C++ side reads its
-shapes out of the sidecar written beside it.
-
-Usage
------
-``python examples/02_trajopt/export.py --out artifacts --cases 4``
-
-``--no-cases`` writes the artifacts without the reference cases, which is what
-a re-export on a machine that only needs to *run* the function wants.
+    uv run python examples/02_trajopt/export.py --out artifacts --cases 4
 """
 
 from __future__ import annotations
@@ -57,17 +29,12 @@ from typing import Any, NamedTuple
 import jax
 import numpy as np
 
-# Before anything traces: without x64 JAX narrows every float64 argument to
-# float32 and says nothing, and a C++ caller writing doubles into a
-# 4-byte-per-element arena then walks off the end of it.  jax2exec.export
-# catches that and refuses, but the switch belongs here, where anyone reading
-# the file to find out what width it exports will look.
+# Before anything is traced: without x64, JAX narrows every float64 argument to
+# float32 and says nothing.  jax2exec.export refuses that, but the switch
+# belongs here, where a reader looks for the width.
 jax.config.update("jax_enable_x64", True)
 
-# Below the switch on purpose rather than with the imports above: everything
-# past this line either builds an array or traces one, and keeping the switch
-# visibly first is what stops a later edit from adding a constant that is
-# quietly narrowed.
+# Imported after the switch: everything past this line builds or traces arrays.
 import jax.numpy as jnp
 from jax import lax
 from jax2exec import export, write_reference_cases
@@ -93,8 +60,7 @@ PRESETS = {
 }
 # docs: end trajopt-presets
 
-#: Plant parameters the kernel unpacks; a property of the model rather than of
-#: its size, so it is a module constant.
+#: Plant parameters the kernel unpacks.
 NP = 8
 
 #: Line-search candidates per iteration.
@@ -109,32 +75,26 @@ ALPHA0 = 0.05
 #: Gradient norm below which an iteration counts as converged.
 GRAD_TOL = 1e-3
 
-#: Plant parameters in the order the kernel unpacks them: mass, k_lin, k_cub,
-#: damp, grav, k_couple, u_gain, dt_scale.  Kept identical to
-#: ``cjfc::workload::kNominalParams`` in ``examples/common/workload.hpp``; the
-#: C++ examples fill their ``params`` arena from that table.
+#: mass, k_lin, k_cub, damp, grav, k_couple, u_gain, dt_scale.  Must equal
+#: ``cjfc::workload::kNominalParams`` in ``examples/common/workload.hpp``.
 NOMINAL_PARAMS = np.array(
     [1.0, 4.0, 1.0, 0.5, 2.0, 0.5, 1.0, 1.0], dtype=np.float64
 )
 
 #: Cost weights: tracking, effort, terminal, smoothing.  float32 because the
-#: kernel takes them that way -- a knob, not a quantity the answer's accuracy
-#: depends on.  Identical to ``cjfc::workload::kWeights``.
+#: kernel takes them that way; must equal ``cjfc::workload::kWeights``.
 WEIGHTS = np.array([1.0, 0.01, 5.0, 0.1], dtype=np.float32)
 
-#: The values ``step`` is drawn from for the random cases.  Three magnitudes,
-#: so a C++ reader that truncated the counter to 8 or 16 bits fails on one of
-#: them rather than on none.
+#: Three magnitudes of ``step``, so a C++ reader that truncated the counter to
+#: 8 or 16 bits fails on one of them.
 STEP_CHOICES = (7, 100, 12345)
 
 
 class Solution(NamedTuple):
     """What one solve returns, in the order the C++ side indexes it.
 
-    A ``NamedTuple`` rather than a tuple or a dict on purpose: the exporter
-    reads output names out of the pytree, a plain tuple carries none (they
-    would become ``out_0``..``out_7``), and a dict flattens in *sorted* key
-    order, which would silently permute the results.
+    A ``NamedTuple``: a plain tuple carries no output names, and a dict
+    flattens in sorted key order, which would silently permute the results.
     """
 
     u_opt: jax.Array  #: float64 ``[h, nu]``: the optimised controls.
@@ -148,13 +108,9 @@ class Solution(NamedTuple):
 
 
 def line_search(objective, controls, grad, alphas):
-    """Evaluate the objective at every candidate step, in one scan.
-
-    A scan rather than a Python loop keeps the four evaluations as one
-    ``while`` in the executable instead of four copies of the rollout, which is
-    the difference between an op count that describes the workload and one that
-    describes the unroller.
-    """
+    """Evaluate the objective at every candidate step, as one scan: four
+    unrolled copies of the rollout would multiply the op count the fixture's
+    allocation figures are recorded against."""
 
     def trial(carry, alpha):
         return carry, objective(controls - alpha * grad)
@@ -163,11 +119,10 @@ def line_search(objective, controls, grad, alphas):
 
 
 class Model:
-    """The workload at one preset: its shapes, its plant, and its solver.
+    """The workload at one preset: its shapes, its plant and its solver.
 
     The sizes are attributes rather than module constants so that two presets
-    can exist in one process, which is what makes ``small`` testable without a
-    second copy of the model.  Everything traced reads them from ``self``.
+    can exist in one process, which is what makes ``small`` testable.
     """
 
     def __init__(self, preset: Preset) -> None:
@@ -177,28 +132,22 @@ class Model:
         self.n_iters = preset.n_iters
         self.nx = 2 * preset.nq
 
-        # Dense, deterministic, and traced as a constant rather than passed in:
-        # it is a property of the plant, not of the problem instance, and
-        # folding it into the executable is what makes the coupling term a
-        # single matmul.
+        # Traced as a constant: a property of the plant, not of the instance,
+        # and folded in it makes the coupling term a single matmul.
         index = np.arange(self.nq, dtype=np.float64)
         self.w_couple = (
             np.cos(0.37 * index[:, None] + 0.11 * index[None, :]) / self.nq
         )
 
-        # One actuator every few masses, so the controls cannot address the
-        # chain directly and the optimiser has to work through the dynamics.
+        # One actuator every few masses, so the optimiser has to work through
+        # the dynamics rather than address the chain directly.
         self.b_act = np.zeros((self.nq, self.nu), dtype=np.float64)
         rows = np.rint(np.linspace(0, self.nq - 1, self.nu)).astype(int)
         self.b_act[rows, np.arange(self.nu)] = 1.0
 
     def specs(self) -> tuple[jax.ShapeDtypeStruct, ...]:
-        """The argument shapes the function is traced with, in call order.
-
-        This table and ``examples/common/workload.hpp`` must agree; the C++
-        side checks dtypes and ranks against it at load and refuses to run
-        otherwise.
-        """
+        """The argument shapes, in call order.  Must agree with
+        ``examples/common/workload.hpp``, which checks them at load."""
         return (
             jax.ShapeDtypeStruct((self.nx,), jnp.float64),  # x0
             jax.ShapeDtypeStruct((self.h, self.nx), jnp.float64),  # x_ref
@@ -210,14 +159,10 @@ class Model:
         )
 
     def reference_trajectory(self, k: int) -> np.ndarray:
-        """The reference the C++ examples feed at cycle ``k``.
-
-        The NumPy twin of ``cjfc::workload::write_reference`` in
-        ``examples/common/workload.hpp``, and it has to stay identical: case 0
-        is what makes a C++ run and a Python run comparable, and the two are
-        only comparable if they solved the same problem.  A slow sine sweeping
-        along the positions, velocities left at zero.
-        """
+        """The reference the C++ examples feed at cycle ``k``: a slow sine
+        along the positions, velocities zero.  Must stay identical to
+        ``cjfc::workload::write_reference``, or case 0 stops being comparable
+        between a C++ run and a Python run."""
         t = np.arange(self.h, dtype=np.float64)[:, None]
         j = np.arange(self.nq, dtype=np.float64)[None, :]
         positions = 0.3 * np.sin(0.05 * (k + t) + 0.2 * j)
@@ -225,14 +170,9 @@ class Model:
 
     # docs: begin trajopt-model
     def dynamics(self, x, u, p):
-        """Continuous-time acceleration of the chain.
-
-        The spring force between neighbours is cubic, so the plant is genuinely
-        nonlinear rather than a linear system wearing a costume; ``tanh`` of a
-        dense mixing matrix couples every mass to every other one, which is
-        what keeps the reverse-mode gradient from collapsing into something
-        sparse and cheap.
-        """
+        """Acceleration of the chain: cubic springs between neighbours,
+        damping, a sine restoring term, and ``tanh`` of a dense mixing matrix
+        so that every mass feels every other and the gradient stays dense."""
         mass = p[0]
         k_lin = p[1]
         k_cub = p[2]
@@ -246,9 +186,7 @@ class Model:
         dq = q[1:] - q[:-1]
         fs = k_lin * dq + k_cub * dq**3
 
-        # Each spring pushes its two ends in opposite directions; the
-        # scatter-add is the chain's incidence matrix written without
-        # materialising it.
+        # Each spring pushes its two ends in opposite directions.
         f = jnp.zeros(self.nq, dtype=x.dtype).at[:-1].add(fs).at[1:].add(-fs)
         f = (
             f
@@ -260,13 +198,9 @@ class Model:
         return jnp.concatenate([qd, f / mass])
 
     def rk4(self, x, u, p):
-        """One RK4 step with a zero-order hold on ``u``.
-
-        RK4 rather than Euler because the four stages put four dynamics
-        evaluations -- and four transposed ones in the gradient -- into every
-        horizon step, which is where the arithmetic that makes this workload
-        worth timing comes from.
-        """
+        """One RK4 step with a zero-order hold on ``u``: four dynamics
+        evaluations per horizon step, which is where the arithmetic comes
+        from."""
         dt = DT * p[7]
         k1 = self.dynamics(x, u, p)
         k2 = self.dynamics(x + 0.5 * dt * k1, u, p)
@@ -275,7 +209,7 @@ class Model:
         return x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
 
     def rollout(self, x0, controls, p):
-        """Integrate the plant forward under ``controls``; returns ``[h, nx]``."""
+        """Integrate the plant forward under ``controls``: ``[h, nx]``."""
 
         def advance(x, u):
             nxt = self.rk4(x, u, p)
@@ -284,12 +218,9 @@ class Model:
         return lax.scan(advance, x0, controls)[1]
 
     def total_cost(self, controls, x0, x_ref, p, w, use_terminal):
-        """Tracking, effort, smoothing, and an optional terminal term.
-
-        ``use_terminal`` selects with ``jnp.where`` rather than with a Python
-        ``if``: it is a traced value, and both arms are evaluated either way,
-        so the cost of a call does not depend on it.
-        """
+        """Tracking, effort, smoothing, and a terminal term selected with
+        ``jnp.where``, so that both arms run and the cost of a call does not
+        depend on ``use_terminal``."""
         err = self.rollout(x0, controls, p) - x_ref
         cost = (
             w[0] * jnp.sum(err**2)
@@ -305,21 +236,12 @@ class Model:
     def solve(self, x0, x_ref, params, u_warm, weights, use_terminal, step):
         """Improve ``u_warm`` for the horizon starting at ``x0``.
 
-        Every input reaches an output, which is not a stylistic point: XLA
-        prunes a parameter that reaches nothing, the executable then takes
-        fewer arguments than the sidecar declares, and the C++ side fails at
-        the first call with "Execution supplied 7 buffers but compiled program
-        expected 4".  Inputs 0-5 feed the cost; ``step`` feeds nothing
-        numerical, so it feeds ``step_next = step + 1`` -- which is also the
-        exact, integer check a C++ loop uses to prove the executable read the
-        inputs it just wrote.
-
-        The iteration count, the number of line-search candidates and the
-        horizon are all fixed at trace time, so two calls on different data
-        cost the same.
+        Every input reaches an output, or XLA prunes it and the executable
+        takes fewer arguments than the sidecar declares.  ``step`` feeds
+        nothing numerical, so it feeds ``step_next = step + 1``: the exact
+        check a C++ loop uses to prove the executable read what it wrote.
         """
-        # float64 throughout the solve; the weights arrive as float32 because
-        # they are a tuning knob, and mixing widths inside the gradient is not.
+        # The weights arrive as float32; the solve runs in float64 throughout.
         w = weights.astype(jnp.float64)
 
         def objective(controls):
@@ -343,8 +265,8 @@ class Model:
                 jnp.any(armijo), jnp.argmax(armijo), jnp.argmin(trials)
             ).astype(jnp.int32)
 
-            # Never accept an increase.  This is what makes cost_history
-            # non-increasing, which is the invariant the export checks.
+            # Never accept an increase: cost_history is non-increasing, and the
+            # export checks that.
             controls = jnp.where(
                 trials[chosen] < cost,
                 controls - alphas[chosen] * grad,
@@ -354,17 +276,14 @@ class Model:
             costs.append(cost)
             gnorms.append(jnp.sqrt(gg))
 
-        # An iteration counts as used when its gradient was still large: the
-        # arithmetic ran regardless, so this reports convergence without ever
-        # having skipped work for it.
+        # Convergence is reported, never acted on: the arithmetic ran anyway.
         used = jnp.sum(jnp.stack(gnorms) > GRAD_TOL).astype(jnp.int32)
 
         return Solution(
             u_opt=controls,
             x_pred=self.rollout(x0, controls, params),
             cost=objective(controls).astype(jnp.float32),
-            # The gradient at the last iterate a gradient was taken at.  Taking
-            # one more would cost a sixth backward pass for a diagnostic.
+            # The last gradient taken; one more would be a sixth backward pass.
             grad_norm=gnorms[-1],
             cost_history=jnp.stack(costs),
             iterations_used=used,
@@ -378,15 +297,10 @@ class Model:
 def build_cases(model: Model, count: int, seed: int) -> list[tuple[Any, ...]]:
     """Build ``count`` argument tuples: case 0 nominal, the rest perturbed.
 
-    Case 0 is the one the C++ tests key on, so it is fixed: zero state, the
-    reference at cycle 0, nominal plant, cold start, terminal cost on, step 0.
-    The rest perturb the state, the plant and the warm start, alternate the
-    terminal-cost branch and vary the step counter, so a case sweep exercises
-    both branches of the kernel and several magnitudes of the counter.
-
-    Their references are the same sinusoid at a different cycle rather than
-    noise: a random ``x_ref`` gives the solver nothing to track, and a case
-    that is unsolvable is a weak test of a solver.
+    Case 0 is what the C++ tests key on, so it is fixed.  The rest perturb the
+    state, the plant and the warm start, alternate the terminal-cost branch
+    and vary the step counter.  Their references are the same sinusoid at a
+    later cycle: a random ``x_ref`` gives the solver nothing to track.
     """
     cases: list[tuple[Any, ...]] = [
         (
@@ -424,11 +338,9 @@ def _fail(message: str) -> SystemExit:
 def _validate(case: int, args: tuple[Any, ...], result: Solution) -> None:
     """Refuse to freeze a case that is not finite or not self-consistent.
 
-    A NaN reference passes every relative-error comparison silently -- each
-    comparison against NaN is false, so nothing exceeds the tolerance -- which
-    would turn the strongest test in the suite into one that cannot fail.  The
-    step check is the same one the C++ loop makes, done here so that a broken
-    export is caught before it reaches a benchmark.
+    A NaN reference passes every relative-error comparison silently -- a
+    comparison with NaN is false -- which would turn the strongest test in
+    the suite into one that cannot fail.
     """
     for name, value in zip(Solution._fields, result):
         array = np.asarray(value)
@@ -445,9 +357,7 @@ def _validate(case: int, args: tuple[Any, ...], result: Solution) -> None:
             f"case {case} returned step_next={step_next}, expected {want}"
         )
 
-    # The line search never accepts an increase, so this holds by
-    # construction.  When it stops holding, the solve is no longer descending,
-    # and a frozen reference case would record that as the right answer.
+    # The line search never accepts an increase, so this holds by construction.
     history = np.asarray(result.cost_history)
     if np.any(np.diff(history) > 0.0):
         raise _fail(
@@ -483,7 +393,8 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument(
         "--no-cases",
         action="store_true",
-        help="write the artifacts without the reference cases",
+        help="write the artifacts without the reference cases; a machine "
+        "that only runs the function needs none",
     )
     return parser.parse_args(argv)
 
@@ -508,12 +419,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {result.mlir}")
     print(f"wrote {result.sidecar}")
 
-    # Run every case through the compiled function before anything is frozen:
-    # write_reference_cases would happily record a broken answer.
+    # Validate before freezing: write_reference_cases records what it is given.
     cases = build_cases(model, max(args.cases, 1), args.seed)
-    solutions = [result.compiled(*case_args) for case_args in cases]
-    for index, (case_args, solution) in enumerate(zip(cases, solutions)):
-        _validate(index, case_args, solution)
+    for index, case_args in enumerate(cases):
+        _validate(index, case_args, result.compiled(*case_args))
 
     if not args.no_cases:
         manifest = write_reference_cases(

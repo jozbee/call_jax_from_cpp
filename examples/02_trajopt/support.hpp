@@ -3,10 +3,8 @@
  * @brief Everything `trajopt.cpp` needs that is not the timed loop: the flags,
  *        the finite-output audit, the fault injector and the two reports.
  *
- * Split out so that the example itself is the measurement -- load, warm up,
- * arm, call, record -- and so that the loop body fits on one page.  The audit
- * and the injector are the exceptions to "everything here runs outside the
- * window": both are called from inside it, and neither allocates.
+ * Only `all_finite` and `inject_fault` are called from inside the armed
+ * window; neither allocates.
  */
 #pragma once
 
@@ -30,17 +28,14 @@
 
 namespace trajopt {
 
-/// The clock for every measurement here.  Not `high_resolution_clock`, which
-/// is an alias for the wall clock on some standard libraries: an NTP step
-/// during a run would show up as a spectacular outlier that never happened.
+/// Not `high_resolution_clock`, which is the wall clock on some standard
+/// libraries: an NTP step would show up as an outlier that never happened.
 using Clock = std::chrono::steady_clock;
 
-/// @brief Milliseconds between two samples of `Clock`.
 inline double millis(Clock::time_point start, Clock::time_point end) {
   return std::chrono::duration<double, std::milli>(end - start).count();
 }
 
-/// @brief Microseconds between two samples of `Clock`.
 inline double micros(Clock::time_point start, Clock::time_point end) {
   return std::chrono::duration<double, std::micro>(end - start).count();
 }
@@ -66,7 +61,6 @@ constexpr char kUsage[] =
     "\n"
     "Exit codes: 0 ok, 1 error, 2 wrong answer, 3 allocation gate, 4 no guard.";
 
-/// @brief Parse @p argv against the flags `kUsage` documents.
 inline cjfc::Cli make_cli(int argc, char** argv) {
   return cjfc::Cli(argc, argv,
                    {"artifact", "iterations", "warmup", "threads", "async",
@@ -75,7 +69,7 @@ inline cjfc::Cli make_cli(int argc, char** argv) {
                    kUsage);
 }
 
-/// Which cycle the fault injector corrupts, and what it does to it.
+/// What `inject_fault` does to cycle `kFaultCycle`.
 enum class Fault { None, Step, NonFinite };
 
 /// Everything the command line can say, resolved once at startup.
@@ -94,9 +88,8 @@ struct Options {
   bool quiet = false;
 };
 
-/// Read the command line into `Options`, refusing a value rather than ignoring
-/// it: a gate nobody spelled correctly is a gate that passes everything, which
-/// is the failure this project takes least well.
+/// Read the command line, refusing a misspelled value rather than ignoring it:
+/// a gate nobody spelled correctly is a gate that passes everything.
 inline Options parse_options(const cjfc::Cli& cli) {
   Options options;
   options.artifact = cli.get("artifact", options.artifact);
@@ -134,10 +127,8 @@ inline Options parse_options(const cjfc::Cli& cli) {
   return options;
 }
 
-/// @brief Say on stderr that this host cannot produce a usable tail number.
-///
-/// Warned about on stderr even under `--quiet`: a latency number from a busy
-/// machine is not noisy, it is wrong.
+/// On stderr even under `--quiet`: a latency number from a busy machine is not
+/// noisy, it is wrong.
 inline void warn_if_busy(const cjfc::HostEnv& env) {
   if (env.busy) {
     std::fprintf(stderr,
@@ -150,22 +141,15 @@ inline void warn_if_busy(const cjfc::HostEnv& env) {
 
 // ------------------------------------------------------ the per-call checks
 
-/**
- * @brief One floating-point output arena, resolved once for the audit.
- *
- * Resolved before the loop rather than looked up inside it: the arenas live as
- * long as the `Function`, so their addresses and lengths are loop invariants,
- * and the audit then costs a walk over memory that is already hot instead of a
- * walk through the spec vectors.
- */
+/// One float output arena, resolved before the loop: the arenas live as long
+/// as the `Function`, so the audit walks memory rather than spec vectors.
 struct FloatArena {
-  const void* data;   ///< The arena itself.
-  std::size_t numel;  ///< Elements in it.
-  bool is_double;     ///< float64 when true, float32 when false.
+  const void* data;
+  std::size_t numel;
+  bool is_double;
 };
 
-/// @brief Whether every element of every audited arena is finite.
-/// Allocation-free and branch-light: safe to call from the timed loop.
+/// Allocation-free: called from inside the timed loop.
 inline bool all_finite(const std::vector<FloatArena>& arenas) {
   for (const FloatArena& arena : arenas) {
     if (arena.is_double) {
@@ -187,7 +171,6 @@ inline bool all_finite(const std::vector<FloatArena>& arenas) {
   return true;
 }
 
-/// @brief The floating-point outputs of @p function, in index order.
 inline std::vector<FloatArena> float_outputs(const pjrt::Function& function) {
   std::vector<FloatArena> arenas;
   arenas.reserve(function.num_outputs());
@@ -202,47 +185,30 @@ inline std::vector<FloatArena> float_outputs(const pjrt::Function& function) {
   return arenas;
 }
 
-/**
- * @brief Corrupts exactly one cycle, so that a gate can be watched firing.
- *
- * A correctness gate nobody has seen fail is not evidence that the thing it
- * guards is right; it is only evidence that the gate is quiet, and those two
- * look identical from outside.  Both faults are applied after the call and
- * before the check, which is where a real one would appear.
- *
- * Called from inside the armed window: an enum comparison and one store, no
- * allocation.
- */
-class FaultInjector {
- public:
-  FaultInjector(Fault fault, std::int64_t cycle)
-      : fault_(fault), cycle_(cycle) {}
+/// The first cycle after the cold call, so the gate fires however short the
+/// run is.
+constexpr std::int64_t kFaultCycle = 1;
 
-  void apply(pjrt::Function& function, const std::vector<FloatArena>& audited,
-             std::int64_t k) const {
-    if (k != cycle_) {
-      return;
-    }
-    if (fault_ == Fault::Step) {
-      // Desynchronise the recirculated counter: the next cycle's check sees a
-      // step that does not follow from the last one.
-      *function.input<std::int32_t>(cjfc::workload::kInStep) += 1;
-    }
-    if (fault_ == Fault::NonFinite && !audited.empty()) {
-      // The audit reads the output arenas, which the API hands out const
-      // because a caller has no business writing them.  Writing one here is
-      // the whole point of the fault, so the cast is deliberate and confined
-      // to this branch.
-      auto* poisoned =
-          static_cast<double*>(const_cast<void*>(audited.front().data));
-      poisoned[0] = std::numeric_limits<double>::quiet_NaN();
-    }
+/// Corrupt cycle `kFaultCycle`, after the call and before the check, where a
+/// real fault would appear.  A gate nobody has seen fail is not evidence of
+/// anything: a quiet gate and a right answer look identical from outside.
+inline void inject_fault(Fault fault, pjrt::Function& function,
+                         const std::vector<FloatArena>& audited,
+                         std::int64_t k) {
+  if (fault == Fault::None || k != kFaultCycle) {
+    return;
   }
-
- private:
-  Fault fault_;
-  std::int64_t cycle_;
-};
+  if (fault == Fault::Step) {
+    // The next cycle's check sees a step that does not follow from this one.
+    *function.input<std::int32_t>(cjfc::workload::kInStep) += 1;
+  }
+  if (fault == Fault::NonFinite && !audited.empty()) {
+    // The outputs are const to callers; writing one is the whole point here.
+    auto* poisoned =
+        static_cast<double*>(const_cast<void*>(audited.front().data));
+    poisoned[0] = std::numeric_limits<double>::quiet_NaN();
+  }
+}
 
 // ------------------------------------------------------------- the reports
 
@@ -264,7 +230,6 @@ struct Outcome {
   int exit_code = cjfc::kExitOk;
 };
 
-/// @brief Read the solver's own answer out of the output arenas.
 inline void read_solution(const pjrt::Function& function, Outcome& outcome) {
   outcome.cost = *function.output<float>(cjfc::workload::kOutCost);
   outcome.grad_norm = *function.output<double>(cjfc::workload::kOutGradNorm);
@@ -274,9 +239,6 @@ inline void read_solution(const pjrt::Function& function, Outcome& outcome) {
       *function.output<std::int32_t>(cjfc::workload::kOutBacktracksUsed);
 }
 
-/// @brief Print the run: what was loaded, the tail of the call latency, the
-///        allocation census and the two correctness checks.  Silent under
-///        `--quiet`.
 inline void print_report(const Options& options, const pjrt::Runtime& runtime,
                          const pjrt::Function& function, const Outcome& outcome,
                          const pjrt::AllocGuard& guard) {
@@ -315,10 +277,7 @@ inline void print_report(const Options& options, const pjrt::Runtime& runtime,
       static_cast<int>(outcome.backtracks_used));
 }
 
-/// @brief Write every raw sample as `index,ns`.
-/// @throws std::runtime_error when the file cannot be written, because a
-///         samples file the caller asked for and did not get is worse than a
-///         failure.
+/// A samples file that was asked for and not written is worse than a failure.
 inline void write_samples(const Options& options,
                           const pjrt::LatencyRecorder& compute) {
   if (!compute.write_samples(options.samples_path.c_str())) {
@@ -326,8 +285,7 @@ inline void write_samples(const Options& options,
   }
 }
 
-/// @brief Write the JSON report: the summary, and everything that decides
-///        whether the summary means anything.
+/// The summary, and everything that decides whether the summary means anything.
 inline void write_report(const Options& options, const cjfc::HostEnv& env,
                          const pjrt::Runtime& runtime,
                          const pjrt::Function& function,
@@ -352,9 +310,8 @@ inline void write_report(const Options& options, const cjfc::HostEnv& env,
   report["runtime"] =
       cjfc::runtime_json(runtime, function, outcome.runtime_ms, outcome.load_ms,
                          outcome.first_call_us);
-  // The shared block nests these; the schema names them at the top of the
-  // runtime object, so they appear in both places rather than a reader having
-  // to know which example wrote the file.
+  // Also at the top of the runtime object, where a reader of an older report
+  // looks for them.
   report["runtime"]["load_kind"] = cjfc::load_kind_name(function.load_kind());
   report["runtime"]["runtime_ms"] = outcome.runtime_ms;
   report["runtime"]["load_ms"] = outcome.load_ms;
