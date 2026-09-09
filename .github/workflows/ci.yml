@@ -231,9 +231,16 @@ jobs:
             -e PJRT_CPU_PLUGIN=/workspace/build/plugin/libpjrt_c_api_cpu_plugin.so \
             ci make test
 
-      # Example 05 needs a ROS 2 image rather than the dev one, artifacts/arm
-      # (exported by `make test` above), and a plugin to load, which the arm64
-      # runner has none of.
+      # Example 05 needs artifacts/arm, a ROS 2 image rather than the dev one,
+      # and a plugin to load, which the arm64 runner has none of. The export is
+      # its own step rather than a side effect of the test suite: a no-op when
+      # the .binpb files are up to date, and the run.sh precondition either way.
+      - name: make export
+        if: ${{ matrix.arch == 'x86_64' && steps.plugin.outputs.present == 'true' }}
+        run: |
+          docker compose -f docker/compose.yml run --rm --user root \
+            ci make export
+
       - name: Build the ros2 image
         if: ${{ matrix.arch == 'x86_64' && steps.plugin.outputs.present == 'true' }}
         uses: docker/build-push-action@v7

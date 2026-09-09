@@ -66,7 +66,7 @@ FENCE = re.compile(
 #: The two homes of a measured figure.
 FIGURE_HOMES = ("docs/developer/", "docs/benchmarks.md")
 
-#: A duration: ``2027 us``, ``1.5 ms``, ``950,000 µs``.
+#: A duration: ``2027 us``, ``1.5 ms``, and the micro-sign spelling of ``us``.
 DURATION = re.compile(r"(?<![\w.])\d[\d,]*(?:\.\d+)?\s*(?:µs|us|ms)\b")
 
 #: A ratio: ``2.4x``, ``4x``.  The ``\b`` excludes a size like ``1024x768``.
@@ -144,7 +144,8 @@ def message_prefixes(root):
     """The first string literal of each ``throw`` in the library: the part of
     the message a reader can grep for, before a path or an index is appended.
     Anything shorter than :data:`MIN_DISTINCTIVE` is a fragment, not a
-    message, and is dropped."""
+    message, and is dropped.
+    """
     found = {}
     for path in sorted(pathlib.Path(root, "src/pjrt_exec").glob("*.cpp")):
         for expression in throw_arguments(path.read_text()):
@@ -164,7 +165,8 @@ def jax2exec():
 
 def test_every_supported_dtype_is_in_the_exporting_guide(repo, jax2exec):
     """A type added to the exporter and not to the table is a type nobody
-    knows they may use."""
+    knows they may use.
+    """
     guide = pathlib.Path(repo.root, "docs/guides/exporting.md").read_text()
     missing = [name for name in jax2exec.SUPPORTED_DTYPES if name not in guide]
     assert not missing, f"not in docs/guides/exporting.md: {missing}"
@@ -172,7 +174,8 @@ def test_every_supported_dtype_is_in_the_exporting_guide(repo, jax2exec):
 
 def test_every_throw_message_has_a_row_in_the_debugging_guide(repo):
     """Every distinct failure the loader can report has a row in the table
-    that is the first thing anyone hits when a load fails."""
+    that is the first thing anyone hits when a load fails.
+    """
     guide = pathlib.Path(repo.root, "docs/guides/debugging.md").read_text()
     prefixes = message_prefixes(repo.root)
     assert prefixes, "no throw messages found; did the sources move?"
@@ -198,7 +201,8 @@ def included_markers(root):
 
 def test_every_included_marker_exists(repo):
     """Each ``literalinclude`` resolves to a file and finds its marker.  A
-    renamed marker only warns in Sphinx and renders an empty block."""
+    renamed marker only warns in Sphinx and renders an empty block.
+    """
     broken = []
     found = 0
     for page, spelled, target, name in included_markers(repo.root):
@@ -214,7 +218,8 @@ def test_every_included_marker_exists(repo):
 
 def test_unused_markers_are_only_reported(repo):
     """A marker no page includes is untidy, not wrong; failing on it would
-    push someone into deleting the marker instead of writing the page."""
+    push someone into deleting the marker instead of writing the page.
+    """
     referenced = {
         (target, name)
         for _page, _spelled, target, name in included_markers(repo.root)
@@ -293,7 +298,8 @@ def entry_pages(root):
 def test_every_guide_and_example_page_states_what_it_assumes(repo):
     """A reader arrives from a search engine, not from the page before, so
     every guide and example opens with the italic *Assumes* line.  A
-    convention rather than a mechanism, which is why it is asserted."""
+    convention rather than a mechanism, which is why it is asserted.
+    """
     missing = []
     for page in entry_pages(repo.root):
         lines = page.read_text().splitlines()
@@ -320,7 +326,8 @@ def test_glossary_terms_are_used(repo):
     never made or an entry that outlived its page.  Reported, not failed,
     since a term added ahead of its page is legitimate.  Case-insensitive,
     as Sphinx's lookup is, and the ``title <target>`` form is compared on
-    its target."""
+    its target.
+    """
     glossary = pathlib.Path(repo.root, "docs/background/glossary.md")
     blocks = [
         block.group(0)
@@ -360,7 +367,8 @@ def test_no_substitution_is_wrapped_in_inline_code(repo):
     """MyST does not substitute inside inline code, and the result is valid
     markdown, so the build stays green while the page tells a reader the
     branch is ``{{ xla_fork_branch }}``.  ``docs/conf.py`` publishes a
-    ``<key>_code`` variant of every value for this."""
+    ``<key>_code`` variant of every value for this.
+    """
     wrapped = re.compile(r"`\{\{\s*[a-z_]+\s*\}\}`")
     offenders = [
         f"{path.relative_to(repo.root)}:{number}: {line.strip()}"
@@ -379,7 +387,8 @@ def test_no_substitution_is_wrapped_in_inline_code(repo):
 def test_the_pinned_jax_version_agrees_everywhere(repo, jax2exec):
     """``versions.env`` is the single source of truth; the others follow it.
     The exporter refuses a version it was not tested with, so a pin that
-    drifts turns into a refusal at export time."""
+    drifts turns into a refusal at export time.
+    """
     env_text = pathlib.Path(repo.root, "versions.env").read_text()
     versions = dict(
         line.split("=", 1)

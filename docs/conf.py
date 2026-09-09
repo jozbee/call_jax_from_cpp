@@ -1,10 +1,10 @@
 """Sphinx configuration for the call_jax_from_cpp documentation.
 
-Two things a stock ``conf.py`` does not do: Doxygen runs at import time, so
-the XML Breathe reads always matches the headers on disk (``sphinx-autobuild``
-re-imports this module, which is what regenerates it); and every pinned
-version is read out of ``versions.env`` and injected as a MyST substitution,
-so no page hand-types one. The build runs with ``-W``: a warning is a failure.
+Two things a stock ``conf.py`` does not do. Doxygen runs at import time, so
+the XML Breathe reads always matches the headers on disk; ``sphinx-autobuild``
+re-imports this module, which is what regenerates it. Every pinned version is
+read out of ``versions.env`` and injected as a MyST substitution, so no page
+hand-types one. The build runs with ``-W``: a warning is a failure.
 """
 
 from __future__ import annotations

@@ -127,7 +127,8 @@ def _loadavg() -> tuple[float, float, float]:
 
 def _in_container() -> bool:
     """The same three signals ``examples/common/rt_env.hpp`` and
-    ``tools/rt_check.sh`` use, so all three agree about one host."""
+    ``tools/rt_check.sh`` use, so all three agree about one host.
+    """
     return (
         Path("/.dockerenv").exists()
         or Path("/run/.containerenv").exists()
@@ -142,9 +143,9 @@ def _parse_cpulist(text: str) -> tuple[int, ...]:
         part = part.strip()
         if not part or part == "(null)":
             continue
-        first, _, last = part.partition("-")
+        first, dash, last = part.partition("-")
         try:
-            cpus.update(range(int(first), int(last or first) + 1))
+            cpus.update(range(int(first), int(last if dash else first) + 1))
         except ValueError:
             continue
     return tuple(sorted(cpus))
@@ -504,7 +505,8 @@ class Build:
 
     def bin(self, name: str) -> Path:
         """A built binary.  Missing after a successful build is a defect in
-        the build, not a reason to skip."""
+        the build, not a reason to skip.
+        """
         path = self.repo.bin(name)
         if not path.is_file():
             pytest.fail(
@@ -774,7 +776,8 @@ class Host:
     def busy(self) -> bool:
         """Whether the session started on a loaded machine.  The threshold is
         ``examples/common/rt_env.hpp``'s, so a C++ report and a Python skip
-        never disagree about one host."""
+        never disagree about one host.
+        """
         return self.loadavg[0] > 1.0
 
 
@@ -815,7 +818,8 @@ class TmpArtifacts:
 
     def copy(self, name: str = "basic") -> Path:
         """Copy an artifact set into a fresh directory and return its base
-        path -- no extension, as ``pjrt::Runtime`` is handed it."""
+        path -- no extension, as ``pjrt::Runtime`` is handed it.
+        """
         into = self._root / f"copy{self._made}"
         self._made += 1
         into.mkdir(parents=True, exist_ok=True)

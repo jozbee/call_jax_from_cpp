@@ -77,9 +77,9 @@ class Error : public std::runtime_error {
 /**
  * @brief An artifact could not be loaded.
  *
- * The failures a caller can act on -- a missing plugin, a sidecar that
+ * The failures a caller can act on: a missing plugin, a sidecar that
  * disagrees with its executable, an unsupported element type, a `.binpb`
- * built for a wider instruction set -- and all of them happen at load.
+ * built for a wider instruction set.  All of them happen at load.
  */
 class LoadError : public std::runtime_error {
  public:
@@ -231,7 +231,7 @@ class Runtime {
   std::string describe() const;
 
  private:
-  /// `dlopen` the plugin, resolve `GetPjrtApi`, `PJRT_Plugin_Initialize`.
+  /// `dlopen` the plugin, resolve `GetPjrtApi`, call `PJRT_Plugin_Initialize`.
   void load_plugin(const std::string& path);
 
   /// Fill `plugin_` from `PJRT_Plugin_Attributes` and the API version.  Runs
@@ -242,8 +242,9 @@ class Runtime {
   /// `sync_mode_`; retries without a rejected option when allowed.
   void create_client();
 
-  /// Shared by the destructor and the constructor's failure path, which has
-  /// no destructor to fall back on.
+  /// Destroy the client if one exists, swallowing any error.  Shared by the
+  /// destructor and the constructor's failure path, which has no destructor
+  /// to fall back on.
   void destroy_client() noexcept;
 
   RuntimeOptions options_;
@@ -593,10 +594,9 @@ class Function {
   // destroy a buffer the next call still needs.
   std::vector<std::int64_t> non_donatable_;
 
-  // Filled at load and passed to every execute; value-initialized and assigned
-  // field by field, never a designated initializer: this header version grew
-  // four trailing fields that a designated initializer would silently leave
-  // uninitialized.
+  // Filled at load and passed to every execute.  Value-initialized, then
+  // assigned field by field, so no trailing field the vendored header carries
+  // is ever left uninitialized, as a designated initializer would leave it.
   PJRT_ExecuteOptions execute_options_{};
 
   PJRT_LoadedExecutable* executable_ = nullptr;

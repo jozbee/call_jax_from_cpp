@@ -26,8 +26,9 @@ SCRIPT = Path(__file__).resolve().parents[2] / "examples/02_trajopt/export.py"
 @pytest.fixture(scope="module")
 def export_module():
     """``examples/02_trajopt/export.py``, loaded under a name of its own:
-    several scripts here are called ``export.py``, and whichever reached
-    ``sys.modules`` first would answer for all of them."""
+    three example scripts are called ``export.py``, and whichever reached
+    ``sys.modules`` first would answer for all of them.
+    """
     pytest.importorskip("jax2exec", reason="the script imports the exporter")
     spec = importlib.util.spec_from_file_location("trajopt_export", SCRIPT)
     assert spec is not None and spec.loader is not None
@@ -47,7 +48,8 @@ def small(export_module):
 def test_the_default_preset_is_the_one_everything_else_pins(export_module):
     """24 masses, 6 actuators, a 50-step horizon, 5 iterations -- spelled out,
     because ``x_ref`` is ``f64[50,48]`` in three other tests and every
-    recorded latency figure describes this size."""
+    recorded latency figure describes this size.
+    """
     preset = export_module.PRESETS["default"]
     assert (preset.nq, preset.nu, preset.h, preset.n_iters) == (24, 6, 50, 5)
 
@@ -81,7 +83,8 @@ def test_small_lowers(small):
 def test_every_actuator_drives_a_different_mass(small):
     """``b_act`` has one 1 per column, on distinct rows.
     ``rint(linspace(0, nq - 1, nu))`` can collide when ``nu`` approaches
-    ``nq``, and a duplicated row would silently weaken the problem."""
+    ``nq``, and a duplicated row would silently weaken the problem.
+    """
     rows = [int(column.argmax()) for column in small.b_act.T]
     assert small.b_act.sum() == small.nu
     assert len(set(rows)) == small.nu

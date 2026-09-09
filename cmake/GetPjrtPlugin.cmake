@@ -106,7 +106,8 @@ function(pjrt_exec_get_plugin OUT_VAR)
   set(_so "${PJRT_EXEC_PLUGIN_DIR}/libpjrt_c_api_cpu_plugin.so")
 
   # Already in the build tree, whichever way it was asked for.
-  if((PJRT_EXEC_PLUGIN_SOURCE_BUILD OR PJRT_EXEC_FETCH_PLUGIN) AND EXISTS "${_so}")
+  if(EXISTS "${_so}" AND
+     (PJRT_EXEC_PLUGIN_SOURCE_BUILD OR PJRT_EXEC_FETCH_PLUGIN))
     message(STATUS "pjrt_exec: reusing the plugin at ${_so}")
     set(${OUT_VAR} "${_so}" PARENT_SCOPE)
     return()

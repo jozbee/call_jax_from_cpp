@@ -227,8 +227,10 @@ that kernel into `//jaxlib_cpu_kernels` the same way as the rest.
 
 **There is no real-time support on macOS.** Every helper in `pjrt::rt` is a
 no-op there, and the preload variable differs (`DYLD_INSERT_LIBRARIES` rather
-than `LD_PRELOAD`, which the Makefile handles). macOS is fine for correctness
-work and is not a machine to take latency numbers on.
+than `LD_PRELOAD`, which the Makefile handles). CMake builds the guard as
+`SHARED` and the Makefile as `cc -shared`, which on Apple is `-dynamiclib`;
+both produce a library dyld will insert. macOS is fine for correctness work
+and is not a machine to take latency numbers on.
 
 **Half-precision and complex dtypes are unsupported.** The supported set is
 `bool`, the four signed and four unsigned integer widths, `float32` and

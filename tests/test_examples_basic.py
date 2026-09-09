@@ -26,6 +26,7 @@ DEBUG_CHECKS = [
 
 
 def basic_argv(build, artifacts, *extra):
+    """``example_01_basic`` on the basic artifact, plus @p extra flags."""
     return [
         build.bin("example_01_basic"),
         "--artifact",
@@ -60,7 +61,8 @@ def test_exits_zero(basic_run):
 
 def test_loaded_the_serialized_executable(basic_run, parse_kv_lines):
     """The AOT path, not the compile fallback: nothing downstream of this line
-    says which of the two happened."""
+    says which of the two happened.
+    """
     reported = parse_kv_lines(basic_run.stdout)
     assert reported["load_kind"] == "deserialized", (
         "the .binpb did not deserialize and the .mlirbc fallback took over; "
@@ -82,7 +84,8 @@ def test_reports_the_arity(basic_run, parse_kv_lines):
 
 def test_reports_the_rank_two_input(basic_run):
     """The spec line, whole: ``numel`` and ``nbytes`` are the arithmetic the
-    loader allocates against, so the three numbers are one statement."""
+    loader allocates against, so the three numbers are one statement.
+    """
     assert (
         "input[0]: dtype=float64 shape=[4,4] numel=16 nbytes=128"
         in basic_run.stdout.splitlines()
@@ -102,7 +105,8 @@ def test_reports_the_scalar_output(basic_run, parse_kv_lines):
 
 def test_the_solution_solves_the_system(basic_run, parse_kv_lines):
     """Two independent residuals: one recomputed in C++ from the input
-    arenas, one the executable itself produced."""
+    arenas, one the executable itself produced.
+    """
     reported = parse_kv_lines(basic_run.stdout)
     assert float(reported["residual_inf_norm"]) < RESIDUAL_TOLERANCE
     assert float(reported["residual_from_jax"]) < RESIDUAL_TOLERANCE
@@ -110,7 +114,8 @@ def test_the_solution_solves_the_system(basic_run, parse_kv_lines):
 
 def test_without_debug_says_the_checks_are_off(basic_run, parse_kv_lines):
     """``debug=0`` is stated, not merely silent: a run with no
-    ``debug_check`` line could otherwise mean the checks passed."""
+    ``debug_check`` line could otherwise mean the checks passed.
+    """
     reported = parse_kv_lines(basic_run.stdout)
     assert reported["debug"] == "0"
     assert not [key for key in reported if key.startswith("debug_check[")]
@@ -138,6 +143,7 @@ def test_debug_names_the_array_by_name_not_only_by_index(
 
 def test_debug_run_still_solves_the_system(basic_debug_run, parse_kv_lines):
     """``--debug`` changes what is checked, not what is computed: the NaN
-    goes in after the good call, and the next call is refused."""
+    goes in after the good call, and the next call is refused.
+    """
     reported = parse_kv_lines(basic_debug_run.stdout)
     assert float(reported["residual_inf_norm"]) < RESIDUAL_TOLERANCE

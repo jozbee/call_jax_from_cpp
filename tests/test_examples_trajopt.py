@@ -84,7 +84,8 @@ def test_report_identifies_itself(short_campaign):
 
 def test_every_sample_was_kept(short_campaign):
     """The recorder reserves once and drops rather than grows, so a non-zero
-    ``dropped`` quietly changes what a percentile is a percentile *of*."""
+    ``dropped`` quietly changes what a percentile is a percentile *of*.
+    """
     _, report = short_campaign
     assert report["compute_us"]["count"] == SHORT_ITERATIONS
     assert report["compute_us"]["dropped"] == 0
@@ -100,7 +101,8 @@ def test_percentiles_are_ordered(short_campaign):
 def test_the_step_counter_agrees(short_campaign):
     """``step_next`` was exactly ``step + 1`` on every call: an integer
     identity that a stale or unread input arena breaks and no float
-    comparison would see."""
+    comparison would see.
+    """
     _, report = short_campaign
     assert report["checks"]["step_counter_ok"] is True
     assert report["checks"]["step_errors"] == 0
@@ -122,7 +124,8 @@ def test_the_solver_reports_a_real_iteration_count(
 ):
     """The last call's ``iterations_used`` is in range; out of range means
     the integer outputs are not being read back from the arenas the
-    executable wrote."""
+    executable wrote.
+    """
     result, _ = short_campaign
     used = int(parse_kv_lines(result.stdout)["result"]["iterations_used"])
     assert 0 <= used <= MAX_SOLVER_ITERATIONS
@@ -133,7 +136,8 @@ def test_long_campaign(
     run, build, plugin, artifacts, tmp_path, load_json, record_property
 ):
     """20,000 calls, gated on the counters and not on the clock; the tail
-    ratios are recorded as properties for a reader to compare."""
+    ratios are recorded as properties for a reader to compare.
+    """
     out = tmp_path / "long.json"
     result = trajopt(run, build, artifacts, out, LONG_ITERATIONS, warmup=200)
     assert result.returncode == 0

@@ -39,7 +39,8 @@ namespace {
 /// Printed at the end, so a truncated run shows as a short count, not a pass.
 int g_checks = 0;
 
-/// @param detail Printed only on failure, where the numbers are the diagnosis.
+/// Report one check by name; exit 1 on the first failure.  @p detail is
+/// printed only on failure, where the numbers are the diagnosis.
 void check(bool ok, const std::string& what, const std::string& detail = {}) {
   ++g_checks;
   if (ok) {
@@ -61,8 +62,9 @@ std::string number(double value) {
   return text;
 }
 
-/// @param tolerance Relative above 1, absolute below it, so a microsecond
-///                  figure near zero is not held to an impossible standard.
+/// Check @p got against @p want.  @p tolerance is relative above 1 and
+/// absolute below it, so a figure near zero is not held to an impossible
+/// standard.
 void check_close(double got, double want, const std::string& what,
                  double tolerance = 1e-9) {
   const double allowed = tolerance * std::max(1.0, std::fabs(want));

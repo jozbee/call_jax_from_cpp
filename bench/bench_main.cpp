@@ -338,7 +338,8 @@ int main(int argc, char** argv) {
       cjfc::HardeningOptions hardening;
       hardening.cpu = args.cpu;
       // --rt is an explicit opt-in, so it asks for SCHED_FIFO too; rt_env
-      // defaults to 0 because an unrequested real-time thread can take the box.
+      // defaults to 0 because an unrequested real-time thread can take the
+      // machine with it.
       hardening.rt_priority = 80;
       int chosen_cpu = -1;
       steps = cjfc::apply_hardening(host, hardening, dma, &chosen_cpu);

@@ -207,12 +207,12 @@ these numbers are not inflated by it either.
 ```{table}
 :class: results
 
-| Period | Duty cycle | min | p50 |
-|---|---|---|---|
-| 3 ms | ~65% | 1866 µs | **2027 µs** |
-| 10 ms | ~20% | 1854 µs | **5196 µs** |
-| 10 ms, unpinned | ~20% | 1932 µs | 5201 µs |
-| 10 ms, pinned | ~20% | 1878 µs | 5228 µs |
+| Period | Duty cycle | min | p50 | max/p50 |
+|---|---|---|---|---|
+| 3 ms | ~65% | 1866 µs | **2027 µs** | — |
+| 10 ms | ~20% | 1854 µs | **5196 µs** | — |
+| 10 ms, unpinned | ~20% | 1932 µs | 5201 µs | 2.14 |
+| 10 ms, pinned | ~20% | 1878 µs | 5228 µs | **1.40** |
 ```
 
 The same work, on the same core, takes 2.6 times longer at 100 Hz than at
@@ -227,7 +227,11 @@ different questions.
 The last two rows are the other effect, and worth keeping apart from the
 first. Pinning does not move the median at all; it cuts the *tail*, from a
 max/p50 of 2.14 unpinned to 1.40 pinned, because the loop stops migrating
-between cores.
+between cores. The first two rows carry no `max/p50` because it was not
+recorded.
+
+`min` barely changes across all four rows: that is the speed this workload
+runs at when the clock is up, and it is what `make bench` reports.
 
 ## How these were measured
 

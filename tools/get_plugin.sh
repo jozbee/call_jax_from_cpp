@@ -27,7 +27,7 @@ die() { echo "get_plugin: $*" >&2; exit 1; }
 # The header comment is the help text; it ends at the first non-comment line.
 usage() { awk 'NR > 1 && /^#/ { print; next } NR > 1 { exit }' "$0"; }
 
-# A PJRT plugin exports exactly one symbol; anything else is not one.
+# A PJRT plugin exports GetPjrtApi; anything else cannot be dlopen-ed as one.
 exports_pjrt_api() {
   nm -D --defined-only "$1" 2>/dev/null | grep -q ' T GetPjrtApi'
 }

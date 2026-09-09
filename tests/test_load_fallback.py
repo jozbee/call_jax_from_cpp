@@ -36,7 +36,8 @@ def load(run, build, base, scenario):
 
 def test_an_intact_artifact_deserializes(run, build, plugin, artifacts):
     """The baseline: without it, a loader that refuses everything would
-    satisfy every assertion below."""
+    satisfy every assertion below.
+    """
     line = load(run, build, artifacts.trajopt, "ok")
     assert line.startswith(LOADED)
     assert "kind=deserialized" in line
@@ -47,7 +48,8 @@ def test_a_sidecar_missing_an_output_is_refused(
 ):
     """The count mismatch names both sides.  Unchecked, the loader would
     allocate one arena too few and the executable would write past the end
-    of the last one."""
+    of the last one.
+    """
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.drop_output(base)
 
@@ -61,7 +63,8 @@ def test_a_sidecar_with_the_wrong_shape_is_refused(
     run, build, plugin, tmp_artifacts
 ):
     """The shape mismatch names the declared shape and the produced one:
-    which is wrong decides whether to re-export or to fix the function."""
+    which is wrong decides whether to re-export or to fix the function.
+    """
     base = tmp_artifacts.copy("trajopt")
 
     def shrink(sidecar):
@@ -84,7 +87,8 @@ def test_a_truncated_executable_falls_back_and_says_why(
     """A stale ``.binpb`` compiles the ``.mlirbc`` instead, out loud: a load
     that takes seconds instead of milliseconds and does not explain itself
     is how a deployment discovers from a latency graph that its AOT path
-    stopped working."""
+    stopped working.
+    """
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.truncate_executable(base)
 
@@ -99,7 +103,8 @@ def test_a_truncated_executable_with_no_bytecode_is_fatal(
     run, build, plugin, tmp_artifacts
 ):
     """Both routes gone: the message names both files, since either reason
-    alone sends the reader to the wrong one."""
+    alone sends the reader to the wrong one.
+    """
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.truncate_executable(base)
     tmp_artifacts.remove(base, ".mlirbc")
@@ -117,7 +122,8 @@ def test_compile_only_ignores_the_binary_beside_it(
 ):
     """``LoadPolicy::CompileOnly`` compiles even with a good ``.binpb`` there,
     and the detail names the policy, which is how a slow load is told apart
-    from a fallback nobody asked for."""
+    from a fallback nobody asked for.
+    """
     line = load(run, build, artifacts.trajopt, "compile-only")
     assert line.startswith(LOADED)
     assert "kind=compiled" in line
@@ -126,7 +132,8 @@ def test_compile_only_ignores_the_binary_beside_it(
 
 def test_binary_only_deserializes(run, build, plugin, artifacts):
     """``LoadPolicy::BinaryOnly`` refuses rather than substitutes: a fallback
-    that compiles for seconds is not a fallback in a control loop."""
+    that compiles for seconds is not a fallback in a control loop.
+    """
     line = load(run, build, artifacts.trajopt, "binary-only")
     assert line.startswith(LOADED)
     assert "kind=deserialized" in line
@@ -135,7 +142,8 @@ def test_binary_only_deserializes(run, build, plugin, artifacts):
 
 def test_a_missing_artifact_is_refused(run, build, plugin, tmp_path):
     """A base path with nothing under it fails at the sidecar, naming the
-    file it tried to open -- the path is given *without* an extension."""
+    file it tried to open -- the path is given *without* an extension.
+    """
     line = load(run, build, tmp_path / "not_an_artifact", "missing")
     assert line.startswith(THREW)
     assert "cannot open sidecar" in line
@@ -146,7 +154,8 @@ def test_a_plugin_that_will_not_open_names_dlopen(run, build, artifacts):
     so a missing ``liblapack`` surfaces here rather than on the first
     ``jnp.linalg`` call.  The scenario points the runtime at the sidecar, a
     file that exists and is not an ELF object, so it cannot succeed by
-    finding a real plugin at a made-up path."""
+    finding a real plugin at a made-up path.
+    """
     line = load(run, build, artifacts.trajopt, "bad-plugin")
     assert line.startswith(THREW)
     assert "dlopen(" in line
@@ -159,7 +168,8 @@ def test_the_compiled_path_computes_the_same_thing(
     """After a fallback, every reference case still agrees: the compiled and
     the deserialized executable are two routes to the same numbers.  The
     reference cases stay in the real artifacts directory; only the executable
-    being loaded is the damaged copy."""
+    being loaded is the damaged copy.
+    """
     base = tmp_artifacts.copy("trajopt")
     tmp_artifacts.truncate_executable(base)
 

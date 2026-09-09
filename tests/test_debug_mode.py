@@ -3,8 +3,9 @@
 ``fn_info`` prints the resolved signature; the assertions on it spell out the
 trajopt calling convention rather than read it back from the sidecar, which
 would make the test agree with whatever the sidecar said.
+
 ``test_debug_checks`` makes one specific mistake, once with ``--debug`` and
-once without, and the pair is the test: with the checks off nothing fails,
+once without; the pair is the test.  With the checks off nothing fails and
 nothing is logged, and the answer the caller goes on to use is a NaN.
 
 The message fragments asserted are the ones docs/guides/debugging.md
@@ -99,14 +100,16 @@ def test_without_the_checks_nothing_notices(
     run, build, plugin, artifacts, scenario, fragment
 ):
     """What "off" costs: for two of these the run continues with a corrupted
-    arena and reports nothing at all."""
+    arena and reports nothing at all.
+    """
     line = check(run, build, artifacts.trajopt, scenario, debug=False)
     assert line.startswith("NO-THROW"), line
 
 
 def test_a_nonfinite_output_is_caught(run, build, plugin, artifacts):
     """A singular system: the inputs are finite and the arithmetic is not, so
-    ``check_values`` has to catch it on the way *out*."""
+    ``check_values`` has to catch it on the way *out*.
+    """
     line = check(run, build, artifacts.basic, "nonfinite-output", debug=True)
     assert line.startswith("THREW: "), line
     assert "is nan" in line or "is inf" in line or "is -inf" in line

@@ -127,7 +127,7 @@ endif
 # --------------------------------------------------------------------- phony
 
 .PHONY: all lib examples tests-cpp tools guard bench export run-examples \
-        test test-slow test-rt test-alloc rt-check plugin plugin-source \
+        test test-slow test-rt test-alloc check rt-check plugin plugin-source \
         docs docs-live docs-linkcheck docs-clean format clean distclean \
         print-config help plugin-hint
 
@@ -213,7 +213,7 @@ export: $(BASIC_ARTIFACT) $(TRAJOPT_ARTIFACT) $(ARM_ARTIFACT)  ## Export the exa
 
 # ---------------------------------------------------------------------- runs
 
-run-examples: examples export guard plugin-hint | $(REPORTS)  ## Run all four examples end to end
+run-examples: examples export guard plugin-hint | $(REPORTS)  ## Run the four make-built examples end to end
 	$(BIN_DIR)/example_01_basic
 	$(BIN_DIR)/example_01_basic --debug
 	$(BIN_DIR)/example_02_trajopt --iterations 500 --json $(REPORTS)/trajopt.json
@@ -231,6 +231,8 @@ bench: $(BIN_DIR)/bench export plugin-hint  ## Build and run the benchmark (see 
 
 test: examples tests-cpp guard plugin-hint  ## Build everything, then run the test suite
 	$(PYTEST) $(PYTEST_ARGS)
+
+check: test  ## Alias for `test`
 
 test-slow: examples tests-cpp guard plugin-hint  ## The suite including the long campaigns
 	$(PYTEST) --runslow $(PYTEST_ARGS)
@@ -282,7 +284,7 @@ format:  ## Format the C++ and Python sources in place
 	$(RUFF) format .
 	$(RUFF) check --fix .
 
-# The plugin is a download or an hour of bazel, not a build product: kept.
+# `clean` keeps the plugin: a download or an hour of bazel, not a build product.
 clean:  ## Remove objects, binaries and the library (keeps build/plugin)
 	rm -rf $(OBJ_DIR) $(BIN_DIR) $(LIB_DIR)
 

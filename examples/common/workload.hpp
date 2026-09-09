@@ -61,8 +61,8 @@ enum Out : std::size_t {
 inline constexpr double kNominalParams[8] = {1.0, 4.0, 1.0, 0.5,
                                              2.0, 0.5, 1.0, 1.0};
 
-/// Cost weights: tracking, effort, terminal, smoothing.  float32 because the
-/// kernel takes them that way.
+/// Cost weights: tracking, effort, terminal, smoothing.  float32 because they
+/// are a knob, not a quantity the answer's accuracy depends on.
 inline constexpr float kWeights[4] = {1.0f, 0.01f, 5.0f, 0.1f};
 
 /// The sizes read out of the artifact, rather than hard-coded here.

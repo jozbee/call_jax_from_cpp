@@ -29,16 +29,19 @@ describes how it got that way and what a change to it has to respect.
 include/pjrt_exec/   Public headers. runtime.hpp is the one to read first.
 src/pjrt_exec/       Implementation: runtime.cpp, rt.cpp, isa.cpp.
 python/jax2exec/     The exporter, the reference-case writer, the check command.
-examples/            01_basic, 02_trajopt, 03_minimal (self-contained), 04_realtime,
-                     and common/ (namespace cjfc: the CLI parser, host audit,
-                     periodic loop, workload contract, report).
+examples/            01_basic, 02_trajopt, 03_minimal (self-contained),
+                     04_realtime, 05_ros2_control (a ros2_control package:
+                     colcon, no common/), and common/ (namespace cjfc: the CLI
+                     parser, host audit, periodic loop, workload contract,
+                     report).
 bench/               The measurement spine: one configuration, measured once.
 tests/               python/ (pytest), cpp/ (test binaries), support/ (the
                      preloadable allocation counter).
 tools/               get_plugin.sh, build_plugin.sh, rt_check.sh, run_matrix.sh,
                      plugin_probe.cpp.
 cmake/               The CMake package, and the plugin download at configure time.
-docker/              dev, ci and plugin-builder images.
+docker/              dev, ci, ros2 and plugin-builder images (Dockerfile,
+                     Dockerfile.ros2).
 third_party/         Vendored PJRT headers and JSON, the fork patches, and the
                      xla submodule.
 docs/                This site. conf.py reads every version out of versions.env.

@@ -81,7 +81,8 @@ def test_jax_and_jaxlib_are_pinned_to_the_same_release():
 def test_the_installed_release_is_the_pinned_one(module_name, key):
     """An environment a release behind produces artifacts the published
     plugin cannot load, and the failure arrives from the C++ side with
-    nothing in it pointing back to here."""
+    nothing in it pointing back to here.
+    """
     module = pytest.importorskip(
         module_name, reason=f"{module_name} is not installed; run `uv sync`"
     )
@@ -90,7 +91,8 @@ def test_the_installed_release_is_the_pinned_one(module_name, key):
 
 def test_the_exporter_agrees_about_the_supported_release():
     """``SUPPORTED_JAX`` is what the exporter warns against, so it moves with
-    the pin rather than after it."""
+    the pin rather than after it.
+    """
     jax2exec = pytest.importorskip("jax2exec")
     pytest.importorskip("jax", reason="SUPPORTED_JAX imports the exporter")
     assert jax2exec.SUPPORTED_JAX == versions_env()["JAX_VERSION"]
@@ -98,6 +100,7 @@ def test_the_exporter_agrees_about_the_supported_release():
 
 def test_the_tool_version_in_every_sidecar_is_the_package_version():
     """``generator.version`` traces an artifact back to the exporter that
-    produced it, which only works if it is the version that shipped."""
+    produced it, which only works if it is the version that shipped.
+    """
     jax2exec = pytest.importorskip("jax2exec")
     assert jax2exec.__version__ == pyproject()["project"]["version"]

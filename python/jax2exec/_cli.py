@@ -291,7 +291,8 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m jax2exec",
         description="Inspect artifacts exported by jax2exec.",
     )
-    # `dest` only names the subcommand in the error when none is given.
+    # `dest` is never read; argparse names it in the error for a missing
+    # subcommand.
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser(
         "check",

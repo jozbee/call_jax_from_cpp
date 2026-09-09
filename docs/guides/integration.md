@@ -8,9 +8,9 @@ matches your build, follow that recipe, and stop — each one is complete.
 
 Three facts shape all of them:
 
-- **Nothing links against the {term}`PJRT plugin`.** It is `dlopen`-ed at run time, so
-  integrating adds two include roots and `-ldl -lpthread` to a link line — no
-  bazel, no network access, no XLA anywhere in your build.
+- **Nothing links against the {term}`PJRT plugin`.** It is `dlopen`-ed at run
+  time, so integrating adds two include roots and `-ldl -lpthread` to a link
+  line — no bazel, no network access, no XLA anywhere in your build.
 - **The library is vendored, not installed.** Three translation units and no
   `install()` rules. A system-wide library shared between two projects pinned
   to different JAX versions would couple them for no gain.
@@ -37,12 +37,14 @@ The motivating application is a controller under `ros2_control`, so this
 recipe comes first. It is what {doc}`/examples/05-ros2-control` does, and the
 CMake below is that package's, included rather than retyped.
 
-**Package layout.**
+**Package layout**, with `my_controller` standing for your package's name
+(the example's is `jax_arm_controller`).
 
 ```text
 my_controller/
   package.xml
   CMakeLists.txt
+  my_controller.xml                    # pluginlib class description
   src/my_controller.cpp
   plugin/libpjrt_c_api_cpu_plugin.so   # from `make plugin`, for the target machine
   artifacts/                           # exported on the target machine
@@ -54,16 +56,29 @@ $ git submodule add https://github.com/jozbee/call_jax_from_cpp.git \
     third_party/call_jax_from_cpp
 ```
 
-**`package.xml`.**
+The class description is what lets `controller_manager` load the controller
+by name; `examples/05_ros2_control/jax_arm_controller.xml` is one.
+
+**`package.xml`.** The example's, plus the one dependency that resolves the
+installed paths at run time:
 
 ```xml
 <buildtool_depend>ament_cmake</buildtool_depend>
 <depend>controller_interface</depend>
-<depend>ament_index_cpp</depend>   <!-- get_package_share_directory -->
+<depend>hardware_interface</depend>
+<depend>pluginlib</depend>
+<depend>rclcpp</depend>
+<depend>rclcpp_lifecycle</depend>
+<depend>ament_index_cpp</depend>   <!-- not in the example; see below -->
 ```
 
-**`CMakeLists.txt`.** The example's, whose `add_subdirectory` reaches two
-directories up into this checkout instead of into a submodule:
+**`CMakeLists.txt`.** The example's. Two of its lines reach two directories
+up into this checkout instead of into the package, so that what the docs show
+is what builds. In a package of your own `add_subdirectory` becomes
+`add_subdirectory(third_party/call_jax_from_cpp EXCLUDE_FROM_ALL)`, and the
+`PJRT_EXEC_PLUGIN_PATH` line is dropped: with the fetch off and no path given,
+the build compiles in no default, and the controller passes the installed
+plugin at run time instead.
 
 ```{literalinclude} ../../examples/05_ros2_control/CMakeLists.txt
 :language: cmake
@@ -72,23 +87,31 @@ directories up into this checkout instead of into a submodule:
 ```
 
 The plugin and the artifacts are runtime data, not build outputs, so a package
-of your own installs its own copies:
+of your own installs its own copies. Both go under `share/<package>`, so that
+one `get_package_share_directory` call finds them, and that call needs the
+dependency the manifest added:
 
 ```cmake
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/plugin/libpjrt_c_api_cpu_plugin.so
-        DESTINATION lib/${PROJECT_NAME})
+        DESTINATION share/${PROJECT_NAME}/plugin)
 install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/artifacts/
         DESTINATION share/${PROJECT_NAME}/artifacts)
+
+find_package(ament_index_cpp REQUIRED)
+target_link_libraries(my_controller PRIVATE ament_index_cpp::ament_index_cpp)
 ```
 
-Resolve both paths at run time from
-`ament_index_cpp::get_package_share_directory`, and pass the plugin through
-{cpp:member}`~pjrt::RuntimeOptions::plugin_path` rather than a compiled-in
-default.
+The example compiles the plugin path in and takes the artifact's base path
+from a parameter, because both live in this checkout. A package of your own
+resolves both from `ament_index_cpp::get_package_share_directory`: the
+artifact in `on_configure`, and the plugin in the accessor that constructs
+the process's `Runtime`, through
+{cpp:member}`~pjrt::RuntimeOptions::plugin_path`.
 
 **Where the objects live.** `controller_manager` hosts every controller in one
-process, and a {cpp:class}`~pjrt::Runtime` is one per process — creating a client starts XLA's
-thread pools, and creating a second one mid-run is a latency spike. So:
+process, and a {cpp:class}`~pjrt::Runtime` is one per process — creating a
+client starts XLA's thread pools, and creating a second one mid-run is a
+latency spike. So:
 
 - **One `Runtime` for the process**, behind an accessor — a function-local
   `static` is enough — shared by every controller.
@@ -117,9 +140,8 @@ computation. An overrun means the controller reads a stale result, not that
 the call was aborted; design the fallback around stale data.
 
 **Verify.** `colcon build --packages-select my_controller` → builds with no
-plugin on the link line, and
-`ls install/my_controller/lib/my_controller/libpjrt_c_api_cpu_plugin.so` finds
-the installed plugin.
+plugin on the link line, and `ls install/my_controller/share/my_controller`
+lists `plugin/` and `artifacts/`.
 
 (rec-submodule)=
 ## Recipe 2 — CMake + git submodule

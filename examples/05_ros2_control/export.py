@@ -1,17 +1,9 @@
 """Export the resolved-rate step a ``ros2_control`` controller calls.
 
 ``step(q, t, dt) -> q_cmd`` moves a two-link planar arm one control period
-along a circle traced by its end-effector.  Forward kinematics is written
-once; the Jacobian that inverts it comes from ``jax.jacfwd``, and the step is
-a damped least-squares solve of ``J qdot = GAIN * e`` integrated over ``dt``.
-That is the reason the numerics are in JAX rather than in the controller:
-the derivation is automatic, so changing the arm means changing ``fk`` and
-re-exporting, not deriving a Jacobian by hand.
-
-``jnp.linalg.solve`` lowers to a LAPACK FFI custom call, exactly as
-``examples/01_basic/export.py`` does, so this artifact needs the plugin
-``make plugin`` provides; a stock PJRT CPU plugin registers no LAPACK
-handlers and refuses it at load.
+along a circle: a damped least-squares solve of ``J qdot = GAIN * e``, with
+``J`` from ``jax.jacfwd``.  The solve lowers to a LAPACK custom call, so the
+artifact needs the fork's plugin.
 
 Run it directly, or through ``make export``::
 
@@ -30,7 +22,7 @@ from jax2exec import export
 def _out_dir() -> str:
     """The directory the three files are written to."""
     parser = argparse.ArgumentParser(
-        description="Export step(q, t, dt) -> q_cmd for examples/05_ros2_control."
+        description="Export step(q, t, dt) -> q_cmd for example 05."
     )
     parser.add_argument(
         "--out",
@@ -59,8 +51,7 @@ def describe(result) -> None:
 jax.config.update("jax_enable_x64", True)  # before anything is traced
 
 L1, L2 = 1.0, 0.8  # link lengths, metres
-GAIN, DAMPING = 5.0, 1e-3  # error gain, and the damping that survives a
-#                            configuration where the arm is nearly straight
+GAIN, DAMPING = 5.0, 1e-3
 
 
 def fk(q):
@@ -83,7 +74,7 @@ def target(t):
 def step(q, t, dt):
     """One control period of resolved-rate control, in joint space."""
     e = target(t) - fk(q)
-    J = jax.jacfwd(fk)(q)  # the derivation this function exists to avoid
+    J = jax.jacfwd(fk)(q)
     qdot = jnp.linalg.solve(J.T @ J + DAMPING * jnp.eye(2), J.T @ (GAIN * e))
     return q + dt * qdot
 

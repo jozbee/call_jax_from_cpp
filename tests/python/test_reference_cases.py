@@ -31,7 +31,8 @@ from jax2exec.reference import write_reference_cases
 
 def mixed(state, step, use_terminal):
     """float64, int32 and bool in and out: the mix the trajopt fixture has,
-    small enough to check by hand."""
+    small enough to check by hand.
+    """
     scaled = state * jnp.where(use_terminal, 2.0, 0.5)
     return {
         "total": scaled.sum(),
@@ -96,7 +97,8 @@ def test_manifest_describes_the_layout(frozen):
 @pytest.mark.parametrize("case", range(len(CASES)))
 def test_case_bytes_are_what_jax_computed(frozen, case):
     """Read each case the way the C++ reader does, and recompute it; the file
-    has to end exactly where the last output ends."""
+    has to end exactly where the last output ends.
+    """
     directory, manifest = frozen
     blob = (directory / manifest["cases"][case]).read_bytes()
 
@@ -133,7 +135,8 @@ def test_case_bytes_are_what_jax_computed(frozen, case):
 
 def test_cases_differ(frozen):
     """Two cases, two different files: a writer that froze case 0 twice would
-    satisfy every assertion above."""
+    satisfy every assertion above.
+    """
     directory, manifest = frozen
     payloads = {(directory / name).read_bytes() for name in manifest["cases"]}
     assert len(payloads) == len(manifest["cases"])
@@ -158,7 +161,8 @@ def _read_case(blob: bytes, manifest: dict) -> tuple[list[np.ndarray], int]:
 
 def test_a_non_finite_output_is_refused(tmp_path):
     """Every comparison against NaN is false, so a NaN reference would make
-    the C++ comparison a test that cannot fail."""
+    the C++ comparison a test that cannot fail.
+    """
     with pytest.raises(ExportError, match="not finite"):
         write_reference_cases(
             lambda x: jnp.log(x),

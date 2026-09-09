@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
 
   try {
     // docs: begin minimal-setup
-    // Before the Runtime, so the heap startup grows is the hardened one.
+    // Before the Runtime, so the heap that startup grows is the hardened one.
     print("harden_malloc", pjrt::rt::harden_malloc());
 
     pjrt::RuntimeOptions runtime_options;

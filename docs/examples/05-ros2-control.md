@@ -6,22 +6,19 @@ same hardening outside a plugin.*
 
 `examples/05_ros2_control` is the executable form of
 {ref}`Recipe 1 <rec-ros2>`: a `ros2_control` position controller for a
-two-link planar arm, hosted by `controller_manager` and built with colcon,
-whose numerics are an exported JAX function. What it demonstrates is where the
-pieces go when the loop is not yours — one {cpp:class}`~pjrt::Runtime` for the
-process, one {cpp:class}`~pjrt::Function` per controller created in
-`on_configure`, the memory hardening in the same place, and an `update()` that
-only copies, calls and writes back.
+two-link planar arm whose numerics are an exported JAX function. It shows
+where the pieces go when the loop is not yours — one
+{cpp:class}`~pjrt::Runtime` for the process, one {cpp:class}`~pjrt::Function`
+per controller created in `on_configure`, the memory hardening in the same
+place, and an `update()` that only copies, calls and writes back.
 
 :::{note}
-**Before the code.** Four namespaces appear. `pjrt::` is the library
+**Before the code.** Three namespaces appear. `pjrt::` is the library
 ({doc}`/api/index`) and `pjrt::rt::` its hardening layer ({doc}`/api/cpp/rt`).
-`jax_arm_controller::` is this example's own and holds one class.
-`controller_interface::` and `hardware_interface::` are
-[ros2_control](https://control.ros.org/jazzy/index.html)'s: the controller base
-class, and the loaned interfaces the manager hands `update()`. Nothing from
-`examples/common/` appears — a controller is a shared object in someone else's
-process, and the fewer headers it drags in the better.
+`controller_interface::` is
+[ros2_control](https://control.ros.org/jazzy/index.html)'s controller base
+class; `RCLCPP_ERROR` and `RCLCPP_INFO` are rclcpp's logging macros. Nothing
+from `examples/common/` appears.
 :::
 
 ## The function
@@ -33,13 +30,16 @@ process, and the fewer headers it drags in the better.
 ```
 
 Resolved-rate control: `fk` is written once and `jax.jacfwd` differentiates
-it, so changing the arm means changing `fk` and re-exporting rather than
-deriving a Jacobian by hand. That is the reason the numerics are in JAX.
-`jnp.linalg.solve` lowers to a LAPACK custom call, as example 01's
-`jnp.linalg.inv` does, so this {term}`artifact` needs the fork's plugin and
-fails at load against a stock one. {py:func}`~jax2exec.export` writes
-`arm.binpb`, `arm.mlirbc` and `arm.json`; the {term}`sidecar` names the inputs
-`q`, `t` and `dt`, which is the contract `on_configure` checks.
+it, so changing the arm means changing `fk` and re-exporting, not deriving a
+Jacobian by hand. `DAMPING` keeps the solve finite where the arm is straight
+and the Jacobian singular, which is also why `urdf/arm.urdf` starts it bent.
+`jnp.linalg.solve` lowers to a LAPACK custom call, so this {term}`artifact`
+needs the fork's plugin. {py:func}`~jax2exec.export` writes the `.binpb`,
+`.mlirbc` and `.json`; the {term}`sidecar` names the inputs `q`, `t` and
+`dt`. `on_configure` resolves them by index and checks only that `q` has one
+element per joint; `tests/test_examples_ros2.py` pins the names and their
+order, so a re-export that reorders them fails there, not as an arm that
+moves strangely.
 
 ## Configure
 
@@ -55,22 +55,20 @@ fails at load against a stock one. {py:func}`~jax2exec.export` writes
 | {cpp:func}`~pjrt::rt::lock_memory` | a {term}`page fault` inside a call | `RLIMIT_MEMLOCK` unlimited; after the load, so what it prefaults is what a call touches |
 | {cpp:func}`~pjrt::rt::corral_xla_threads` | XLA's {term}`thread pool` waking on the update thread's core | the `Runtime` to exist, and the `xla_cpus` parameter to name somewhere to put them |
 
-Two helpers are deliberately absent.
-{cpp:func}`~pjrt::rt::pin_current_thread` and
-{cpp:func}`~pjrt::rt::set_realtime_priority` act on the calling thread, and the
-update thread is not this controller's: calling either from a plugin would
-promote whichever thread happened to run `on_configure`. `controller_manager`
-owns that thread and configures it from its own parameters —
-`thread_priority` for {term}`SCHED_FIFO`, `lock_memory` for the process — both
-set in `config/controllers.yaml`.
+Each returns a {cpp:struct}`~pjrt::rt::Status`; `report`, the file's own
+helper, logs it as the `[ok  ]`/`[skip]` lines under
+[Reading the output](#reading-the-output).
 
-`runtime()`, the file's only free function, is a function-local static: one
-client per process, shared by every controller the manager hosts, because a
-second one starts a second set of XLA pools mid-run.
+{cpp:func}`~pjrt::rt::pin_current_thread` and
+{cpp:func}`~pjrt::rt::set_realtime_priority` are absent: both act on the
+calling thread, and the update thread is `controller_manager`'s, whose
+`thread_priority` parameter in `config/controllers.yaml` does that half.
+`runtime()` is the process's one `Runtime`.
 {cpp:enumerator}`~pjrt::LoadPolicy::BinaryOnly` makes a missing or foreign
-`.binpb` a {cpp:class}`~pjrt::LoadError` at configure time rather than seconds
-of silent compilation at startup; both exceptions the load can raise are
-logged, and the controller reports `CallbackReturn::ERROR`.
+`.binpb` a {cpp:class}`~pjrt::LoadError` at configure time rather than
+seconds of silent compilation; the `catch` turns it, and anything else the
+load throws, into a logged line and `CallbackReturn::ERROR`, so the manager
+never activates a controller with no function.
 
 ## Update
 
@@ -84,19 +82,17 @@ logged, and the controller reports `CallbackReturn::ERROR`.
 |---|---|
 | `state_interfaces_`, `command_interfaces_` | the loaned interfaces `controller_interface::ControllerInterface` fills in, in the order the two `*_interface_configuration()` methods asked for them — which is joint order |
 | `get_optional()` | `hardware_interface::LoanedStateInterface`'s read, `std::nullopt` when another thread holds the handle; `value_or(q_[i])` then keeps last cycle's value rather than a zero |
-| `set_value()` | `[[nodiscard]] bool` since ros2_control 4; a refused write is late data reaching the actuator, so it is reported as `return_type::ERROR` rather than dropped |
+| `set_value()` | `[[nodiscard]] bool` since ros2_control 4; a refused write leaves last cycle's command standing — stale data, the same policy as an overrun — and is counted, reported once at deactivation. Returning `return_type::ERROR` instead would have the manager deactivate the controller |
 | `q_`, `t_`, `dt_`, `q_cmd_` | the four {term}`arenas <arena>`, resolved once in `on_configure` |
 | {cpp:func}`~pjrt::Function::call` | execute, one await, one `memcpy` per output; allocation-free, lock-free and silent |
 
-Nothing in the body allocates, locks or logs. `period` comes from the manager
-rather than from a clock read here, so a cycle that ran late integrates the
-time it actually took. An overrun is stale data, not a cancelled call: PJRT
-cannot stop a running CPU computation.
+Nothing in the body allocates, blocks or logs: the loaned handles try-lock
+and yield rather than wait, and give up after ten tries. `period` comes from
+the manager, so a cycle that ran late integrates the time it actually took.
+An overrun is stale data, not a cancelled call: PJRT cannot stop a running
+CPU computation.
 
 ## Build and run
-
-The package is not part of `make`: colcon builds it, inside a ROS 2 workspace,
-and the `ros2` compose service is one.
 
 ```console
 $ make plugin && make export                            # the plugin, and artifacts/arm
@@ -105,15 +101,19 @@ $ docker compose -f docker/compose.yml run --rm ros2 \
     examples/05_ros2_control/run.sh --seconds 8         # colcon build, launch, stop, report
 ```
 
-`run.sh --help` is its own header comment. Without `--seconds` the launch runs
-until Ctrl-C; with it, the script samples `/joint_states` while the launch is
-up and prints the first and last vectors it saw. Everything colcon writes goes
-under `build/ros2/`.
+The package is not part of `make`: colcon builds it inside a ROS 2 workspace,
+and the `ros2` compose service is one. Without `--seconds` the launch runs
+until Ctrl-C; with it, `run.sh` samples `/joint_states` while the launch is
+up, prints the first and last vectors it saw, and exits non-zero unless the
+run showed the four facts below. CI runs that command and relies on the exit
+status; `run.sh --help` is its own header comment.
 
 ## Reading the output
 
-From a run of the command above, in the `ros2` service on this project's
-development host, with the epoch timestamps elided:
+From a run of the command above in the `ros2` service on this project's
+development host: the lines about this controller, timestamps elided. Cut:
+the colcon build, the launch's and the manager's other lines, the
+broadcaster's, and the plugin's absl start-up chatter.
 
 ```text
 [ros2_control_node-2] [INFO] [controller_manager]: Successful set up FIFO RT scheduling policy with priority 50.
@@ -125,32 +125,35 @@ development host, with the epoch timestamps elided:
 [spawner-3] [INFO] [spawner_joint_state_broadcaster]: Configured and activated jax_arm_controller
 
 === /joint_states ===
-first 0.480172438184073, 1.022513746356958
-last  -0.35332078464935923, 2.223814587740879
+first 0.4607781236559495, 1.0439951470612612
+last  -0.26244714029634797, 2.1463853760531397
 ```
 
-Both steps report `[ok  ]` because the compose service grants `CAP_SYS_NICE`
-and an unlimited memlock; without them `lock_memory` reports `[skip]` and the
-run is still correct. `corral_xla_threads` prints nothing here: `xla_cpus` is
-empty, so it is never attempted. Nothing touches `/dev/cpu_dma_latency` — the
-{term}`C-state` hold is the host's business, not a plugin's. The first line is
-the manager's, and it is the half of the hardening this controller cannot do
-for itself.
+`harden_malloc` needs no privilege. `lock_memory` reports `[ok  ]` because
+the compose service grants an unlimited memlock; without it the line reads
+`[skip]` and the run is still correct. The manager's first line needs
+`CAP_SYS_NICE`, which the service also grants; it is the half of the
+hardening this controller cannot do for itself. `corral_xla_threads` prints
+nothing: `xla_cpus` is empty, so it is never attempted. Nothing touches
+`/dev/cpu_dma_latency` — the {term}`C-state` hold is the host's business.
 
 The two joint vectors are the evidence that the loop ran: the arm starts at
 the pose `urdf/arm.urdf` gives the mock hardware and ends somewhere else, so
 `update()` was called, `call()` returned, and the commands reached the
-interfaces. `tests/test_examples_ros2.py` asserts exactly those four things.
+interfaces. `run.sh` and `tests/test_examples_ros2.py` both assert the two
+hardening lines, the activation line, and that the two vectors were
+published and differ.
 
 ## Making it yours
 
 Replace `fk` and the joint list; keep the order in `on_configure`. The three
-parameters are the whole configuration surface — `joints`, `artifact` (a base
-path with no extension) and `xla_cpus` — and the artifact path is one line of
+parameters — `joints`, `artifact` (a base path, no extension) and `xla_cpus`
+— are the whole configuration surface, and the artifact path is one line of
 `config/controllers.yaml`, naming a `.binpb` exported on the machine that will
-run it. A package of your own carries the library as a submodule and installs
-its own copy of the plugin and the artifacts, which is what
-{doc}`/guides/integration` spells out; this one reaches two directories up
-into the checkout instead, so that what the docs show is what builds.
+run it. The plugin is the other path: `PJRT_EXEC_PLUGIN_PATH` in
+`CMakeLists.txt` is the `.so` compiled in as the default, so point it at your
+own copy — or set {cpp:member}`~pjrt::RuntimeOptions::plugin_path` in
+`runtime()` and drop the line. A package of your own installs the plugin and
+the artifacts itself, as {doc}`/guides/integration` spells out.
 {doc}`/guides/realtime` says what each hardening call buys, and
 {doc}`03-minimal` is the same order in a program that owns its loop.

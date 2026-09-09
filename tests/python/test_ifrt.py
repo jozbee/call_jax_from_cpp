@@ -4,9 +4,9 @@
 the blob back untouched when it does not: an unrecognised blob passed through
 at worst reproduces not having the module, while a wrong guess writes a file
 that fails at load.  Every unrecognised shape below comes back byte-identical
-and labelled ``as-is``, and nothing may raise.  The envelopes are synthetic
--- ``tag || length || bytes`` -- because that is the only way to reach the
-paths a real jaxlib does not produce.
+and labelled ``as-is``, and nothing may raise.  The envelopes are synthetic,
+``tag || length || bytes`` built by hand, because that is the only way to reach
+the paths a real jaxlib does not produce.
 """
 
 from __future__ import annotations
@@ -36,7 +36,8 @@ def envelope(header: bytes, payload: bytes) -> bytes:
 @pytest.fixture(scope="module")
 def pjrt_payload(artifacts):
     """The real serialized executable ``examples/01_basic`` exports, so the
-    round trips below are the bytes the C++ loader deserializes."""
+    round trips below are the bytes the C++ loader deserializes.
+    """
     blob = (artifacts / "basic.binpb").read_bytes()
     assert blob, "the exported executable is empty"
     return blob
@@ -44,7 +45,8 @@ def pjrt_payload(artifacts):
 
 def test_a_written_executable_is_already_plain(pjrt_payload):
     """``.binpb`` on disk has been through ``unwrap`` once, so it must look
-    like an ``ExecutableAndOptionsProto`` to a second pass."""
+    like an ``ExecutableAndOptionsProto`` to a second pass.
+    """
     assert looks_like_pjrt_payload(pjrt_payload)
     unwrapped, how = unwrap(pjrt_payload)
     assert how == "as-is"
@@ -53,7 +55,8 @@ def test_a_written_executable_is_already_plain(pjrt_payload):
 
 def test_unwrap_is_idempotent(pjrt_payload):
     """Unwrapping twice is unwrapping once, not a header eaten off the front
-    of a payload."""
+    of a payload.
+    """
     wrapped = envelope(_PJRT_IFRT_FIELD, pjrt_payload)
     once, how_once = unwrap(wrapped)
     assert how_once == "ifrt-unwrapped"
@@ -76,7 +79,8 @@ def test_unwrap_is_idempotent(pjrt_payload):
 )
 def test_unrecognised_blobs_come_back_untouched(label, blob):
     """Never raises, never edits; the loader's ``.mlirbc`` fallback covers
-    bytes that turn out not to be loadable."""
+    bytes that turn out not to be loadable.
+    """
     unwrapped, how = unwrap(blob)
     assert how == "as-is", label
     assert unwrapped == blob, label
@@ -85,7 +89,8 @@ def test_unrecognised_blobs_come_back_untouched(label, blob):
 def test_a_truncated_envelope_does_not_raise(pjrt_payload):
     """Truncation is the shape a half-written file has.  Cut inside the
     header the blob passes through; cut inside the payload the remains come
-    back.  Either is fine; an exception is not."""
+    back.  Either is fine; an exception is not.
+    """
     wrapped = envelope(_PJRT_IFRT_FIELD, pjrt_payload)
 
     inside_header = wrapped[: len(_PJRT_IFRT_FIELD) - 2]
@@ -101,7 +106,8 @@ def test_a_truncated_envelope_does_not_raise(pjrt_payload):
 
 def test_an_envelope_naming_another_format_is_left_alone(pjrt_payload):
     """Only ``pjrt_ifrt`` is unwrapped: stripping another format's header
-    would produce a file that deserializes to the wrong thing."""
+    would produce a file that deserializes to the wrong thing.
+    """
     wrapped = envelope(_OTHER_FIELD, pjrt_payload)
     assert not looks_like_pjrt_payload(wrapped), (
         "this blob has to reach the header check, not the payload shortcut"
@@ -113,7 +119,8 @@ def test_an_envelope_naming_another_format_is_left_alone(pjrt_payload):
 
 def test_an_envelope_around_something_else_is_left_alone():
     """The header alone is not proof; the payload behind it has to start like
-    an ``ExecutableAndOptionsProto`` as well."""
+    an ``ExecutableAndOptionsProto`` as well.
+    """
     wrapped = envelope(_PJRT_IFRT_FIELD, b"\x12 not a serialized executable")
     unwrapped, how = unwrap(wrapped)
     assert how == "as-is"

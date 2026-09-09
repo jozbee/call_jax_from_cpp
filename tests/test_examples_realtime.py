@@ -97,7 +97,8 @@ def realtime(
     run, build, plugin, artifacts, tmp_path_factory, load_json, iterations
 ):
     """One periodic run, shared by every test that reads its report: 2000
-    cycles at 10 ms is twenty seconds of wall clock."""
+    cycles at 10 ms is twenty seconds of wall clock.
+    """
 
     def go():
         out = tmp_path_factory.mktemp("realtime") / "report.json"
@@ -132,7 +133,8 @@ def test_minimal_loop_exits_zero_and_prints_two_summaries(
 ):
     """``example_03_minimal`` loaded, computed the residual, and each recorder
     printed a summary: the failure this catches is a copied file that
-    compiles and then measures nothing."""
+    compiles and then measures nothing.
+    """
     result = run(
         [
             build.bin("example_03_minimal"),
@@ -175,7 +177,8 @@ def test_config_records_what_was_asked_for(realtime, iterations):
 def test_every_hardening_step_says_what_it_did(realtime):
     """Each step reports whether it worked *and* why, in words.  An
     unprivileged run is expected to lose some of these, and the sentence
-    saying which one and what it needed is what makes that survivable."""
+    saying which one and what it needed is what makes that survivable.
+    """
     _, report = realtime
     hardening = report["hardening"]
     assert hardening, "no hardening steps were recorded"
@@ -224,7 +227,8 @@ def test_every_cycle_was_recorded(realtime, iterations):
 def test_each_series_is_a_full_summary(realtime, series):
     """Present, numeric and ordered.  ``period_jitter_us`` is signed --
     waking early is as much a defect as waking late -- so the only honest
-    check on it is that its numbers are numbers."""
+    check on it is that its numbers are numbers.
+    """
     _, report = realtime
     summary = report[series]
     for field in ("min_us", "p50_us", "p99_us", "p999_us", "max_us"):
@@ -257,7 +261,8 @@ def test_no_major_faults(realtime):
 
 def test_the_census_measured_something(realtime_census):
     """``guard_present: false`` is a record of "not measured", which must
-    never read as zero allocations."""
+    never read as zero allocations.
+    """
     result, report = realtime_census
     assert result.returncode == 0
     allocations = report["allocations"]
@@ -267,7 +272,8 @@ def test_the_census_measured_something(realtime_census):
 
 def test_the_loop_allocates_nothing_of_its_own(realtime_census):
     """``self`` is the number that must be zero; the plugin's count is XLA's
-    thunk runtime, not reachable from this side of the C API."""
+    thunk runtime, not reachable from this side of the C API.
+    """
     _, report = realtime_census
     allocations = report["allocations"]
     assert allocations["self"] == 0
@@ -279,7 +285,8 @@ def test_the_loop_allocates_nothing_of_its_own(realtime_census):
 @pytest.mark.rt
 def test_tail_ratios(realtime):
     """p99.9/p50 and max/p50, not the mean: the mean of a control loop's call
-    latency cannot tell you whether it will make its deadline."""
+    latency cannot tell you whether it will make its deadline.
+    """
     _, report = realtime
     compute = report["compute_us"]
     assert compute["p999_over_p50"] <= MAX_P999_OVER_P50
@@ -303,7 +310,8 @@ def test_no_deadline_was_missed(realtime):
 def test_no_faults_and_few_involuntary_switches(realtime, iterations):
     """A minor fault inside the window means ``mlockall`` did not hold; an
     involuntary switch means something outranked a SCHED_FIFO loop.  The
-    switch budget scales with the run."""
+    switch budget scales with the run.
+    """
     _, report = realtime
     rusage = report["rusage"]
     assert rusage["minflt"] == 0
@@ -315,7 +323,8 @@ def test_no_faults_and_few_involuntary_switches(realtime, iterations):
 def test_hardening_succeeded(realtime):
     """Everything the loop asked the kernel for, and could have had, it got.
     ``cpu_dma_latency`` is exempt unless this process is root; the other
-    exemptions are :data:`NOT_A_FAILURE`, matched on the detail."""
+    exemptions are :data:`NOT_A_FAILURE`, matched on the detail.
+    """
     _, report = realtime
     failed = {}
     for name, step in report["hardening"].items():
@@ -333,7 +342,8 @@ def test_hardening_succeeded(realtime):
 def test_run_realtime_script_audits_before_it_measures(run, repo, plugin):
     """``run_realtime.sh`` prints the host audit first, then runs.  Positions,
     not presence: a latency figure whose provenance was written down
-    afterwards is one nobody can defend later."""
+    afterwards is one nobody can defend later.
+    """
     launcher = repo.root / "examples/04_realtime/run_realtime.sh"
     if not launcher.is_file():
         pytest.skip(f"{launcher} is not in this checkout")

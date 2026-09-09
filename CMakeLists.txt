@@ -149,6 +149,7 @@ if(PJRT_EXEC_BUILD_EXAMPLES)
 endif()
 
 if(PJRT_EXEC_BUILD_TESTS)
+  # Named rather than globbed, so a new test binary is a visible edit here.
   # Skipped rather than named when absent: a source CMake cannot find is a
   # generate-time error that takes the library and the examples down with it.
   foreach(_name fn_info test_debug_checks test_load_errors test_latency
@@ -157,7 +158,8 @@ if(PJRT_EXEC_BUILD_TESTS)
       message(STATUS "pjrt_exec: skipping test binary ${_name} (no tests/cpp/${_name}.cpp)")
       continue()
     endif()
-    pjrt_exec_add_program(${_name} "tests/cpp/${_name}.cpp" tests examples bench)
+    pjrt_exec_add_program(${_name} "tests/cpp/${_name}.cpp"
+                          tests examples bench)
     list(APPEND PJRT_EXEC_TEST_BINS ${_name})
   endforeach()
 

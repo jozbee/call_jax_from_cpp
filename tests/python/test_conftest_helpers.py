@@ -1,7 +1,8 @@
 """``conftest.parse_kv_lines``, checked against real ``example_01_basic``
 output.  Every assertion the integration tests make about a binary goes
 through it, and a parser that quietly returned an empty dict would turn
-those into tests that cannot fail."""
+those into tests that cannot fail.
+"""
 
 from __future__ import annotations
 

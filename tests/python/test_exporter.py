@@ -54,7 +54,8 @@ print(f"callable={callable(export)}")
 def test_export_survives_a_lazy_sibling_import(run):
     """``from jax2exec import ExportError, export`` must give the function,
     not the submodule.  In a subprocess because the answer depends on which
-    lazy attribute the process touched first."""
+    lazy attribute the process touched first.
+    """
     completed = run(
         [sys.executable, "-c", _PUBLIC_IMPORT],
         env={"PYTHONPATH": str(REPO_ROOT / "python")},
@@ -66,7 +67,8 @@ def test_export_survives_a_lazy_sibling_import(run):
 
 def two_in_two_out(matrix, vector):
     """A matrix, a vector, and a result that depends on both: an input that
-    reaches no output is dropped by XLA and refused by the exporter."""
+    reaches no output is dropped by XLA and refused by the exporter.
+    """
     scaled = matrix @ vector
     return {"scaled": scaled, "total": scaled.sum()}
 
@@ -147,7 +149,8 @@ def test_sidecar_describes_every_array(exported):
 
 def test_sidecar_digests_match_the_files(exported):
     """The digests tell a truncated or swapped artifact from a matching one,
-    so they have to be of what actually landed."""
+    so they have to be of what actually landed.
+    """
     artifacts = exported.metadata["artifacts"]
     assert artifacts["executable"] == exported.executable.name
     assert artifacts["executable_sha256"] == _sha256(exported.executable)
@@ -157,7 +160,8 @@ def test_sidecar_digests_match_the_files(exported):
 
 def test_sidecar_records_how_the_pjrt_bytes_were_obtained(exported):
     """``executable_source`` is where a JAX bump that changes jaxlib's IFRT
-    envelope shows up first; see ``jax2exec._ifrt``."""
+    envelope shows up first; see ``jax2exec._ifrt``.
+    """
     source = exported.metadata["artifacts"]["executable_source"]
     assert source in {"ifrt-unwrapped", "as-is"}
 
@@ -169,7 +173,8 @@ def test_sidecar_on_disk_is_the_returned_metadata(exported, load_json):
 
 def test_mlir_bytecode_is_written_and_not_empty(exported):
     """The ``.mlirbc`` is what the loader compiles in-process when the
-    ``.binpb`` was built elsewhere."""
+    ``.binpb`` was built elsewhere.
+    """
     assert exported.mlir is not None
     assert exported.mlir.is_file()
     assert exported.mlir.stat().st_size > 0
@@ -187,7 +192,8 @@ def _sha256(path: Path) -> str:
 def test_rank_n_shapes_survive_the_round_trip(tmp_path):
     """Rank is carried through untouched, in both directions.  A rank-1
     example cannot detect a layout disagreement, so the shapes that matter
-    have more than one axis."""
+    have more than one axis.
+    """
 
     def reshape(block):
         return jnp.broadcast_to(block.sum(), (2, 2, 2)) * 1.0
@@ -214,7 +220,8 @@ def test_rank_n_shapes_survive_the_round_trip(tmp_path):
 @pytest.mark.parametrize("dtype_name", sorted(SUPPORTED_DTYPES))
 def test_every_supported_dtype_exports(dtype_name, tmp_path):
     """One export per row of the dtype table, which is the contract NumPy,
-    PJRT, C++ and the sidecar have to agree on."""
+    PJRT, C++ and the sidecar have to agree on.
+    """
     info = SUPPORTED_DTYPES[dtype_name]
     dtype = jnp.dtype(dtype_name)
 
@@ -259,7 +266,8 @@ def test_unsupported_dtypes_are_named_not_reinterpreted(dtype_name, tmp_path):
 
 def test_keyword_arguments_are_rejected(tmp_path):
     """A C++ call is positional, so the arguments have to be too; a caller
-    reaching for keywords reaches for a mapping."""
+    reaching for keywords reaches for a mapping.
+    """
     with pytest.raises(ExportError) as raised:
         export(
             two_in_two_out,
@@ -276,7 +284,8 @@ def test_keyword_arguments_are_rejected(tmp_path):
 
 def test_zero_element_arrays_are_rejected(tmp_path):
     """Nothing establishes what a zero-byte PJRT buffer does on this path, so
-    the exporter refuses rather than finding out in a control loop."""
+    the exporter refuses rather than finding out in a control loop.
+    """
     with pytest.raises(ExportError, match="no elements"):
         export(
             lambda x: x + x,
@@ -290,7 +299,8 @@ def test_zero_element_arrays_are_rejected(tmp_path):
 def test_a_rejected_export_writes_nothing_at_all(tmp_path):
     """The whole directory stays empty, not just the artifacts of this name:
     a stale ``.binpb`` beside a sidecar describing something else is loaded
-    by the C++ side and fails a long way from the cause."""
+    by the C++ side and fails a long way from the cause.
+    """
     target = tmp_path / "nothing-should-land-here"
     target.mkdir()
     with pytest.raises(ExportError):
@@ -344,7 +354,8 @@ def test_x64_narrowing_is_refused_not_recorded(run, tmp_path):
     """float64 without ``jax_enable_x64`` must be an error, not a float32
     sidecar: a C++ caller writing doubles into a 4-byte-per-element arena
     walks off the end of it.  The message has to name the switch, because
-    that is the whole fix."""
+    that is the whole fix.
+    """
     completed = run(
         [sys.executable, "-c", _X64_TRAP, str(tmp_path)],
         env={

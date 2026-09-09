@@ -50,8 +50,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Sourced before anything reads JAX_VERSION or the fork metadata.
-# shellcheck disable=SC1091
-[[ -f "$REPO_ROOT/versions.env" ]] && . "$REPO_ROOT/versions.env"
+have_versions=0
+if [[ -f "$REPO_ROOT/versions.env" ]]; then
+  # shellcheck disable=SC1091
+  . "$REPO_ROOT/versions.env"
+  have_versions=1
+fi
 
 # ---------------------------------------------------------------- preconditions
 [[ -d "$XLA_DIR" ]] || die "no XLA tree at $XLA_DIR
@@ -120,7 +124,8 @@ nm -D --defined-only "$OUT" 2>/dev/null | grep -q ' T GetPjrtApi' \
 # mounted), so fall back to versions.env rather than record "unknown".
 fork_commit="$(git -C "$XLA_DIR" rev-parse HEAD 2>/dev/null || true)"
 fork_branch="$(git -C "$XLA_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
-if [[ -z "$fork_commit" && -n "${XLA_FORK_COMMIT:-}" ]]; then
+if [[ -z "$fork_commit" && "$have_versions" == 1 \
+      && -n "${XLA_FORK_COMMIT:-}" ]]; then
   fork_commit="$XLA_FORK_COMMIT"
   fork_branch="${XLA_FORK_BRANCH:-}"
   echo "build_plugin: no git metadata in $XLA_DIR; recording the fork commit from versions.env" >&2

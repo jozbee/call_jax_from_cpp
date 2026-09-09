@@ -2,12 +2,11 @@ controller_manager:
   ros__parameters:
     update_rate: 500          # Hz; the period the controller is called on
 
-    # The update thread belongs to the manager, so the two hardening steps the
-    # controller cannot take are taken here instead: SCHED_FIFO for the thread,
-    # and mlockall for the process.  Both report failure and carry on when the
-    # host withholds the privilege.
+    # The update thread is the manager's, so SCHED_FIFO for it is asked for
+    # here, not in the controller.  It reports failure and carries on when the
+    # host withholds the privilege.  mlockall is the controller's: it comes
+    # after the load, so the prefault covers what a call touches.
     thread_priority: 50
-    lock_memory: true
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster

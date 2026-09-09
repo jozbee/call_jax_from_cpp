@@ -103,6 +103,35 @@ Actions". Without it the deploy job fails with a 404 from the Pages API.
 `.nojekyll` is written by `sphinx.ext.githubpages`, which is what keeps
 `_static/` and `_sources/` from 404ing.
 
+## CI action pins
+
+The three workflows pin every action they use, and the pins were chosen for
+one reason: Node 20 leaves GitHub's runners in September 2026, and an action
+still on a Node 20 major stops working there. Verified 2026-09-05 with
+`gh api repos/<owner>/<repo>/releases/latest --jq .tag_name` for the latest
+release, then each `action.yml` read for its runtime.
+
+| Action | Latest then | Pinned | Runtime |
+|---|---|---|---|
+| `actions/checkout` | v7.0.1 | v7 | node24 |
+| `actions/cache` | v6.1.0 | v6 | node24 |
+| `actions/upload-artifact` | v7.0.1 | v7 | node24 |
+| `actions/download-artifact` | v8.0.1 | v8 | node24 |
+| `astral-sh/setup-uv` | v10.0.1 | v10.0.1 | node24 |
+| `docker/setup-buildx-action` | v4.3.0 | v4 | node24 |
+| `docker/build-push-action` | v7.3.0 | v7 | node24 |
+| `actions/configure-pages` | v6.0.0 | v6 | node24 |
+| `actions/upload-pages-artifact` | v5.0.0 | v5 | composite |
+| `actions/deploy-pages` | v5.0.1 | v5 | node24 |
+| `bazel-contrib/setup-bazel` | 0.19.0 | 0.19.0 | node24 |
+| `softprops/action-gh-release` | v3.0.3 | v3 | node24 |
+
+Two are pinned to an exact release rather than a major alias:
+`astral-sh/setup-uv` stopped publishing a floating major tag after v7, and
+`bazel-contrib/setup-bazel` publishes none (its releases are 0.x). To re-check
+the table, run the two commands above for each row; a runtime other than
+`node24` or `composite` is the thing to act on.
+
 ## Release checklist
 
 Source release, in order. Each line has the command that says whether it

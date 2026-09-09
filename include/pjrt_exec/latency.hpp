@@ -364,8 +364,8 @@ class LatencyRecorder {
   /**
    * @brief Write every raw sample as `index,ns`, overwriting @p path.
    *
-   * Summaries hide *when* an outlier happened, and that is usually the whole
-   * diagnosis.
+   * Summaries hide *when* an outlier happened: a spike on call 3 and one on
+   * call 30,000 share a p99.9 and have different causes.
    *
    * @return false when the file could not be opened.
    */

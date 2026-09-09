@@ -2,10 +2,10 @@
  * @file alloc_guard.hpp
  * @brief Optional hook into the preloaded allocation counter.
  *
- * Nothing links against `tests/support/malloc_guard.c`.  The guard resolves
- * the interposer's markers with `dlsym(RTLD_DEFAULT, ...)` and degrades to
- * no-ops returning 0 when they are absent, so one binary runs both with and
- * without the preload:
+ * The counter is `tests/support/malloc_guard.c`, an allocator interposer
+ * that is preloaded and never linked.  The guard resolves its markers with
+ * `dlsym(RTLD_DEFAULT, ...)` and degrades to no-ops returning 0 when they
+ * are absent, so one binary runs both with and without the preload:
  *
  * @code
  *   LD_PRELOAD=build/lib/malloc_guard.so ./build/bin/bench ...

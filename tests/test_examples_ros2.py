@@ -5,7 +5,8 @@ The first half is pure JAX: it loads ``export.py`` by path and iterates
 asserts: resolved-rate control against a moving target lags by about
 ``speed / GAIN`` and never catches up.  The second half needs a ROS 2
 workspace, so it skips with the remedy where there is no ``colcon``; CI runs
-it in the ``ros2`` compose service.
+the same script in the ``ros2`` compose service and relies on its exit
+status, which fails on the same four facts the test asserts.
 """
 
 from __future__ import annotations
@@ -47,7 +48,7 @@ TRACKING_TOLERANCE = 0.05
 @pytest.fixture(scope="module")
 def export_module():
     """``examples/05_ros2_control/export.py``, loaded under a name of its own:
-    four scripts here are called ``export.py``, and whichever reached
+    three example scripts are called ``export.py``, and whichever reached
     ``sys.modules`` first would answer for all of them."""
     pytest.importorskip("jax2exec", reason="the script imports the exporter")
     spec = importlib.util.spec_from_file_location("arm_export", SCRIPT)
@@ -59,8 +60,9 @@ def export_module():
 
 
 def test_the_step_tracks_the_circle(export_module):
-    """Iterated at the controller's period from the pose ``urdf/arm.urdf``
-    gives the mock hardware, the end-effector reaches the target."""
+    """Iterated at the controller's period, the end-effector tracks the
+    target to within the lag a proportional law leaves.  The initial pose is
+    the one ``urdf/arm.urdf`` gives the mock hardware."""
     import jax.numpy as jnp
 
     step = jax.jit(export_module.step)
@@ -93,10 +95,11 @@ def test_the_sidecar_names_the_three_inputs(artifacts):
 def test_the_controller_runs_under_ros2_control(repo, artifacts):
     """Build with colcon, launch, and read what the run says about itself.
 
-    Four claims that fail differently: the hardening lines say the
-    controller applied the process's half of the bargain, ``active`` says
-    ``controller_manager`` accepted the plugin, and the two joint vectors say
-    the loop actually ran.
+    Four claims that fail differently, then a fifth: the hardening lines say
+    the controller applied the process's half of the bargain, ``active`` says
+    ``controller_manager`` accepted the plugin, the two joint vectors say the
+    loop actually ran, and the exit status says ``run.sh`` reached the same
+    verdict.
     """
     for tool in ("colcon", "ros2"):
         if shutil.which(tool) is None:
@@ -116,10 +119,11 @@ def test_the_controller_runs_under_ros2_control(repo, artifacts):
         check=False,
     )
     output = result.stdout + result.stderr
-    assert result.returncode == 0, output
 
+    # The controller's `[ok  ]`/`[skip]` lines, as run.sh greps them; a bare
+    # name would also match run.sh's own FAIL line.
     for line in ("harden_malloc", "lock_memory"):
-        assert line in output, f"no {line} status line:\n{output}"
+        assert f"] {line}:" in output, f"no {line} status line:\n{output}"
     assert "Configured and activated jax_arm_controller" in output, output
 
     positions = dict(
@@ -132,3 +136,4 @@ def test_the_controller_runs_under_ros2_control(repo, artifacts):
     assert positions["first"] != positions["last"], (
         "the joints did not move over the run:\n" + output
     )
+    assert result.returncode == 0, output

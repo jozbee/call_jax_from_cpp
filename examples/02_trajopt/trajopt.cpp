@@ -114,7 +114,8 @@ int run(int argc, char** argv) {
   {
     pjrt::AllocGuardScope armed(guard);
     for (std::size_t i = 0; i < options.iterations; ++i) {
-      cjfc::workload::write_reference(x_ref, dims, cycle);  // between calls
+      // Between calls, never during one.
+      cjfc::workload::write_reference(x_ref, dims, cycle);
       {
         pjrt::ScopedLatency sample(compute);
         function.call();

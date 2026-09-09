@@ -1,6 +1,7 @@
 """Small utilities the integration tests share, on top of ``conftest``: a
 per-session cache for runs several tests read, the environment knobs only
-the integration tests honour, and two predicates."""
+the integration tests honour, and two predicates.
+"""
 
 from __future__ import annotations
 

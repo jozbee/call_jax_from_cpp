@@ -9,8 +9,8 @@
 #
 # The real-time helpers in include/pjrt_exec/rt.hpp need privileges a default
 # container does not have: SCHED_FIFO needs CAP_SYS_NICE plus an rtprio limit,
-# and mlockall needs an unlimited memlock. They are granted to `dev` and `ci`
-# so the hardening path can be exercised. Container timings are relative
+# and mlockall needs an unlimited memlock. They are granted to `dev`, `ci` and
+# `ros2` so the hardening path can be exercised. Container timings are relative
 # signals only; real numbers come from bare metal.
 x-rt-privileges: &rt-privileges
   cap_add:

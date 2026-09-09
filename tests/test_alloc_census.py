@@ -26,6 +26,7 @@ MIN_SELFTEST_ALLOCS = 3
 
 
 def census_argv(build, artifacts, out):
+    """The armed benchmark: gated on ``self``, refusing to run unguarded."""
     return [
         build.bin("bench"),
         "--fixture",
@@ -112,7 +113,8 @@ def test_bench_allocates_nothing_of_its_own(bench_census):
 def test_the_plugin_allocation_is_visible_and_nonzero(bench_census):
     """A census that saw nothing at all would pass every gate above; the
     plugin's count is what proves the interposer was armed over the right
-    window rather than merely loaded."""
+    window rather than merely loaded.
+    """
     _, report = bench_census
     allocations = report["allocations"]
     assert allocations["plugin"] > 0

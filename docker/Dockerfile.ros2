@@ -2,35 +2,28 @@
 #
 # ROS 2 Jazzy environment for examples/05_ros2_control.
 #
-# Separate from docker/Dockerfile because the two have nothing in common: this
-# one carries no JAX, no bazel and no plugin. The controller is built with
-# colcon against the checkout in the bind mount, and it loads the plugin and
-# the artifacts from there as well, so the image holds only ROS 2 and a C++
-# toolchain.
+# Separate from docker/Dockerfile because the two have nothing in common: no
+# JAX, no bazel, no plugin. The controller is built with colcon against the
+# bind-mounted checkout and loads the plugin and the artifacts from there, so
+# the image holds only ROS 2 and a C++ toolchain.
 FROM ros:jazzy-ros-base
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# ros2_control plus the two nodes the launch file needs. The broadcaster is
-# what publishes /joint_states, which is how a run shows that the arm moved.
+# A C++ toolchain, colcon, and what package.xml depends on. The broadcaster
+# publishes /joint_states, which is how a run shows that the arm moved.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential cmake git sudo \
       python3-colcon-common-extensions \
-      ros-jazzy-ros2-control \
       ros-jazzy-controller-manager \
       ros-jazzy-controller-interface \
       ros-jazzy-hardware-interface \
       ros-jazzy-joint-state-broadcaster \
-      ros-jazzy-realtime-tools \
       ros-jazzy-robot-state-publisher \
-      ros-jazzy-ros2-control-test-assets \
-      ros-jazzy-ros2controlcli \
-      ros-jazzy-xacro \
     && rm -rf /var/lib/apt/lists/*
 
-# uid/gid 1000 matches the host user, so bind-mounted files stay writable --
-# the same reason docker/Dockerfile does it. Noble ships a `ubuntu` user at
-# 1000, which has to go first.
+# uid/gid 1000 matches the host user, so bind-mounted files stay writable.
+# Noble ships a `ubuntu` user at 1000, which has to go first.
 RUN userdel -r ubuntu 2>/dev/null || true; \
     groupadd -g 1000 dev && useradd -m -u 1000 -g 1000 -s /bin/bash dev \
     && echo 'dev ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/dev \

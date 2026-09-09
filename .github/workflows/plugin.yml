@@ -23,10 +23,10 @@ on:
         type: string
       build_mode:
         description: >-
-          bazel -c mode. Measured to be irrelevant to call latency (p50 moved
-          0.2% between opt and fastbuild), because the compute kernels are
-          LLVM-compiled at export time and embedded in the artifact; opt is
-          what ships.
+          bazel -c mode. Measured to make no difference to call latency (the
+          figure is on docs/benchmarks.md): the compute kernels are compiled at
+          export time into the artifact, and the plugin only orchestrates. opt
+          is what ships.
         type: choice
         options: [opt, fastbuild]
         default: opt

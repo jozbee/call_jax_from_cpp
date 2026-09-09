@@ -81,8 +81,9 @@ NOMINAL_PARAMS = np.array(
     [1.0, 4.0, 1.0, 0.5, 2.0, 0.5, 1.0, 1.0], dtype=np.float64
 )
 
-#: Cost weights: tracking, effort, terminal, smoothing.  float32 because the
-#: kernel takes them that way; must equal ``cjfc::workload::kWeights``.
+#: Cost weights: tracking, effort, terminal, smoothing.  float32 because they
+#: are a knob, not a quantity the answer's accuracy depends on; must equal
+#: ``cjfc::workload::kWeights``.
 WEIGHTS = np.array([1.0, 0.01, 5.0, 0.1], dtype=np.float32)
 
 #: Three magnitudes of ``step``, so a C++ reader that truncated the counter to
@@ -110,7 +111,8 @@ class Solution(NamedTuple):
 def line_search(objective, controls, grad, alphas):
     """Evaluate the objective at every candidate step, as one scan: four
     unrolled copies of the rollout would multiply the op count the fixture's
-    allocation figures are recorded against."""
+    allocation figures are recorded against.
+    """
 
     def trial(carry, alpha):
         return carry, objective(controls - alpha * grad)
@@ -147,7 +149,8 @@ class Model:
 
     def specs(self) -> tuple[jax.ShapeDtypeStruct, ...]:
         """The argument shapes, in call order.  Must agree with
-        ``examples/common/workload.hpp``, which checks them at load."""
+        ``examples/common/workload.hpp``, which checks them at load.
+        """
         return (
             jax.ShapeDtypeStruct((self.nx,), jnp.float64),  # x0
             jax.ShapeDtypeStruct((self.h, self.nx), jnp.float64),  # x_ref
@@ -162,7 +165,8 @@ class Model:
         """The reference the C++ examples feed at cycle ``k``: a slow sine
         along the positions, velocities zero.  Must stay identical to
         ``cjfc::workload::write_reference``, or case 0 stops being comparable
-        between a C++ run and a Python run."""
+        between a C++ run and a Python run.
+        """
         t = np.arange(self.h, dtype=np.float64)[:, None]
         j = np.arange(self.nq, dtype=np.float64)[None, :]
         positions = 0.3 * np.sin(0.05 * (k + t) + 0.2 * j)
@@ -172,7 +176,8 @@ class Model:
     def dynamics(self, x, u, p):
         """Acceleration of the chain: cubic springs between neighbours,
         damping, a sine restoring term, and ``tanh`` of a dense mixing matrix
-        so that every mass feels every other and the gradient stays dense."""
+        so that every mass feels every other and the gradient stays dense.
+        """
         mass = p[0]
         k_lin = p[1]
         k_cub = p[2]
@@ -200,7 +205,8 @@ class Model:
     def rk4(self, x, u, p):
         """One RK4 step with a zero-order hold on ``u``: four dynamics
         evaluations per horizon step, which is where the arithmetic comes
-        from."""
+        from.
+        """
         dt = DT * p[7]
         k1 = self.dynamics(x, u, p)
         k2 = self.dynamics(x + 0.5 * dt * k1, u, p)
@@ -220,7 +226,8 @@ class Model:
     def total_cost(self, controls, x0, x_ref, p, w, use_terminal):
         """Tracking, effort, smoothing, and a terminal term selected with
         ``jnp.where``, so that both arms run and the cost of a call does not
-        depend on ``use_terminal``."""
+        depend on ``use_terminal``.
+        """
         err = self.rollout(x0, controls, p) - x_ref
         cost = (
             w[0] * jnp.sum(err**2)

@@ -120,7 +120,7 @@ make plugin              # download the prebuilt PJRT CPU plugin, sha256-verifie
 make plugin-source       # build it from the XLA fork with bazel (30-60 min)
 
 make                     # the library and the four C++ examples
-                         # (05 is a ROS 2 package: examples/05_ros2_control/run.sh)
+                         # (05 is a ROS 2 package: see examples/05_ros2_control)
 make examples            # just the examples
 make bench               # build and run the benchmark
 make export              # run the export scripts with JAX
@@ -143,7 +143,7 @@ make print-config        # the resolved build configuration
 Everything also runs in the container, which already has doxygen and bazel:
 
 ```console
-docker compose -f docker/compose.yml run --rm dev   # or: ci, plugin-builder
+docker compose -f docker/compose.yml run --rm dev # or: ci, ros2, plugin-builder
 ```
 
 ## House voice

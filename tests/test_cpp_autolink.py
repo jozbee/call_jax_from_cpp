@@ -123,7 +123,8 @@ def test_qualified_exact_links(index):
 
 def test_unique_suffix_links_alias(index):
     """Inside ``namespace pjrt`` or after a ``using`` the code a page shows is
-    not fully qualified; a suffix matching exactly one entity links."""
+    not fully qualified; a suffix matching exactly one entity links.
+    """
     out = rewrite(names("rt", "lock_memory"), index)
     assert hrefs(out) == [("api/cpp/rt.html#_CPPv4LM", "pjrt::rt::lock_memory")]
 

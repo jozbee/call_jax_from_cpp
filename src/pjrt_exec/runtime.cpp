@@ -443,7 +443,7 @@ void scan_arena(const char* role, std::size_t index, const ArraySpec& spec,
       }
       break;
     }
-    default:
+    default:  // integer arenas hold no invalid bit patterns
       break;
   }
 }

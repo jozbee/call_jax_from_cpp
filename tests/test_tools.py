@@ -4,6 +4,7 @@
 and on an ordinary developer machine plenty is, so its exit code is recorded
 and not asserted; what is asserted is that every section printed, because
 those sections are the provenance a latency number is quoted with.
+
 ``plugin_probe`` answers what cannot be found by experiment: this XLA
 validates create-option names and fails client creation on an unknown one.
 A plugin built from the fork advertises ``supports_synchronous_execution``;
@@ -105,7 +106,8 @@ def test_probe_reports_the_sync_mode(probe):
 
 def test_probe_lists_the_attributes(probe):
     """Counted against ``num_attributes``, not merely non-empty: a count
-    that is not then listed is a surface nobody can see."""
+    that is not then listed is a surface nobody can see.
+    """
     _, reported = probe
     listed = [key for key in reported if key.startswith("attribute[")]
     assert listed
@@ -114,7 +116,8 @@ def test_probe_lists_the_attributes(probe):
 
 def test_the_forked_plugin_executes_inline(probe):
     """Against this project's fork, execution really is inline.  Skipped
-    against a stock plugin, which advertises no such option."""
+    against a stock plugin, which advertises no such option.
+    """
     _, reported = probe
     if SYNC_ATTRIBUTE not in reported:
         pytest.skip(
@@ -135,7 +138,8 @@ def test_run_matrix_writes_a_row_per_configuration(
     """One CSV row per configuration per round, plus the header.  The sweep
     interleaves configurations in short rounds because a sequential A/B
     drifts with CPU temperature by the same order as the effect measured;
-    that structure is what is checked, not the numbers."""
+    that structure is what is checked, not the numbers.
+    """
     sweep = tool(repo, "tools/run_matrix.sh")
     csv_path = tmp_path / "matrix.csv"
     result = run(

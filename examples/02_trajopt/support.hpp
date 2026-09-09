@@ -310,8 +310,8 @@ inline void write_report(const Options& options, const cjfc::HostEnv& env,
   report["runtime"] =
       cjfc::runtime_json(runtime, function, outcome.runtime_ms, outcome.load_ms,
                          outcome.first_call_us);
-  // Also at the top of the runtime object, where a reader of an older report
-  // looks for them.
+  // The schema also names these at the top of the runtime object, so a
+  // reader need not know which example wrote the file.
   report["runtime"]["load_kind"] = cjfc::load_kind_name(function.load_kind());
   report["runtime"]["runtime_ms"] = outcome.runtime_ms;
   report["runtime"]["load_ms"] = outcome.load_ms;

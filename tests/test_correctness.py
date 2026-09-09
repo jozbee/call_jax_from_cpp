@@ -105,7 +105,8 @@ def test_sweep_exits_zero(all_cases):
 
 def test_sweep_covers_every_case_twice(all_cases, artifacts, load_json):
     """Two passes over every case, forwards then backwards -- counted, since
-    a sweep that ran one pass would still print that everything agreed."""
+    a sweep that ran one pass would still print that everything agreed.
+    """
     n_cases = len(load_json(artifacts.trajopt_cases)["cases"])
     seen = CASE_LINE.findall(all_cases.stdout)
     assert len(seen) == 2 * n_cases, all_cases.stdout
@@ -124,7 +125,8 @@ def test_sweep_agrees_with_the_reference(all_cases):
 def test_every_case_is_within_tolerance(all_cases, tolerance):
     """Each printed comparison, not only the summary line.  The NaN count is
     the one a maximum-of-relative-errors check cannot see: a NaN difference
-    is not a large error but an absent one."""
+    is not a large error but an absent one.
+    """
     reported = re.findall(
         r"max rel err ([\d.e+-]+), (\d+) exact mismatches, (\d+) nan",
         all_cases.stdout,
@@ -138,7 +140,8 @@ def test_every_case_is_within_tolerance(all_cases, tolerance):
 
 def test_async_is_still_correct(run, build, plugin, artifacts):
     """Whether the plugin honours ``--async`` is a latency question; whether
-    the answers are still right is not negotiable either way."""
+    the answers are still right is not negotiable either way.
+    """
     result = run(sweep_argv(build, artifacts.dir, "--async"))
     assert result.returncode == 0
     assert AGREEMENT in result.stdout

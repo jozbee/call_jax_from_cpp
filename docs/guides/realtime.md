@@ -108,7 +108,7 @@ quantities are defined in {doc}`/background/latency`.
 | cycle time | wake to end of feedback | the loop body, not only the call |
 | wake-up latency | how late the sleep returned | C-state exit, timer resolution, or a busy core |
 | period jitter (signed) | wake-to-wake minus the period | the scheduler, not XLA — early is as much a defect as late |
-| deadline misses | cycles that ended after the next release | one is a bug in the period; many are a bug in the workload |
+| deadline misses | cycles that ended after the next release | one is a bug in the period; many are a bug in the workload; `utilization` p50 is the honest headroom figure |
 | page faults | minor and major, in the timed window | `lock_memory` did not take effect, or warm-up was too short |
 | context switches | voluntary and involuntary | involuntary, on a pinned `SCHED_FIFO` thread: something else wants that core |
 | allocations | the armed census, per call | `self` must be zero; `plugin` is XLA's thunk runtime, reported |
