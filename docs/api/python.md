@@ -167,6 +167,8 @@ nothing about an artifact that was already generated without it.
 .. autodata:: jax2exec.tune.CATALOG
 
 .. autodata:: jax2exec.tune.MIN_GAIN
+
+.. autodata:: jax2exec.tune.RESULT_SCHEMA
 ```
 
 ## Deprecated

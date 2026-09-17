@@ -243,7 +243,7 @@ class TuneResult:
     Parameters
     ----------
     schema : int
-        :data:`RESULT_SCHEMA` as written.
+        :data:`jax2exec.tune.RESULT_SCHEMA` as written.
     host : dict
         the host facts this package reads of the machine that measured.
     jax, jaxlib : str or None
