@@ -86,8 +86,10 @@ MIN_GAIN = 0.03
 RESULT_SCHEMA = 1
 
 #: One-minute load average above which a child's timings are flagged.  A
-#: busy machine does not add noise to a latency, it invalidates it.
-LOADAVG_LIMIT = 0.5
+#: busy machine does not add noise to a latency, it invalidates it.  The
+#: measurement's own child holds one core, so the limit allows one and flags
+#: half a core more; a limit below one marks every row of every campaign.
+LOADAVG_LIMIT = 1.5
 
 #: Busy fraction of the measured core's SMT sibling above which a child is
 #: flagged: a sibling shares the physical core's execution resources.
