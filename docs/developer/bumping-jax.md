@@ -240,6 +240,12 @@ is a state to commit.
 `pyproject.toml` and `versions.env` agree; run it before wondering which file is
 wrong.
 
+**Then.** The flag catalog in `python/jax2exec/_flags.py` carries `since` and
+`until` versions on the entries a release added or retired. Run
+`tune_flags` with its smoke probe on the new release and move those bounds
+before publishing the plugin: a retired flag is refused by name, and a
+stale bound would drop a flag the new release still takes.
+
 (ifrt-envelope)=
 ## Step 12 — Verify the exporter's private-API path
 

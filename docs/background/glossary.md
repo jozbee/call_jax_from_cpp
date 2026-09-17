@@ -4,6 +4,11 @@
 first use, so no page has to define it inline.*
 
 ```{glossary}
+A/A arm
+  A second run of the baseline configuration placed at the far end of each
+  round. The spread of its ratios about one is the band inside which two
+  arms cannot be told apart. {doc}`/guides/tuning`.
+
 absolute sleep
   Sleeping until a point in time on `CLOCK_MONOTONIC` rather than for a
   duration, so one wake-up's lateness does not feed into the next period.
@@ -18,6 +23,11 @@ arena
   The 64-byte-aligned buffer a `Function` owns for one input or output,
   wrapped once as a zero-copy PJRT buffer so that a call transfers nothing.
   {doc}`/guides/calling`.
+
+arm
+  One configuration of a comparison: a flag set, an interpreter, a
+  hardening option. Rounds are the outer loop and arms the inner one, so a
+  drift applies to every arm alike. {doc}`/guides/tuning`.
 
 artifact
   The three files an export writes under one base path: the compiled

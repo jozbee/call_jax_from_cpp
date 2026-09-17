@@ -7,6 +7,18 @@ Notable changes to this project. The format follows
 ## [Unreleased]
 
 ### Added
+- `tune_flags` and `run_arms`: an XLA flag tuner for any JAX function. The
+  switches worth measuring are data (`jax2exec.tune.CATALOG`), each carrying
+  the host ISA level and the JAX range it needs, so a catalog entry can be
+  dropped with a printable reason instead of by a predicate nobody can read.
+  Arms are interleaved in rounds -- order reversed on even rounds -- against
+  an A/A arm whose own spread is the band a verdict is judged against, and a
+  control arm whose known loss the protocol has to be able to see or the
+  result reports itself invalid. Every arm's first-round outputs are compared
+  with the reference's, so a flag that is faster because it computes something
+  else is a `mismatch` and not a win. `TuneResult.table()` renders the
+  campaign with its tail columns and its caveats, and `TuneResult.save()`
+  writes it as versioned JSON.
 - A dtype-generic, rank-general C++ API: `float64`, `float32`, every integer
   width and `bool`, at any rank. Typed accessors `input<T>(i)` / `output<T>(i)`
   sit alongside `input_raw(i)` for generic code.

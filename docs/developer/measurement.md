@@ -97,6 +97,19 @@ honest; quote the one that matches how the code will run, and say which it
 is. The experiment is on the [benchmarks page](../benchmarks.md) and the
 mechanism on [real-time notes](realtime-notes.md).
 
+## Trap 7 — a flag the backend ignores reads as within A/A
+
+The smoke probe of {py:func}`~jax2exec.tune_flags` runs a small jitted matmul
+under each candidate before the first round, so a flag the installed XLA does
+not know is dropped with the backend's own message. An inner key of
+`--xla_backend_extra_options` gets no such refusal: the backend accepts any
+spelling and ignores what it does not recognise, so a mistyped key measures
+exactly like a flag that does nothing. The tuner cannot tell the two apart;
+its table marks every extra-option row so the reader knows which rows carry
+that caveat. What the tuner measures is the in-process compiled program: an
+artifact is relinked at load and never recompiled, so a flag set reaches the
+C++ path only through the environment of the export run.
+
 ## The tools
 
 ```
@@ -108,6 +121,11 @@ tools/rt_check.sh                 # host audit: governor, isolcpus, nohz_full,
 make test-alloc                   # the zero-allocation gate
 make test-rt                      # the real-time statistics gates
 ```
+
+`jax2exec.tune_flags` is the same protocol as `tools/run_matrix.sh` for a
+JAX function instead of a binary: rounds outer, arms inner, one fresh process
+per arm because `XLA_FLAGS` is read once at backend start. The
+{doc}`tuning guide <../guides/tuning>` has the call.
 
 `build/bin/bench` measures **exactly one configuration** and records what it
 was; anything comparative is built out of several runs of it. Its flags select

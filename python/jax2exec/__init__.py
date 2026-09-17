@@ -4,6 +4,7 @@
 ``write_reference_cases`` freezes what the function returns; and
 ``python -m jax2exec check <base>`` inspects an artifact set without JAX,
 which the machine running the C++ caller usually does not have.
+``tune_flags`` measures which XLA flags a function is faster under.
 """
 
 from __future__ import annotations
@@ -24,6 +25,14 @@ if TYPE_CHECKING:  # pragma: no cover - for type checkers and readers
         jax2exec,
     )
     from .reference import write_reference_cases
+    from .tune import (
+        Arm,
+        ArmResult,
+        Candidate,
+        TuneResult,
+        run_arms,
+        tune_flags,
+    )
 
 #: Version of this package, recorded in every sidecar's ``generator`` block.
 __version__ = TOOL_VERSION
@@ -32,16 +41,23 @@ __all__ = [
     "SCHEMA_VERSION",
     "SUPPORTED_DTYPES",
     "SUPPORTED_JAX",
+    "Arm",
+    "ArmResult",
+    "Candidate",
     "ExportError",
     "ExportResult",
+    "TuneResult",
     "__version__",
     "export",
     "jax2exec",
+    "run_arms",
+    "tune_flags",
     "write_reference_cases",
 ]
 
-# Attribute -> module that defines it.  Both modules import JAX, which the
-# machine running `check` may not have.
+# Attribute -> module that defines it.  `export` and `reference` import JAX,
+# which the machine running `check` may not have; `tune` does not, but it is
+# deferred too so that the facade stays one rule rather than two.
 _LAZY = {
     "SUPPORTED_JAX": "export",
     "ExportError": "export",
@@ -49,6 +65,12 @@ _LAZY = {
     "export": "export",
     "jax2exec": "export",
     "write_reference_cases": "reference",
+    "Arm": "tune",
+    "ArmResult": "tune",
+    "Candidate": "tune",
+    "TuneResult": "tune",
+    "run_arms": "tune",
+    "tune_flags": "tune",
 }
 
 

@@ -29,6 +29,12 @@ yet.
    write_reference_cases
    SUPPORTED_JAX
    SCHEMA_VERSION
+   tune_flags
+   run_arms
+   TuneResult
+   ArmResult
+   Arm
+   Candidate
 ```
 
 ## Exporting
@@ -106,6 +112,62 @@ half-added, and so the sidecar stays readable by a loader that has no NumPy.
 `__version__` is the exporter version, and it is recorded in every sidecar's
 `generator` block so an artifact can be traced back to the exact code that
 produced it.
+
+## Tuning XLA flags
+
+`tune_flags` measures which XLA code-generation flags one JAX function is
+faster under, on this host and at this JAX, by interleaving the arms in rounds
+against an A/A arm that measures the machine's own noise. Those flags reach a
+C++ caller only through the environment of the *export* run: a `.binpb` is
+relinked at load and never recompiled, so a flag set at run time changes
+nothing about an artifact that was already generated without it.
+
+```{eval-rst}
+.. autofunction:: jax2exec.tune_flags
+```
+
+```{eval-rst}
+.. autofunction:: jax2exec.run_arms
+```
+
+```{eval-rst}
+.. autoclass:: jax2exec.TuneResult
+   :members: table, save
+```
+
+```{eval-rst}
+.. autoclass:: jax2exec.ArmResult
+```
+
+```{eval-rst}
+.. autoclass:: jax2exec.Arm
+```
+
+```{eval-rst}
+.. autoclass:: jax2exec.Candidate
+```
+
+```{eval-rst}
+.. autofunction:: jax2exec.tune.combinations
+```
+
+```{eval-rst}
+.. autofunction:: jax2exec.tune.combination_arm
+```
+
+```{eval-rst}
+.. autofunction:: jax2exec.tune.load_result
+```
+
+```{eval-rst}
+.. autofunction:: jax2exec.tune.merge_flags
+```
+
+```{eval-rst}
+.. autodata:: jax2exec.tune.CATALOG
+
+.. autodata:: jax2exec.tune.MIN_GAIN
+```
 
 ## Deprecated
 
